@@ -88,23 +88,13 @@ export default function PipelinePage() {
             Data processing and alpha detection
           </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => runPipeline('01')}
-            disabled={runningPipeline || status?.running}
-            className="btn-primary text-xs disabled:opacity-50"
-          >
-            {runningPipeline || status?.running ? 'Running...' : 'Run Full Pipeline'}
-          </button>
-          <button
-            onClick={() => runPipeline('06_1')}
-            disabled={runningPipeline || status?.running}
-            className="btn-secondary text-xs disabled:opacity-50"
-            title="Re-run alpha detection steps only (skip data fetching)"
-          >
-            Recompute Alpha
-          </button>
-        </div>
+        <button
+          onClick={() => runPipeline('01')}
+          disabled={runningPipeline || status?.running}
+          className="btn-primary text-xs disabled:opacity-50"
+        >
+          {runningPipeline || status?.running ? 'Running...' : 'Run Full Pipeline'}
+        </button>
       </div>
 
       {/* Progress Overview */}
@@ -197,31 +187,6 @@ export default function PipelinePage() {
           </table>
         </div>
       )}
-
-      {/* CLI Commands */}
-      <div className="rounded-lg border border-border bg-surface p-4">
-        <h3 className="text-sm font-medium text-text-primary mb-3">CLI Commands</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          {[
-            { label: 'Full pipeline', command: 'uv run poly run' },
-            { label: 'From step', command: 'uv run poly run --from-step 03_1' },
-            { label: 'Status', command: 'uv run poly run state' },
-            { label: 'Reset', command: 'uv run poly run reset' },
-          ].map((item) => (
-            <div
-              key={item.label}
-              className="flex items-center gap-3 px-3 py-2 rounded bg-surface-elevated border border-border"
-            >
-              <span className="text-[10px] uppercase tracking-wider text-text-muted w-20 shrink-0">
-                {item.label}
-              </span>
-              <code className="text-xs font-mono text-cyan">
-                {item.command}
-              </code>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
