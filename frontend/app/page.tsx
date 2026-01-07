@@ -184,7 +184,7 @@ export default function Dashboard() {
               className="text-[10px] text-text-muted cursor-help"
               title={`Last snapshot: ${formatDateTime(status.production.last_run.completed_at)}\nEvents processed: ${status.production.last_run.events_processed || 0}`}
             >
-              Snapshot: {formatRelativeTime(status.production.last_run.completed_at)}
+              Events snapshot: {formatRelativeTime(status.production.last_run.completed_at)}
             </div>
           )}
         </div>
