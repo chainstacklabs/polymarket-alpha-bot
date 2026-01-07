@@ -18,7 +18,7 @@ cp .env.example .env  # Add OPENROUTER_API_KEY
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENROUTER_API_KEY` | API key for LLM inference | required |
+| `OPENROUTER_API_KEY` | API key for LLM inference (event semantics, causal classification). Free models work fine — we use `xiaomi/mimo-v2-flash:free` | required |
 | `POLYMARKET_TAG` | Comma-separated Polymarket tags (OR logic). E.g., `politics` or `politics,sports` | `politics` |
 
 ## Usage
