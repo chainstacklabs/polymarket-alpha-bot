@@ -413,30 +413,6 @@ export default function OpportunitiesPage() {
                 {getRelationHint(selectedOpportunity.relation.type)}
               </div>
             </div>
-
-            {/* Modal Footer */}
-            <div className="flex gap-2 p-4 border-t border-border">
-              <a
-                href={getMarketUrl(selectedOpportunity.trigger)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 px-4 py-2 text-center text-sm bg-surface-elevated hover:bg-surface-hover border border-border rounded-lg transition-colors"
-              >
-                Open Trigger
-              </a>
-              <a
-                href={getMarketUrl(selectedOpportunity.consequence)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`flex-1 px-4 py-2 text-center text-sm rounded-lg transition-colors ${
-                  selectedOpportunity.alpha.direction === 'BUY'
-                    ? 'bg-alpha-buy/20 hover:bg-alpha-buy/30 text-alpha-buy border border-alpha-buy/30'
-                    : 'bg-alpha-sell/20 hover:bg-alpha-sell/30 text-alpha-sell border border-alpha-sell/30'
-                }`}
-              >
-                Open Consequence ({selectedOpportunity.alpha.direction})
-              </a>
-            </div>
           </div>
         </div>
       )}
