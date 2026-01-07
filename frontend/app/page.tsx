@@ -187,7 +187,6 @@ export default function Dashboard() {
               <OpportunityCard
                 key={opp.id}
                 opportunity={opp}
-                currentPrice={prices[opp.consequence.event_id]?.price}
                 onClick={() => setSelectedOpportunity(opp)}
               />
             ))}
@@ -197,7 +196,11 @@ export default function Dashboard() {
     </div>
 
     {/* Opportunity Detail Modal */}
-    {selectedOpportunity && (
+    {selectedOpportunity && (() => {
+      // Backend already recalculates alpha with live prices
+      const isBuy = selectedOpportunity.alpha.signal > 0
+
+      return (
       <div
         className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
         onClick={() => setSelectedOpportunity(null)}
@@ -210,8 +213,8 @@ export default function Dashboard() {
           <div className="flex items-center justify-between p-4 border-b border-border">
             <div className="flex items-center gap-3">
               <span className="text-sm font-mono text-text-muted">#{selectedOpportunity.rank}</span>
-              <span className={`text-sm font-semibold ${selectedOpportunity.alpha.direction === 'BUY' ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
-                {selectedOpportunity.alpha.direction} {selectedOpportunity.alpha.signal_display}
+              <span className={`text-sm font-semibold ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
+                {isBuy ? 'BUY' : 'SELL'} {selectedOpportunity.alpha.signal_display}
               </span>
             </div>
             <button
@@ -259,23 +262,12 @@ export default function Dashboard() {
             </div>
 
             {/* Consequence Event */}
-            <div className={`rounded-lg p-4 border-2 ${selectedOpportunity.alpha.direction === 'BUY' ? 'border-alpha-buy/30 bg-alpha-buy/5' : 'border-alpha-sell/30 bg-alpha-sell/5'}`}>
+            <div className={`rounded-lg p-4 border-2 ${isBuy ? 'border-alpha-buy/30 bg-alpha-buy/5' : 'border-alpha-sell/30 bg-alpha-sell/5'}`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">THEN (Consequence)</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-text-muted">{selectedOpportunity.consequence.price_display}</span>
-                  {prices[selectedOpportunity.consequence.event_id]?.price !== undefined && (
-                    <span className={`text-[10px] font-mono ${
-                      prices[selectedOpportunity.consequence.event_id].price > selectedOpportunity.consequence.price
-                        ? 'text-alpha-buy'
-                        : prices[selectedOpportunity.consequence.event_id].price < selectedOpportunity.consequence.price
-                        ? 'text-alpha-sell'
-                        : 'text-text-muted'
-                    }`}>
-                      ({((prices[selectedOpportunity.consequence.event_id].price - selectedOpportunity.consequence.price) / selectedOpportunity.consequence.price * 100).toFixed(0)}%)
-                    </span>
-                  )}
-                </div>
+                <span className="text-xs font-mono text-text-muted">
+                  {selectedOpportunity.consequence.price_display}
+                </span>
               </div>
               <p className="text-sm text-text-primary mb-3">{selectedOpportunity.consequence.title}</p>
               <a
@@ -305,7 +297,8 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-    )}
+      )
+    })()}
     </>
   )
 }

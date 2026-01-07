@@ -74,7 +74,7 @@ export default function OpportunitiesPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null)
   const [filter, setFilter] = useState('')
-  const { prices, connected } = usePrices()
+  const { connected } = usePrices()
 
   useEffect(() => {
     async function fetchData() {
@@ -206,7 +206,7 @@ export default function OpportunitiesPage() {
                     Consequence
                   </th>
                   <SortHeader field="trigger_price" label="T%" hint="Trigger event market probability" className="w-12" />
-                  <SortHeader field="consequence_price" label="C%" hint="Consequence event market probability (+ live change)" className="w-14" />
+                  <SortHeader field="consequence_price" label="C%" hint="Consequence event market probability (live)" className="w-14" />
                   <SortHeader field="alpha" label="Alpha" hint="Expected profit if trigger occurs. BUY = underpriced, SELL = overpriced" className="w-16" />
                   <SortHeader field="confidence" label="Conf" hint="Model confidence in the relationship" className="w-14" />
                   <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-10"></th>
@@ -214,11 +214,8 @@ export default function OpportunitiesPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {sortedOpportunities.map((opp) => {
-                  const currentPrice = prices[opp.consequence.event_id]?.price
-                  const priceChange = currentPrice !== undefined
-                    ? ((currentPrice - opp.consequence.price) / opp.consequence.price) * 100
-                    : null
-                  const isBuy = opp.alpha.direction === 'BUY'
+                  // Backend already recalculates alpha with live prices
+                  const isBuy = opp.alpha.signal > 0
 
                   return (
                     <tr
@@ -253,16 +250,9 @@ export default function OpportunitiesPage() {
                         </span>
                       </td>
                       <td className="px-2.5 py-2">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-mono text-text-muted">
-                            {opp.consequence.price_display}
-                          </span>
-                          {priceChange !== null && (
-                            <span className={`text-[10px] font-mono ${priceChange > 0 ? 'text-alpha-buy' : priceChange < 0 ? 'text-alpha-sell' : 'text-text-muted'}`}>
-                              {priceChange > 0 ? '+' : ''}{priceChange.toFixed(0)}%
-                            </span>
-                          )}
-                        </div>
+                        <span className="text-xs font-mono text-text-muted">
+                          {opp.consequence.price_display}
+                        </span>
                       </td>
                       <td className="px-2.5 py-2">
                         <span className={`text-xs font-mono font-medium ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
@@ -307,7 +297,11 @@ export default function OpportunitiesPage() {
     </div>
 
       {/* Opportunity Detail Modal - outside animated container to fix fixed positioning */}
-      {selectedOpportunity && (
+      {selectedOpportunity && (() => {
+        // Backend already recalculates alpha with live prices
+        const isBuy = selectedOpportunity.alpha.signal > 0
+
+        return (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
           onClick={() => setSelectedOpportunity(null)}
@@ -320,8 +314,8 @@ export default function OpportunitiesPage() {
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-3">
                 <span className="text-sm font-mono text-text-muted">#{selectedOpportunity.rank}</span>
-                <span className={`text-sm font-semibold ${selectedOpportunity.alpha.direction === 'BUY' ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
-                  {selectedOpportunity.alpha.direction} {selectedOpportunity.alpha.signal_display}
+                <span className={`text-sm font-semibold ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
+                  {isBuy ? 'BUY' : 'SELL'} {selectedOpportunity.alpha.signal_display}
                 </span>
               </div>
               <button
@@ -369,23 +363,12 @@ export default function OpportunitiesPage() {
               </div>
 
               {/* Consequence Event */}
-              <div className={`rounded-lg p-4 border-2 ${selectedOpportunity.alpha.direction === 'BUY' ? 'border-alpha-buy/30 bg-alpha-buy/5' : 'border-alpha-sell/30 bg-alpha-sell/5'}`}>
+              <div className={`rounded-lg p-4 border-2 ${isBuy ? 'border-alpha-buy/30 bg-alpha-buy/5' : 'border-alpha-sell/30 bg-alpha-sell/5'}`}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">THEN (Consequence)</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-text-muted">{selectedOpportunity.consequence.price_display}</span>
-                    {prices[selectedOpportunity.consequence.event_id]?.price !== undefined && (
-                      <span className={`text-[10px] font-mono ${
-                        prices[selectedOpportunity.consequence.event_id].price > selectedOpportunity.consequence.price
-                          ? 'text-alpha-buy'
-                          : prices[selectedOpportunity.consequence.event_id].price < selectedOpportunity.consequence.price
-                          ? 'text-alpha-sell'
-                          : 'text-text-muted'
-                      }`}>
-                        ({((prices[selectedOpportunity.consequence.event_id].price - selectedOpportunity.consequence.price) / selectedOpportunity.consequence.price * 100).toFixed(0)}%)
-                      </span>
-                    )}
-                  </div>
+                  <span className="text-xs font-mono text-text-muted">
+                    {selectedOpportunity.consequence.price_display}
+                  </span>
                 </div>
                 <p className="text-sm text-text-primary mb-3">{selectedOpportunity.consequence.title}</p>
                 <a
@@ -415,7 +398,8 @@ export default function OpportunitiesPage() {
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
     </>
   )
 }

@@ -50,18 +50,14 @@ const getMarketUrl = (event: EventRef) => {
 
 interface OpportunityCardProps {
   opportunity: Opportunity
-  currentPrice?: number
   onClick?: () => void
 }
 
-export function OpportunityCard({ opportunity, currentPrice, onClick }: OpportunityCardProps) {
+export function OpportunityCard({ opportunity, onClick }: OpportunityCardProps) {
   const { trigger, consequence, relation, alpha } = opportunity
 
-  const priceChange = currentPrice !== undefined
-    ? ((currentPrice - consequence.price) / consequence.price) * 100
-    : null
-
-  const isBuy = alpha.direction === 'BUY'
+  // Backend already recalculates alpha with live prices
+  const isBuy = alpha.signal > 0
 
   return (
     <div
@@ -90,7 +86,7 @@ export function OpportunityCard({ opportunity, currentPrice, onClick }: Opportun
             ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}
           `}
         >
-          {alpha.direction} {alpha.signal_display}
+          {isBuy ? 'BUY' : 'SELL'} {alpha.signal_display}
         </span>
       </div>
 
@@ -114,19 +110,9 @@ export function OpportunityCard({ opportunity, currentPrice, onClick }: Opportun
             <p className="text-sm text-text-primary truncate" title={consequence.title}>
               {consequence.title}
             </p>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono text-text-muted">{consequence.price_display}</span>
-              {priceChange !== null && (
-                <span
-                  className={`
-                    text-[10px] font-mono font-medium
-                    ${priceChange > 0 ? 'text-alpha-buy' : priceChange < 0 ? 'text-alpha-sell' : 'text-text-muted'}
-                  `}
-                >
-                  {priceChange > 0 ? '+' : ''}{priceChange.toFixed(0)}%
-                </span>
-              )}
-            </div>
+            <span className="text-xs font-mono text-text-muted">
+              {consequence.price_display}
+            </span>
           </div>
         </div>
       </div>

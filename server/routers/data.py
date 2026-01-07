@@ -6,11 +6,127 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from server.price_cache import PriceData
+
 router = APIRouter()
 
 # Data directory - relative to project root
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 LIVE_DIR = DATA_DIR / "_live"
+
+
+def recalculate_opportunities_with_live_prices(
+    opportunities: list[dict],
+    live_prices: dict[str, PriceData],
+) -> list[dict]:
+    """
+    Recalculate alpha opportunities with live prices.
+
+    Updates trigger/consequence prices, recalculates alpha signal,
+    and re-sorts by confidence-adjusted alpha.
+
+    Formula:
+        model_P_B_given_A = original_alpha + original_consequence_price
+        new_alpha = model_P_B_given_A - live_consequence_price
+
+    Args:
+        opportunities: Base opportunities from opportunities.json
+        live_prices: Current prices from PriceCacheService
+
+    Returns:
+        Recalculated and re-sorted opportunities
+    """
+    recalculated = []
+
+    for opp in opportunities:
+        # Make a deep copy to avoid mutating original
+        updated = json.loads(json.dumps(opp))
+
+        trigger = updated.get("trigger", {})
+        consequence = updated.get("consequence", {})
+        alpha = updated.get("alpha", {})
+        relation = updated.get("relation", {})
+
+        trigger_id = trigger.get("event_id")
+        consequence_id = consequence.get("event_id")
+
+        if not trigger_id or not consequence_id:
+            recalculated.append(updated)
+            continue
+
+        # Get original values
+        original_alpha = alpha.get("signal", 0)
+        original_consequence_price = consequence.get("price", 0.5)
+        original_trigger_price = trigger.get("price", 0.5)
+        confidence = relation.get("confidence", 0.7)
+
+        # Get live prices
+        trigger_price_data = live_prices.get(trigger_id)
+        consequence_price_data = live_prices.get(consequence_id)
+
+        # Use live prices if available
+        live_trigger_price = (
+            trigger_price_data.price
+            if trigger_price_data and trigger_price_data.price is not None
+            else original_trigger_price
+        )
+        live_consequence_price = (
+            consequence_price_data.price
+            if consequence_price_data and consequence_price_data.price is not None
+            else original_consequence_price
+        )
+
+        # Back-calculate model prediction from original data
+        # model_P_B_given_A = original_alpha + original_consequence_price
+        model_conditional = original_alpha + original_consequence_price
+
+        # Recalculate alpha with live price
+        new_alpha = model_conditional - live_consequence_price
+
+        # Update trigger prices
+        updated["trigger"]["price"] = round(live_trigger_price, 4)
+        updated["trigger"]["price_display"] = f"{int(live_trigger_price * 100)}%"
+
+        # Update consequence prices
+        updated["consequence"]["price"] = round(live_consequence_price, 4)
+        updated["consequence"]["price_display"] = (
+            f"{int(live_consequence_price * 100)}%"
+        )
+
+        # Update alpha
+        updated["alpha"]["signal"] = round(new_alpha, 4)
+        updated["alpha"]["signal_display"] = (
+            f"+{int(new_alpha * 100)}%"
+            if new_alpha >= 0
+            else f"{int(new_alpha * 100)}%"
+        )
+        updated["alpha"]["direction"] = "BUY" if new_alpha > 0 else "SELL"
+        updated["alpha"]["confidence_adjusted"] = round(new_alpha * confidence, 4)
+
+        # Recalculate expected return
+        if new_alpha > 0:
+            ev = new_alpha / live_consequence_price if live_consequence_price > 0 else 0
+        else:
+            risk = 1 - live_consequence_price
+            ev = abs(new_alpha) / risk if risk > 0 else 0
+
+        if "strategy" in updated:
+            updated["strategy"]["expected_return"] = f"{ev:.1f}x per dollar"
+
+        recalculated.append(updated)
+
+    # Re-sort by confidence-adjusted alpha (absolute value, descending)
+    recalculated.sort(
+        key=lambda x: abs(x.get("alpha", {}).get("confidence_adjusted", 0)),
+        reverse=True,
+    )
+
+    # Re-assign ranks
+    for i, opp in enumerate(recalculated, 1):
+        opp["rank"] = i
+        opp["id"] = f"opp_{i:03d}"
+
+    return recalculated
 
 
 def load_json_file(path: Path) -> Any:
@@ -59,24 +175,53 @@ async def get_opportunities(
     live: bool = Query(True, description="Use live data (default) or historical"),
     run_id: str | None = Query(None, description="Specific historical run ID"),
 ) -> dict[str, Any]:
-    """Get alpha opportunities.
+    """Get alpha opportunities with live price recalculation.
 
-    By default, returns live accumulated data from the production pipeline.
+    By default, returns live accumulated data from the production pipeline,
+    with alpha signals recalculated using current market prices.
     Use live=false or specify run_id to access historical script-based runs.
     """
+    from server.price_cache import price_cache
+
     # Try live data first
     live_path = LIVE_DIR / "opportunities.json"
     if live and run_id is None and live_path.exists():
-        opportunities = load_json_file(live_path)
-        if isinstance(opportunities, list):
-            opportunities = opportunities[:limit]
+        data = load_json_file(live_path)
+
+        # Handle nested format: {"_meta": {...}, "opportunities": [...]}
+        if isinstance(data, dict) and "opportunities" in data:
+            opportunities = data["opportunities"]
+        elif isinstance(data, list):
+            opportunities = data
+        else:
+            opportunities = []
+
+        # Get live prices and recalculate alpha
+        live_prices = price_cache.get_prices()
+        metadata = price_cache.get_metadata()
+
+        if live_prices:
+            opportunities = recalculate_opportunities_with_live_prices(
+                opportunities, live_prices
+            )
+
+        # Apply limit after re-sorting
+        opportunities = opportunities[:limit]
+
         return {
             "source": "live",
-            "count": len(opportunities) if isinstance(opportunities, list) else 1,
-            "data": opportunities,
+            "count": len(opportunities),
+            "data": {"opportunities": opportunities},
+            "prices": {
+                "last_fetch": (
+                    metadata.last_fetch.isoformat() if metadata.last_fetch else None
+                ),
+                "is_stale": metadata.is_stale,
+                "event_count": metadata.event_count,
+            },
         }
 
-    # Fall back to historical runs
+    # Fall back to historical runs (no live recalculation)
     run_path = get_run_path("06_3_export_opportunities", run_id)
     opportunities = load_json_file(run_path / "opportunities.json")
 
