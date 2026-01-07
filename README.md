@@ -14,6 +14,13 @@ uv sync
 cp .env.example .env  # Add OPENROUTER_API_KEY
 ```
 
+## Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENROUTER_API_KEY` | API key for LLM inference | required |
+| `POLYMARKET_TAG` | Comma-separated Polymarket tags (OR logic). E.g., `politics` or `politics,sports` | `politics` |
+
 ## Usage
 
 ### Run Pipeline

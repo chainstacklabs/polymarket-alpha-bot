@@ -6,6 +6,7 @@ Extracted from experiments/01_fetch_events.py for production pipeline.
 
 import asyncio
 import json
+import os
 from typing import Any
 
 import httpx
@@ -16,7 +17,7 @@ from loguru import logger
 # =============================================================================
 
 GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
-TARGET_TAG_SLUG = "politics"
+TARGET_TAG_SLUG = os.getenv("POLYMARKET_TAG", "politics")
 PAGE_SIZE = 100
 REQUEST_TIMEOUT = 30.0
 MAX_RETRIES = 3
@@ -126,46 +127,64 @@ def process_events(
 # =============================================================================
 
 
-async def fetch_events(tag_slug: str = TARGET_TAG_SLUG) -> list[dict[str, Any]]:
+async def fetch_events(tag_slugs: str = TARGET_TAG_SLUG) -> list[dict[str, Any]]:
     """
     Fetch all active events from Polymarket API.
 
     Args:
-        tag_slug: Tag to filter events by (default: "politics")
+        tag_slugs: Comma-separated tags to filter events by (OR logic).
+                   E.g., "politics" or "politics,sports,crypto"
 
     Returns:
         List of processed events with active markets
     """
-    logger.info(f"Fetching Polymarket events (tag: {tag_slug})...")
+    tags = [t.strip() for t in tag_slugs.split(",") if t.strip()]
+    if not tags:
+        raise ValueError("No valid tags provided")
+
+    logger.info(f"Fetching Polymarket events (tags: {tags})...")
 
     async with httpx.AsyncClient(
         base_url=GAMMA_API_BASE_URL, timeout=REQUEST_TIMEOUT
     ) as client:
-        # Get tag ID
-        tag = await fetch_json(client, f"/tags/slug/{tag_slug}")
-        if not tag:
-            raise ValueError(f"Tag '{tag_slug}' not found")
+        all_events: dict[str, dict[str, Any]] = {}  # Dedupe by event ID
 
-        tag_id = tag["id"]
-        logger.info(f"Found tag: {tag.get('label')} (id={tag_id})")
+        for tag_slug in tags:
+            # Get tag ID
+            tag = await fetch_json(client, f"/tags/slug/{tag_slug}")
+            if not tag:
+                logger.warning(f"Tag '{tag_slug}' not found, skipping")
+                continue
 
-        # Fetch events
-        events_raw = await fetch_all_pages(
-            client,
-            "/events",
-            {"tag_id": tag_id, "active": "true", "closed": "false"},
-        )
+            tag_id = tag["id"]
+            logger.info(f"Found tag: {tag.get('label')} (id={tag_id})")
+
+            # Fetch events for this tag
+            events_raw = await fetch_all_pages(
+                client,
+                "/events",
+                {"tag_id": tag_id, "active": "true", "closed": "false"},
+            )
+
+            # Add to combined results (dedupe by ID)
+            for event in events_raw:
+                event_id = event.get("id")
+                if event_id and event_id not in all_events:
+                    all_events[event_id] = event
+
+        if not all_events:
+            raise ValueError(f"No events found for tags: {tags}")
 
         # Process events and markets
-        events = process_events(events_raw)
-        logger.info(f"Fetched {len(events)} active events")
+        events = process_events(list(all_events.values()))
+        logger.info(f"Fetched {len(events)} active events from {len(tags)} tag(s)")
 
         return events
 
 
-def fetch_events_sync(tag_slug: str = TARGET_TAG_SLUG) -> list[dict[str, Any]]:
+def fetch_events_sync(tag_slugs: str = TARGET_TAG_SLUG) -> list[dict[str, Any]]:
     """Synchronous wrapper for fetch_events."""
-    return asyncio.run(fetch_events(tag_slug))
+    return asyncio.run(fetch_events(tag_slugs))
 
 
 # =============================================================================
