@@ -181,7 +181,7 @@ export default function GraphPage() {
   } : { nodes: [], edges: [] }
 
   const relationTypes = graphData?.elements?.edges
-    ? Array.from(new Set(graphData.elements.edges.map(e => e.data.relation)))
+    ? Array.from(new Set(graphData.elements.edges.map(e => e.data.relation).filter(Boolean)))
     : []
 
   return (
