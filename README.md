@@ -2,6 +2,11 @@
 
 Polymarket alpha detection: finds conditional probability arbitrage across related prediction markets.
 
+## Prerequisites
+
+- [uv](https://docs.astral.sh/uv/) — Python package manager
+- [Node.js](https://nodejs.org/) 18+ — for frontend
+
 ## Setup
 
 ```bash
@@ -36,7 +41,8 @@ uv run python experiments/01_fetch_events.py
 ## UI
 
 ```bash
-cd frontend && npm run dev
+cd frontend && npm install
+npm run dev
 # Open http://localhost:3000
 ```
 
