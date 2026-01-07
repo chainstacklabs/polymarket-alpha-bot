@@ -18,6 +18,7 @@ MANIFEST_PATH = DATA_DIR / "manifest.json"
 
 # Pipeline state
 _running_pipeline: dict[str, Any] | None = None
+_step_tracker: Any = None  # StepTracker instance during pipeline run
 
 
 class PipelineRunRequest(BaseModel):
@@ -100,6 +101,14 @@ async def get_status() -> dict[str, Any]:
     is_running = (
         _running_pipeline is not None and _running_pipeline.get("status") == "running"
     )
+
+    # Get step progress from tracker (or final state if completed)
+    step_progress = None
+    if is_running and _step_tracker is not None:
+        step_progress = _step_tracker.get_state()
+    elif _running_pipeline and "final_step_progress" in _running_pipeline:
+        step_progress = _running_pipeline["final_step_progress"]
+
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "running": is_running,
@@ -107,6 +116,7 @@ async def get_status() -> dict[str, Any]:
         "production": production_state,
         "steps": steps,
         "manifest": manifest,
+        "step_progress": step_progress,
     }
 
 
@@ -262,9 +272,14 @@ async def get_running() -> dict[str, Any]:
 
 def run_production_pipeline_task(full: bool):
     """Background task to run the production pipeline."""
-    global _running_pipeline
+    global _running_pipeline, _step_tracker
 
     try:
+        # Create step tracker for progress monitoring
+        from core.step_tracker import StepTracker
+
+        _step_tracker = StepTracker()
+
         _running_pipeline = {
             "started_at": datetime.now(timezone.utc).isoformat(),
             "pipeline_type": "production",
@@ -274,7 +289,7 @@ def run_production_pipeline_task(full: bool):
 
         from core.runner import run
 
-        result = run(full=full)
+        result = run(full=full, step_tracker=_step_tracker)
 
         _running_pipeline["status"] = "completed"
         _running_pipeline["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -285,6 +300,11 @@ def run_production_pipeline_task(full: bool):
             _running_pipeline["status"] = "error"
             _running_pipeline["error"] = str(e)
             _running_pipeline["completed_at"] = datetime.now(timezone.utc).isoformat()
+    finally:
+        # Preserve final step progress for frontend before clearing tracker
+        if _step_tracker and _running_pipeline:
+            _running_pipeline["final_step_progress"] = _step_tracker.get_state()
+        _step_tracker = None
 
 
 @router.post("/run/production")

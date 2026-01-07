@@ -5,12 +5,9 @@ import { StatusCard } from '@/components/StatusCard'
 import { OpportunityCard } from '@/components/OpportunityCard'
 import { usePrices } from '@/hooks/usePrices'
 
-interface PipelineStep {
-  step: string
-  name: string
-  description: string
-  latest_run: string | null
-  has_data: boolean
+interface StepProgressData {
+  completed_count: number
+  total_steps: number
 }
 
 interface LastRun {
@@ -33,7 +30,7 @@ interface ProductionState {
 }
 
 interface PipelineStatus {
-  steps: PipelineStep[]
+  step_progress: StepProgressData | null
   production: ProductionState | null
 }
 
@@ -160,8 +157,8 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [])
 
-  const completedSteps = status?.steps.filter(s => s.has_data).length || 0
-  const totalSteps = status?.steps.length || 17
+  const completedSteps = status?.step_progress?.completed_count || 0
+  const totalSteps = status?.step_progress?.total_steps || 14
 
   return (
     <>

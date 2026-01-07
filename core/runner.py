@@ -49,19 +49,28 @@ MAX_LLM_PAIRS = 10000  # Limit LLM calls for causal classification
 # MAIN RUNNER
 # =============================================================================
 
+# Import step tracker for progress monitoring (imported here to avoid circular imports)
+from core.step_tracker import StepTracker
 
-async def run_async(full: bool = False) -> dict:
+
+async def run_async(
+    full: bool = False, step_tracker: StepTracker | None = None
+) -> dict:
     """
     Run the pipeline asynchronously.
 
     Args:
         full: If True, reprocess everything. If False, incremental.
+        step_tracker: Optional tracker for progress monitoring.
 
     Returns:
         Dict with run statistics
     """
     start_time = datetime.now(timezone.utc)
     logger.info(f"Starting pipeline run (mode: {'full' if full else 'incremental'})")
+
+    # Create tracker if not provided (for CLI/standalone usage)
+    tracker = step_tracker or StepTracker()
 
     # Load state
     state = load_state()
@@ -77,240 +86,268 @@ async def run_async(full: bool = False) -> dict:
         # =====================================================================
         # STEP 1: Fetch all events from API
         # =====================================================================
-        logger.info("Step 1: Fetching events from Polymarket API...")
-        all_events = await fetch_events()
-        logger.info(f"Fetched {len(all_events)} events")
+        with tracker.step(1, "Fetch Events"):
+            logger.info("Step 1: Fetching events from Polymarket API...")
+            all_events = await fetch_events()
+            tracker.update_details(f"Fetched {len(all_events)} events")
+            logger.info(f"Fetched {len(all_events)} events")
 
         # =====================================================================
         # STEP 2: Identify new events
         # =====================================================================
-        all_ids = [e["id"] for e in all_events]
-        new_ids = state.get_new_ids(all_ids)
-        new_events = [e for e in all_events if e["id"] in new_ids]
-
-        logger.info(f"Total events: {len(all_events)}, New events: {len(new_events)}")
+        with tracker.step(2, "Identify New Events"):
+            all_ids = [e["id"] for e in all_events]
+            new_ids = state.get_new_ids(all_ids)
+            new_events = [e for e in all_events if e["id"] in new_ids]
+            tracker.update_details(
+                f"Found {len(new_events)} new of {len(all_events)} total"
+            )
+            logger.info(
+                f"Total events: {len(all_events)}, New events: {len(new_events)}"
+            )
 
         # =====================================================================
         # STEP 3: Handle no new events case
         # =====================================================================
         if not new_events and not full:
-            logger.info("No new events - updating prices only...")
+            with tracker.step(3, "Update Prices Only"):
+                logger.info("No new events - updating prices only...")
 
-            # Update prices in state
-            prices = extract_prices(all_events)
-            state.update_event_prices(prices)
+                # Update prices in state
+                prices = extract_prices(all_events)
+                state.update_event_prices(prices)
+                tracker.update_details(f"Updated prices for {len(prices)} events")
 
-            # Load existing graph and run alpha detection with new prices
-            graph = state.get_graph()
-            if graph.nodes:
-                opportunities, summary = run_alpha_detection(
-                    graph.to_dict(), all_events
-                )
-                export_live_data(state, all_events, opportunities)
+                # Load existing graph and run alpha detection with new prices
+                graph = state.get_graph()
+                if graph.nodes:
+                    opportunities, summary = run_alpha_detection(
+                        graph.to_dict(), all_events
+                    )
+                    export_live_data(state, all_events, opportunities)
 
-                state.complete_run(run_id, len(all_events), 0, "completed")
+                    state.complete_run(run_id, len(all_events), 0, "completed")
 
-                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-                logger.info(f"Price update complete in {elapsed:.1f}s")
+                    elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                    logger.info(f"Price update complete in {elapsed:.1f}s")
 
-                return {
-                    "mode": "price_update",
-                    "total_events": len(all_events),
-                    "new_events": 0,
-                    "opportunities": len(opportunities),
-                    "elapsed_seconds": elapsed,
-                }
+                    return {
+                        "mode": "price_update",
+                        "total_events": len(all_events),
+                        "new_events": 0,
+                        "opportunities": len(opportunities),
+                        "elapsed_seconds": elapsed,
+                    }
 
-            logger.warning("No existing graph - nothing to update")
-            state.complete_run(run_id, 0, 0, "skipped")
-            return {"mode": "skipped", "reason": "no_graph"}
+                logger.warning("No existing graph - nothing to update")
+                state.complete_run(run_id, 0, 0, "skipped")
+                return {"mode": "skipped", "reason": "no_graph"}
 
         # =====================================================================
         # STEP 4: Preload models (do this before heavy processing)
         # =====================================================================
-        logger.info("Loading ML models...")
-        preload_models()
+        with tracker.step(4, "Load ML Models"):
+            logger.info("Loading ML models...")
+            preload_models()
+            tracker.update_details("Loaded GLiNER, embedder, LLM client")
 
         # =====================================================================
         # STEP 5: Prepare NLP data for new events
         # =====================================================================
-        logger.info("Step 5: Preparing NLP data...")
-        nlp_events = prepare_nlp_data(new_events)
-        logger.info(f"Prepared {len(nlp_events)} events for NLP")
+        with tracker.step(5, "Prepare NLP Data"):
+            logger.info("Step 5: Preparing NLP data...")
+            nlp_events = prepare_nlp_data(new_events)
+            tracker.update_details(f"Prepared {len(nlp_events)} events")
+            logger.info(f"Prepared {len(nlp_events)} events for NLP")
 
         # =====================================================================
         # STEP 6: Extract entities
         # =====================================================================
-        logger.info("Step 6: Extracting entities...")
-        entities = extract_and_process_entities(nlp_events, state)
-        logger.info(f"Extracted {len(entities)} entities")
+        with tracker.step(6, "Extract Entities"):
+            logger.info("Step 6: Extracting entities...")
+            entities = extract_and_process_entities(nlp_events, state)
+            tracker.update_details(f"Extracted {len(entities)} entities")
+            logger.info(f"Extracted {len(entities)} entities")
 
         # =====================================================================
-        # STEP 6.5: Extract event semantics
+        # STEP 7: Extract event semantics
         # =====================================================================
-        logger.info("Step 6.5: Extracting event semantics...")
-        from core.steps.semantics import (
-            extract_event_semantics,
-            get_semantics_for_prioritization,
-        )
-
-        semantics_by_id = await extract_event_semantics(nlp_events, state)
-        semantics_for_pairs = get_semantics_for_prioritization(semantics_by_id)
-        logger.info(f"Extracted semantics for {len(semantics_by_id)} events")
-
-        # =====================================================================
-        # STEP 7: Generate embeddings
-        # =====================================================================
-        logger.info("Step 7: Generating embeddings...")
-        new_embeddings, new_event_ids = embed_events(nlp_events, state)
-        logger.info(f"Generated embeddings for {len(new_event_ids)} events")
-
-        # =====================================================================
-        # STEP 7.5: Enrich quality
-        # =====================================================================
-        logger.info("Step 7.5: Enriching quality...")
-        from core.steps.quality import enrich_events_quality
-
-        entity_sets = {e["id"]: e.get("entities", []) for e in nlp_events}
-        _enriched_events, negation_pairs = enrich_events_quality(
-            nlp_events, entity_sets
-        )
-        logger.info(f"Quality enriched: {len(negation_pairs)} negation pairs found")
-
-        # =====================================================================
-        # STEP 8: Find candidate pairs (new vs all)
-        # =====================================================================
-        logger.info("Step 8: Finding candidate pairs...")
-
-        # Get all embeddings and event IDs
-        all_embeddings, all_event_ids = state.get_embeddings()
-
-        if all_embeddings is None or len(all_embeddings) == 0:
-            # First run - use only new embeddings
-            all_embeddings = new_embeddings
-            all_event_ids = new_event_ids
-
-        # Prepare all events lookup
-        existing_events = state.get_all_events()
-        all_events_for_pairs = existing_events + nlp_events
-
-        candidate_pairs = block_candidate_pairs(
-            new_events=nlp_events,
-            all_events=all_events_for_pairs,
-            new_embeddings=new_embeddings,
-            all_embeddings=all_embeddings,
-            all_event_ids=all_event_ids,
-        )
-        logger.info(f"Found {len(candidate_pairs)} candidate pairs")
-
-        # =====================================================================
-        # STEP 9: Classify structural relations
-        # =====================================================================
-        logger.info("Step 9: Classifying structural relations...")
-        events_by_id = {e["id"]: e for e in all_events_for_pairs}
-        structural_relations = classify_structural(candidate_pairs, events_by_id)
-
-        # Add negation pairs as MUTUALLY_EXCLUSIVE (from quality enrichment)
-        for pair in negation_pairs:
-            structural_relations.append(
-                {
-                    "source_id": pair.event_id_a,
-                    "target_id": pair.event_id_b,
-                    "relation_type": "MUTUALLY_EXCLUSIVE",
-                    "confidence": 0.9,
-                    "classification_method": "negation_detection",
-                }
+        with tracker.step(7, "Extract Semantics"):
+            logger.info("Step 7: Extracting event semantics...")
+            from core.steps.semantics import (
+                extract_event_semantics,
+                get_semantics_for_prioritization,
             )
 
-        logger.info(f"Found {len(structural_relations)} structural relations")
-
-        # =====================================================================
-        # STEP 10: Classify causal relations (LLM)
-        # =====================================================================
-        logger.info("Step 10: Classifying causal relations (LLM)...")
-
-        # Filter pairs not already classified as structural
-        structural_pairs = {
-            (r["source_id"], r["target_id"]) for r in structural_relations
-        }
-        pairs_for_causal = [
-            p
-            for p in candidate_pairs
-            if (p["event_a_id"], p["event_b_id"]) not in structural_pairs
-            and (p["event_b_id"], p["event_a_id"]) not in structural_pairs
-        ][:MAX_LLM_PAIRS]
-
-        causal_relations = await classify_causal(
-            pairs_for_causal,
-            events_by_id,
-            semantics_by_id=semantics_for_pairs,
-            max_pairs=MAX_LLM_PAIRS,
-        )
-        logger.info(f"Found {len(causal_relations)} causal relations")
-
-        # =====================================================================
-        # STEP 11: Build/merge graph
-        # =====================================================================
-        logger.info("Step 11: Building relation graph...")
-
-        # Get existing graph
-        existing_graph = state.get_graph()
-
-        if existing_graph.nodes and not full:
-            # Incremental: merge into existing graph
-            new_graph_nodes = [
-                {
-                    "id": e["id"],
-                    "title": e.get("title", ""),
-                    "current_price": extract_prices([e]).get(e["id"], 0.5),
-                }
-                for e in nlp_events
-            ]
-            new_graph_edges = [
-                {
-                    "source": r["source_id"],
-                    "target": r["target_id"],
-                    "relation_type": r["relation_type"],
-                    "confidence": r.get("confidence", 0.5),
-                }
-                for r in structural_relations + causal_relations
-            ]
-
-            merged = merge_into_graph(
-                existing_graph.to_dict(), new_graph_nodes, new_graph_edges
+            semantics_by_id = await extract_event_semantics(nlp_events, state)
+            semantics_for_pairs = get_semantics_for_prioritization(semantics_by_id)
+            tracker.update_details(
+                f"Extracted semantics for {len(semantics_by_id)} events"
             )
-            graph = GraphData.from_dict(merged)
-        else:
-            # Full: build new graph
-            graph_dict = build_relation_graph(
-                all_events_for_pairs,
-                structural_relations,
-                causal_relations,
+            logger.info(f"Extracted semantics for {len(semantics_by_id)} events")
+
+        # =====================================================================
+        # STEP 8: Generate embeddings
+        # =====================================================================
+        with tracker.step(8, "Generate Embeddings"):
+            logger.info("Step 8: Generating embeddings...")
+            new_embeddings, new_event_ids = embed_events(nlp_events, state)
+            tracker.update_details(f"Generated {len(new_event_ids)} embeddings")
+            logger.info(f"Generated embeddings for {len(new_event_ids)} events")
+
+        # =====================================================================
+        # STEP 9: Enrich quality
+        # =====================================================================
+        with tracker.step(9, "Enrich Quality"):
+            logger.info("Step 9: Enriching quality...")
+            from core.steps.quality import enrich_events_quality
+
+            entity_sets = {e["id"]: e.get("entities", []) for e in nlp_events}
+            _enriched_events, negation_pairs = enrich_events_quality(
+                nlp_events, entity_sets
             )
-            graph = GraphData.from_dict(graph_dict)
-
-        # Save graph
-        state.save_graph(graph)
-        logger.info(f"Graph: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
+            tracker.update_details(f"Found {len(negation_pairs)} negation pairs")
+            logger.info(f"Quality enriched: {len(negation_pairs)} negation pairs found")
 
         # =====================================================================
-        # STEP 12: Alpha detection
+        # STEP 10: Find candidate pairs (new vs all)
         # =====================================================================
-        logger.info("Step 12: Detecting alpha opportunities...")
-        opportunities, summary = run_alpha_detection(graph.to_dict(), all_events)
-        logger.info(f"Found {len(opportunities)} alpha opportunities")
+        with tracker.step(10, "Find Candidate Pairs"):
+            logger.info("Step 10: Finding candidate pairs...")
+
+            # Get all embeddings and event IDs
+            all_embeddings, all_event_ids = state.get_embeddings()
+
+            if all_embeddings is None or len(all_embeddings) == 0:
+                # First run - use only new embeddings
+                all_embeddings = new_embeddings
+                all_event_ids = new_event_ids
+
+            # Prepare all events lookup
+            existing_events = state.get_all_events()
+            all_events_for_pairs = existing_events + nlp_events
+
+            candidate_pairs = block_candidate_pairs(
+                new_events=nlp_events,
+                all_events=all_events_for_pairs,
+                new_embeddings=new_embeddings,
+                all_embeddings=all_embeddings,
+                all_event_ids=all_event_ids,
+            )
+            tracker.update_details(f"Found {len(candidate_pairs)} pairs")
+            logger.info(f"Found {len(candidate_pairs)} candidate pairs")
 
         # =====================================================================
-        # STEP 13: Save new events to state
+        # STEP 11: Classify structural relations
         # =====================================================================
-        logger.info("Step 13: Saving state...")
-        state.add_events(nlp_events)
+        with tracker.step(11, "Classify Structural"):
+            logger.info("Step 11: Classifying structural relations...")
+            events_by_id = {e["id"]: e for e in all_events_for_pairs}
+            structural_relations = classify_structural(candidate_pairs, events_by_id)
+
+            # Add negation pairs as MUTUALLY_EXCLUSIVE (from quality enrichment)
+            for pair in negation_pairs:
+                structural_relations.append(
+                    {
+                        "source_id": pair.event_id_a,
+                        "target_id": pair.event_id_b,
+                        "relation_type": "MUTUALLY_EXCLUSIVE",
+                        "confidence": 0.9,
+                        "classification_method": "negation_detection",
+                    }
+                )
+
+            tracker.update_details(f"Found {len(structural_relations)} relations")
+            logger.info(f"Found {len(structural_relations)} structural relations")
 
         # =====================================================================
-        # STEP 14: Export to _live/
+        # STEP 12: Classify causal relations (LLM)
         # =====================================================================
-        logger.info("Step 14: Exporting to _live/...")
-        export_live_data(state, all_events, opportunities)
+        with tracker.step(12, "Classify Causal (LLM)"):
+            logger.info("Step 12: Classifying causal relations (LLM)...")
+
+            # Filter pairs not already classified as structural
+            structural_pairs = {
+                (r["source_id"], r["target_id"]) for r in structural_relations
+            }
+            pairs_for_causal = [
+                p
+                for p in candidate_pairs
+                if (p["event_a_id"], p["event_b_id"]) not in structural_pairs
+                and (p["event_b_id"], p["event_a_id"]) not in structural_pairs
+            ][:MAX_LLM_PAIRS]
+
+            tracker.update_details(f"Classifying {len(pairs_for_causal)} pairs...")
+            causal_relations = await classify_causal(
+                pairs_for_causal,
+                events_by_id,
+                semantics_by_id=semantics_for_pairs,
+                max_pairs=MAX_LLM_PAIRS,
+            )
+            tracker.update_details(f"Found {len(causal_relations)} causal relations")
+            logger.info(f"Found {len(causal_relations)} causal relations")
+
+        # =====================================================================
+        # STEP 13: Build/merge graph
+        # =====================================================================
+        with tracker.step(13, "Build Graph"):
+            logger.info("Step 13: Building relation graph...")
+
+            # Get existing graph
+            existing_graph = state.get_graph()
+
+            if existing_graph.nodes and not full:
+                # Incremental: merge into existing graph
+                new_graph_nodes = [
+                    {
+                        "id": e["id"],
+                        "title": e.get("title", ""),
+                        "current_price": extract_prices([e]).get(e["id"], 0.5),
+                    }
+                    for e in nlp_events
+                ]
+                new_graph_edges = [
+                    {
+                        "source": r["source_id"],
+                        "target": r["target_id"],
+                        "relation_type": r["relation_type"],
+                        "confidence": r.get("confidence", 0.5),
+                    }
+                    for r in structural_relations + causal_relations
+                ]
+
+                merged = merge_into_graph(
+                    existing_graph.to_dict(), new_graph_nodes, new_graph_edges
+                )
+                graph = GraphData.from_dict(merged)
+            else:
+                # Full: build new graph
+                graph_dict = build_relation_graph(
+                    all_events_for_pairs,
+                    structural_relations,
+                    causal_relations,
+                )
+                graph = GraphData.from_dict(graph_dict)
+
+            # Save graph
+            state.save_graph(graph)
+            tracker.update_details(
+                f"{len(graph.nodes)} nodes, {len(graph.edges)} edges"
+            )
+            logger.info(f"Graph: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
+
+        # =====================================================================
+        # STEP 14: Alpha detection
+        # =====================================================================
+        with tracker.step(14, "Detect Alpha"):
+            logger.info("Step 14: Detecting alpha opportunities...")
+            opportunities, summary = run_alpha_detection(graph.to_dict(), all_events)
+            tracker.update_details(f"Found {len(opportunities)} opportunities")
+            logger.info(f"Found {len(opportunities)} alpha opportunities")
+
+            # Save state and export (grouped in final step)
+            state.add_events(nlp_events)
+            export_live_data(state, all_events, opportunities)
 
         # Complete run
         state.complete_run(run_id, len(all_events), len(new_events), "completed")
@@ -343,17 +380,18 @@ async def run_async(full: bool = False) -> dict:
         state.close()
 
 
-def run(full: bool = False) -> dict:
+def run(full: bool = False, step_tracker: StepTracker | None = None) -> dict:
     """
     Run the pipeline synchronously.
 
     Args:
         full: If True, reprocess everything. If False, incremental.
+        step_tracker: Optional tracker for progress monitoring.
 
     Returns:
         Dict with run statistics
     """
-    return asyncio.run(run_async(full))
+    return asyncio.run(run_async(full, step_tracker=step_tracker))
 
 
 # =============================================================================
