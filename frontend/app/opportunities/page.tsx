@@ -50,7 +50,7 @@ export default function OpportunitiesPage() {
         const res = await fetch('http://localhost:8000/data/opportunities?limit=100')
         if (res.ok) {
           const data = await res.json()
-          setOpportunities(data.data || [])
+          setOpportunities(data.data?.opportunities || [])
         }
       } catch (error) {
         console.error('Failed to fetch opportunities:', error)
