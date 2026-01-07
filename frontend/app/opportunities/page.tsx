@@ -111,23 +111,16 @@ export default function OpportunitiesPage() {
       return sortDirection === 'asc' ? aVal - bVal : bVal - aVal
     })
 
-  const SortHeader = ({ field, label, className = '' }: { field: SortField, label: string, className?: string }) => (
+  const SortHeader = ({ field, label, hint, className = '' }: { field: SortField, label: string, hint: string, className?: string }) => (
     <th
-      className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted cursor-pointer hover:text-cyan transition-colors ${className}`}
+      className={`px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted cursor-pointer hover:text-text-secondary transition-colors ${className}`}
       onClick={() => handleSort(field)}
+      title={hint}
     >
       <div className="flex items-center gap-1">
         {label}
         {sortField === field && (
-          <svg
-            className={`w-3 h-3 text-cyan transition-transform ${sortDirection === 'desc' ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
-          </svg>
+          <span className={`text-cyan ${sortDirection === 'desc' ? 'rotate-180' : ''}`}>↑</span>
         )}
       </div>
     </th>
@@ -138,201 +131,118 @@ export default function OpportunitiesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-text-primary">
-            Opportunities
-          </h1>
-          <p className="text-text-secondary text-sm mt-1">
-            {opportunities.length} alpha signals detected
+          <h1 className="text-xl font-semibold text-text-primary">Opportunities</h1>
+          <p className="text-sm text-text-muted mt-0.5">
+            {opportunities.length} alpha signals
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Search */}
-          <div className="relative">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Filter..."
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="pl-9 pr-3 py-2 w-48 bg-surface border border-border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/20 transition-all"
-            />
-          </div>
-          {/* Connection status */}
-          <div
-            className={`
-              flex items-center gap-1.5 px-3 py-2 rounded-lg border
-              ${connected
-                ? 'bg-emerald/5 border-emerald/20 text-emerald'
-                : 'bg-surface border-border text-text-muted'
-              }
-            `}
-          >
-            <span className={`relative flex h-2 w-2`}>
-              {connected && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald opacity-75" />
-              )}
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
-            </span>
-            <span className="text-xs font-medium">
-              {connected ? 'Live' : 'Offline'}
-            </span>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="Filter..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="px-3 py-1.5 w-40 bg-surface-elevated border border-border rounded text-sm text-text-primary placeholder:text-text-muted focus:border-cyan/50 focus:outline-none transition-colors"
+          />
+          <div className="flex items-center gap-1.5 text-xs text-text-muted">
+            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
+            <span>{connected ? 'Live' : 'Offline'}</span>
           </div>
         </div>
       </div>
 
       {/* Table */}
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <div className="flex items-center gap-3 text-text-muted">
-            <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-            <span>Loading opportunities...</span>
-          </div>
+        <div className="flex items-center justify-center py-12">
+          <span className="text-sm text-text-muted">Loading...</span>
         </div>
       ) : (
-        <div className="rounded-xl border border-border overflow-hidden bg-surface">
+        <div className="rounded-lg border border-border overflow-hidden bg-surface">
           <div className="overflow-x-auto">
-            <table className="w-full terminal-table table-fixed">
+            <table className="w-full table-fixed">
               <thead className="bg-surface-elevated border-b border-border">
                 <tr>
-                  <SortHeader field="rank" label="#" className="w-12" />
-                  <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-[22%]">
-                    Trigger Event
+                  <SortHeader field="rank" label="#" hint="Opportunity rank by alpha strength" className="w-10" />
+                  <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-[24%]" title="IF this event happens...">
+                    Trigger
                   </th>
-                  <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-24">
-                    Relation
+                  <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-28" title="Relationship type between trigger and consequence events">
+                    Type
                   </th>
-                  <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-[22%]">
-                    Consequence Event
+                  <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-[24%]" title="...THEN this event is affected">
+                    Consequence
                   </th>
-                  <SortHeader field="trigger_price" label="Trig %" className="w-16" />
-                  <SortHeader field="consequence_price" label="Cons %" className="w-20" />
-                  <SortHeader field="alpha" label="Alpha" className="w-20" />
-                  <SortHeader field="confidence" label="Conf" className="w-20" />
-                  <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-16">
-                    Action
-                  </th>
+                  <SortHeader field="trigger_price" label="T%" hint="Trigger event market probability" className="w-12" />
+                  <SortHeader field="consequence_price" label="C%" hint="Consequence event market probability (+ live change)" className="w-14" />
+                  <SortHeader field="alpha" label="Alpha" hint="Expected profit if trigger occurs. BUY = underpriced, SELL = overpriced" className="w-16" />
+                  <SortHeader field="confidence" label="Conf" hint="Model confidence in the relationship" className="w-14" />
+                  <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-10"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/50">
-                {sortedOpportunities.map((opp, idx) => {
+              <tbody className="divide-y divide-border">
+                {sortedOpportunities.map((opp) => {
                   const currentPrice = prices[opp.consequence.event_id]?.price
                   const priceChange = currentPrice !== undefined
                     ? ((currentPrice - opp.consequence.price) / opp.consequence.price) * 100
                     : null
                   const isBuy = opp.alpha.direction === 'BUY'
-                  const alphaValue = parseFloat(opp.alpha.signal_display.replace(/[+%]/g, ''))
-                  const isHighAlpha = alphaValue > 20
 
                   return (
                     <tr
                       key={opp.id}
-                      className={`
-                        transition-colors animate-fade-in opacity-0
-                        ${isHighAlpha
-                          ? isBuy
-                            ? 'bg-alpha-buy/[0.02] hover:bg-alpha-buy/[0.05]'
-                            : 'bg-alpha-sell/[0.02] hover:bg-alpha-sell/[0.05]'
-                          : 'hover:bg-surface-hover'
-                        }
-                      `}
-                      style={{ animationDelay: `${idx * 0.02}s` }}
+                      className="hover:bg-surface-hover transition-colors"
                     >
-                      <td className="px-3 py-3">
-                        <span className="text-xs font-mono text-text-muted">
-                          {opp.rank}
-                        </span>
+                      <td className="px-2.5 py-2">
+                        <span className="text-xs font-mono text-text-muted">{opp.rank}</span>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-2.5 py-2">
                         <p className="text-sm text-text-primary truncate" title={opp.trigger.title}>
                           {opp.trigger.title}
                         </p>
                       </td>
-                      <td className="px-3 py-3">
-                        <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-surface-elevated text-text-secondary border border-border truncate block">
+                      <td className="px-2.5 py-2">
+                        <span className="text-[10px] uppercase text-text-muted truncate block" title={opp.relation.type}>
                           {opp.relation.type}
                         </span>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-2.5 py-2">
                         <p className="text-sm text-text-primary truncate" title={opp.consequence.title}>
                           {opp.consequence.title}
                         </p>
                       </td>
-                      <td className="px-3 py-3">
-                        <span className="text-sm font-mono text-text-secondary">
+                      <td className="px-2.5 py-2">
+                        <span className="text-xs font-mono text-text-muted">
                           {opp.trigger.price_display}
                         </span>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-2.5 py-2">
                         <div className="flex items-center gap-1">
-                          <span className="text-sm font-mono text-text-secondary">
+                          <span className="text-xs font-mono text-text-muted">
                             {opp.consequence.price_display}
                           </span>
                           {priceChange !== null && (
-                            <span
-                              className={`
-                                text-[10px] font-mono font-semibold
-                                ${priceChange > 0
-                                  ? 'text-alpha-buy'
-                                  : priceChange < 0
-                                    ? 'text-alpha-sell'
-                                    : 'text-text-muted'
-                                }
-                              `}
-                            >
+                            <span className={`text-[10px] font-mono ${priceChange > 0 ? 'text-alpha-buy' : priceChange < 0 ? 'text-alpha-sell' : 'text-text-muted'}`}>
                               {priceChange > 0 ? '+' : ''}{priceChange.toFixed(0)}%
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-3">
-                        <span
-                          className={`
-                            inline-flex items-center px-2 py-0.5 text-xs font-bold rounded
-                            ${isBuy
-                              ? 'bg-alpha-buy/10 text-alpha-buy'
-                              : 'bg-alpha-sell/10 text-alpha-sell'
-                            }
-                          `}
-                        >
+                      <td className="px-2.5 py-2">
+                        <span className={`text-xs font-mono font-medium ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
                           {opp.alpha.signal_display}
                         </span>
                       </td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-1">
-                          <div className="w-8 h-1 bg-surface-elevated rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-cyan to-cyan-dim rounded-full"
-                              style={{ width: `${opp.relation.confidence * 100}%` }}
-                            />
-                          </div>
-                          <span className="text-[10px] font-mono text-text-muted">
-                            {(opp.relation.confidence * 100).toFixed(0)}%
-                          </span>
-                        </div>
+                      <td className="px-2.5 py-2">
+                        <span className="text-xs font-mono text-text-muted">
+                          {(opp.relation.confidence * 100).toFixed(0)}%
+                        </span>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-2.5 py-2">
                         <button
                           onClick={() => window.open(`https://polymarket.com/event/${opp.consequence.event_id}`, '_blank')}
-                          className="
-                            flex items-center gap-1 px-2 py-1 text-xs font-semibold
-                            bg-cyan/10 text-cyan border border-cyan/20 rounded
-                            hover:bg-cyan/20 hover:border-cyan/30 transition-all
-                          "
+                          className="text-xs text-text-muted hover:text-cyan transition-colors"
                         >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-                          </svg>
+                          →
                         </button>
                       </td>
                     </tr>
@@ -342,14 +252,14 @@ export default function OpportunitiesPage() {
             </table>
           </div>
 
-          {/* Table footer */}
-          <div className="px-3 py-2.5 bg-surface-elevated border-t border-border flex items-center justify-between">
-            <p className="text-xs text-text-muted">
-              Showing {sortedOpportunities.length} of {opportunities.length}
-            </p>
-            <p className="text-xs text-text-muted">
+          {/* Footer */}
+          <div className="px-2.5 py-2 bg-surface-elevated border-t border-border flex items-center justify-between">
+            <span className="text-[10px] text-text-muted">
+              {sortedOpportunities.length} of {opportunities.length}
+            </span>
+            <span className="text-[10px] text-text-muted font-mono">
               {new Date().toLocaleTimeString()}
-            </p>
+            </span>
           </div>
         </div>
       )}
