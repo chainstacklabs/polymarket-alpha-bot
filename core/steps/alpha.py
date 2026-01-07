@@ -21,6 +21,9 @@ MIN_CONFIDENCE = 0.60
 MIN_TRIGGER_PRICE = 0.02
 MAX_TRIGGER_PRICE = 0.80
 
+# URL generation
+POLYMARKET_BASE_URL = "https://polymarket.com/event"
+
 # Relation type priors for P(B|A)
 RELATION_TYPE_PRIORS = {
     "DIRECT_CAUSE": {"min": 0.80, "max": 0.95, "default": 0.88},
@@ -78,7 +81,7 @@ def estimate_conditional(edge: dict) -> tuple[float, float, float]:
 def compute_conditionals(
     graph: dict,
     events: list[dict],
-) -> list[dict]:
+) -> tuple[list[dict], dict[str, str]]:
     """
     Compute conditional probabilities for all causal edges.
 
@@ -87,16 +90,22 @@ def compute_conditionals(
         events: All events with current prices
 
     Returns:
-        List of edges with conditional probability estimates
+        Tuple of (edges with conditional probability estimates, slug lookup)
     """
-    # Build price lookup
+    # Build price and slug lookups
     prices = {}
+    slugs = {}
     for event in events:
         event_id = event.get("id")
         markets = event.get("markets", [])
-        if markets and event_id:
-            outcome_prices = markets[0].get("outcomePrices", [0.5])
-            prices[event_id] = outcome_prices[0] if outcome_prices else 0.5
+        if event_id:
+            # Price lookup
+            if markets:
+                outcome_prices = markets[0].get("outcomePrices", [0.5])
+                prices[event_id] = outcome_prices[0] if outcome_prices else 0.5
+            # Slug lookup (for Polymarket URLs)
+            if event.get("slug"):
+                slugs[event_id] = event["slug"]
 
     # Build node lookup from graph
     nodes_by_id = {n["id"]: n for n in graph.get("nodes", [])}
@@ -152,7 +161,7 @@ def compute_conditionals(
         )
 
     logger.info(f"Computed conditionals for {len(processed)} causal edges")
-    return processed
+    return processed, slugs
 
 
 # =============================================================================
@@ -160,16 +169,29 @@ def compute_conditionals(
 # =============================================================================
 
 
-def detect_alpha(edges_with_conditionals: list[dict]) -> list[dict]:
+def generate_market_url(slug: str | None, event_id: str) -> str:
+    """Generate Polymarket URL for an event using slug (preferred) or event_id."""
+    identifier = slug if slug else event_id
+    return f"{POLYMARKET_BASE_URL}/{identifier}"
+
+
+def detect_alpha(
+    edges_with_conditionals: list[dict],
+    slugs: dict[str, str] | None = None,
+) -> list[dict]:
     """
     Detect alpha opportunities from model vs market divergence.
 
     Args:
         edges_with_conditionals: Edges with conditional probability estimates
+        slugs: Dict mapping event_id to slug for URL generation
 
     Returns:
         List of alpha opportunities
     """
+    if slugs is None:
+        slugs = {}
+
     opportunities = []
     signal_counter = 0
 
@@ -210,18 +232,26 @@ def detect_alpha(edges_with_conditionals: list[dict]) -> list[dict]:
             risk = 1 - target_price
             ev_per_dollar = abs(alpha_signal) / risk if risk > 0 else 0
 
+        # Get slugs for URL generation
+        source_slug = slugs.get(edge["source_id"])
+        target_slug = slugs.get(edge["target_id"])
+
         opportunities.append(
             {
                 "signal_id": f"alpha_{signal_counter:04d}",
                 "trigger": {
                     "event_id": edge["source_id"],
+                    "slug": source_slug,
                     "title": edge["source_title"],
                     "current_price": edge["source_price"],
+                    "market_url": generate_market_url(source_slug, edge["source_id"]),
                 },
                 "consequence": {
                     "event_id": edge["target_id"],
+                    "slug": target_slug,
                     "title": edge["target_title"],
                     "current_price": edge["target_price"],
+                    "market_url": generate_market_url(target_slug, edge["target_id"]),
                 },
                 "relation_type": edge["relation_type"],
                 "alpha_signal": round(alpha_signal, 4),
@@ -291,16 +321,16 @@ def run_alpha_detection(
 
     Args:
         graph: Knowledge graph
-        events: All events with prices
+        events: All events with prices (including slugs for URL generation)
 
     Returns:
         Tuple of (opportunities, summary)
     """
-    # Compute conditionals
-    edges_with_conditionals = compute_conditionals(graph, events)
+    # Compute conditionals (also builds slug lookup for URLs)
+    edges_with_conditionals, slugs = compute_conditionals(graph, events)
 
-    # Detect alpha
-    opportunities = detect_alpha(edges_with_conditionals)
+    # Detect alpha (with slugs for proper Polymarket URLs)
+    opportunities = detect_alpha(edges_with_conditionals, slugs)
 
     # Generate summary
     summary = generate_summary(opportunities, graph)

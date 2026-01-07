@@ -15,21 +15,20 @@ const getRelationHint = (type: string): string => {
   return RELATION_HINTS[normalized] || type
 }
 
+interface EventRef {
+  event_id: string
+  slug?: string
+  title: string
+  price: number
+  price_display: string
+  market_url?: string
+}
+
 interface Opportunity {
   id: string
   rank: number
-  trigger: {
-    event_id: string
-    title: string
-    price: number
-    price_display: string
-  }
-  consequence: {
-    event_id: string
-    title: string
-    price: number
-    price_display: string
-  }
+  trigger: EventRef
+  consequence: EventRef
   relation: {
     type: string
     type_display: string
@@ -40,6 +39,13 @@ interface Opportunity {
     signal_display: string
     direction: string
   }
+}
+
+// Generate Polymarket URL - prefer market_url, fall back to slug, then event_id
+const getMarketUrl = (event: EventRef) => {
+  if (event.market_url) return event.market_url
+  const identifier = event.slug || event.event_id
+  return `https://polymarket.com/event/${identifier}`
 }
 
 interface OpportunityCardProps {
@@ -136,7 +142,7 @@ export function OpportunityCard({ opportunity, currentPrice }: OpportunityCardPr
           </span>
         </div>
         <button
-          onClick={() => window.open(`https://polymarket.com/event/${consequence.event_id}`, '_blank')}
+          onClick={() => window.open(getMarketUrl(consequence), '_blank')}
           className="text-xs text-text-secondary hover:text-cyan transition-colors"
         >
           View →
