@@ -66,7 +66,7 @@ export default function PipelinePage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => runPipeline(false, 50)}
+            onClick={() => runPipeline(false, 20)}
             disabled={isRunning}
             className="btn-secondary text-xs disabled:opacity-50"
           >

@@ -32,7 +32,7 @@ cd frontend && npm i && npm run dev  # UI at http://localhost:3000
 ```
 
 Go to Pipeline tab:
-- "Run Demo" — quick test with 50 events
+- "Run Demo" — quick test with 20 events
 - "Sync New Events" — process only new events
 - "Reprocess All Events" — full reprocess
 
