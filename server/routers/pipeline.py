@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
@@ -32,6 +32,9 @@ class ProductionRunRequest(BaseModel):
     """Request to run production pipeline."""
 
     full: bool = False  # If True, reset and reprocess all
+    max_events: int | None = Field(
+        default=None, gt=0, description="Limit number of events fetched (must be > 0)"
+    )
 
 
 def load_manifest() -> dict:
@@ -270,7 +273,7 @@ async def get_running() -> dict[str, Any]:
 # =============================================================================
 
 
-def run_production_pipeline_task(full: bool):
+def run_production_pipeline_task(full: bool, max_events: int | None = None):
     """Background task to run the production pipeline."""
     global _running_pipeline, _step_tracker
 
@@ -280,16 +283,18 @@ def run_production_pipeline_task(full: bool):
 
         _step_tracker = StepTracker()
 
+        mode = "demo" if max_events else ("full" if full else "incremental")
         _running_pipeline = {
             "started_at": datetime.now(timezone.utc).isoformat(),
             "pipeline_type": "production",
-            "mode": "full" if full else "incremental",
+            "mode": mode,
+            "max_events": max_events,
             "status": "running",
         }
 
         from core.runner import run
 
-        result = run(full=full, step_tracker=_step_tracker)
+        result = run(full=full, step_tracker=_step_tracker, max_events=max_events)
 
         _running_pipeline["status"] = "completed"
         _running_pipeline["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -333,12 +338,16 @@ async def run_production(
         )
 
     # Start pipeline in background
-    background_tasks.add_task(run_production_pipeline_task, request.full)
+    background_tasks.add_task(
+        run_production_pipeline_task, request.full, request.max_events
+    )
 
+    mode = "demo" if request.max_events else ("full" if request.full else "incremental")
     return {
         "status": "started",
         "pipeline_type": "production",
-        "mode": "full" if request.full else "incremental",
+        "mode": mode,
+        "max_events": request.max_events,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 

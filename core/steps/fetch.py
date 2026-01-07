@@ -127,13 +127,18 @@ def process_events(
 # =============================================================================
 
 
-async def fetch_events(tag_slugs: str = TARGET_TAG_SLUG) -> list[dict[str, Any]]:
+async def fetch_events(
+    tag_slugs: str = TARGET_TAG_SLUG,
+    max_events: int | None = None,
+) -> list[dict[str, Any]]:
     """
     Fetch all active events from Polymarket API.
 
     Args:
         tag_slugs: Comma-separated tags to filter events by (OR logic).
                    E.g., "politics" or "politics,sports,crypto"
+        max_events: Optional limit on number of events to return.
+                    If None, returns all events.
 
     Returns:
         List of processed events with active markets
@@ -177,14 +182,25 @@ async def fetch_events(tag_slugs: str = TARGET_TAG_SLUG) -> list[dict[str, Any]]
 
         # Process events and markets
         events = process_events(list(all_events.values()))
-        logger.info(f"Fetched {len(events)} active events from {len(tags)} tag(s)")
+
+        # Apply max_events limit if specified
+        if max_events is not None and len(events) > max_events:
+            events = events[:max_events]
+            logger.info(
+                f"Limited to {len(events)} events (max_events={max_events}) from {len(tags)} tag(s)"
+            )
+        else:
+            logger.info(f"Fetched {len(events)} active events from {len(tags)} tag(s)")
 
         return events
 
 
-def fetch_events_sync(tag_slugs: str = TARGET_TAG_SLUG) -> list[dict[str, Any]]:
+def fetch_events_sync(
+    tag_slugs: str = TARGET_TAG_SLUG,
+    max_events: int | None = None,
+) -> list[dict[str, Any]]:
     """Synchronous wrapper for fetch_events."""
-    return asyncio.run(fetch_events(tag_slugs))
+    return asyncio.run(fetch_events(tag_slugs, max_events=max_events))
 
 
 # =============================================================================

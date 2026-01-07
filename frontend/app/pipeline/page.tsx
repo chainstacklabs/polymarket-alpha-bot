@@ -29,13 +29,13 @@ export default function PipelinePage() {
     return () => clearInterval(interval)
   }, [status?.running])
 
-  async function runPipeline(full: boolean = true) {
+  async function runPipeline(full: boolean = true, maxEvents?: number) {
     setRunningPipeline(true)
     try {
       const res = await fetch('http://localhost:8000/pipeline/run/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ full }),
+        body: JSON.stringify({ full, max_events: maxEvents }),
       })
       if (res.ok) {
         // Start polling for updates
@@ -65,6 +65,13 @@ export default function PipelinePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => runPipeline(false, 50)}
+            disabled={isRunning}
+            className="btn-secondary text-xs disabled:opacity-50"
+          >
+            Run Demo
+          </button>
           <button
             onClick={() => runPipeline(false)}
             disabled={isRunning}

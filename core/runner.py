@@ -54,7 +54,9 @@ from core.step_tracker import StepTracker
 
 
 async def run_async(
-    full: bool = False, step_tracker: StepTracker | None = None
+    full: bool = False,
+    step_tracker: StepTracker | None = None,
+    max_events: int | None = None,
 ) -> dict:
     """
     Run the pipeline asynchronously.
@@ -62,6 +64,8 @@ async def run_async(
     Args:
         full: If True, reprocess everything. If False, incremental.
         step_tracker: Optional tracker for progress monitoring.
+        max_events: Optional limit on number of events to fetch.
+                    Useful for demo/testing with smaller datasets.
 
     Returns:
         Dict with run statistics
@@ -87,8 +91,13 @@ async def run_async(
         # STEP 1: Fetch all events from API
         # =====================================================================
         with tracker.step(1, "Fetch Events"):
-            logger.info("Step 1: Fetching events from Polymarket API...")
-            all_events = await fetch_events()
+            if max_events:
+                logger.info(
+                    f"Step 1: Fetching events from Polymarket API (max: {max_events})..."
+                )
+            else:
+                logger.info("Step 1: Fetching events from Polymarket API...")
+            all_events = await fetch_events(max_events=max_events)
             tracker.update_details(f"Fetched {len(all_events)} events")
             logger.info(f"Fetched {len(all_events)} events")
 
@@ -380,18 +389,26 @@ async def run_async(
         state.close()
 
 
-def run(full: bool = False, step_tracker: StepTracker | None = None) -> dict:
+def run(
+    full: bool = False,
+    step_tracker: StepTracker | None = None,
+    max_events: int | None = None,
+) -> dict:
     """
     Run the pipeline synchronously.
 
     Args:
         full: If True, reprocess everything. If False, incremental.
         step_tracker: Optional tracker for progress monitoring.
+        max_events: Optional limit on number of events to fetch.
+                    Useful for demo/testing with smaller datasets.
 
     Returns:
         Dict with run statistics
     """
-    return asyncio.run(run_async(full, step_tracker=step_tracker))
+    return asyncio.run(
+        run_async(full, step_tracker=step_tracker, max_events=max_events)
+    )
 
 
 # =============================================================================

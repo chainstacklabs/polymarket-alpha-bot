@@ -25,7 +25,10 @@ cp .env.example .env  # Add OPENROUTER_API_KEY
 
 ### Run Pipeline
 
-Two options:
+**UI (recommended):** Start the frontend (see below), go to Pipeline tab.
+- "Run Demo" — quick test with 50 events
+- "Sync New Events" — process only new events
+- "Reprocess All Events" — full reprocess
 
 **CLI:**
 ```bash
@@ -33,8 +36,6 @@ uv run poly run          # Sync new events only
 uv run poly run --full   # Reprocess all events
 uv run poly run state    # Check pipeline status
 ```
-
-**UI:** Start the frontend (see below), go to Pipeline tab. Use "Reprocess All Events" for first run, "Sync New Events" for subsequent updates.
 
 ### Start Services
 
