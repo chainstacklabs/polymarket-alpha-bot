@@ -91,7 +91,15 @@ def get_active_event_ids() -> list[str]:
         return []
 
     try:
-        opportunities = json.loads(opportunities_file.read_text())
+        data = json.loads(opportunities_file.read_text())
+        # Handle both formats: flat list or nested {"opportunities": [...]}
+        if isinstance(data, dict) and "opportunities" in data:
+            opportunities = data["opportunities"]
+        elif isinstance(data, list):
+            opportunities = data
+        else:
+            return []
+
         event_ids = set()
         for opp in opportunities[:100]:  # Limit to top 100
             if isinstance(opp, dict):
