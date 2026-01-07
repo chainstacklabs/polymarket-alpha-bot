@@ -13,6 +13,30 @@ interface PipelineStep {
   has_data: boolean
 }
 
+interface LastRun {
+  id: number
+  run_type: string
+  started_at: string
+  completed_at: string | null
+  events_processed: number
+  new_events: number
+  status: string
+}
+
+interface ProductionState {
+  total_events: number
+  total_entities: number
+  total_edges: number
+  last_full_run: string | null
+  last_refresh: string | null
+  last_run: LastRun | null
+}
+
+interface PipelineStatus {
+  steps: PipelineStep[]
+  production: ProductionState | null
+}
+
 interface Opportunity {
   id: string
   rank: number
@@ -66,6 +90,35 @@ const getRelationHint = (type: string): string => {
   return RELATION_HINTS[normalized] || type
 }
 
+// Format timestamp to human-readable relative time
+const formatRelativeTime = (isoString: string): string => {
+  const date = new Date(isoString)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return 'just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+// Format timestamp to full date/time
+const formatDateTime = (isoString: string): string => {
+  const date = new Date(isoString)
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
+
 // Generate Polymarket URL
 const getMarketUrl = (event: { market_url?: string; slug?: string; event_id: string }) => {
   if (event.market_url) return event.market_url
@@ -74,7 +127,7 @@ const getMarketUrl = (event: { market_url?: string; slug?: string; event_id: str
 }
 
 export default function Dashboard() {
-  const [status, setStatus] = useState<{ steps: PipelineStep[] } | null>(null)
+  const [status, setStatus] = useState<PipelineStatus | null>(null)
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null)
@@ -121,9 +174,19 @@ export default function Dashboard() {
             Alpha opportunities from Polymarket
           </p>
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-text-muted">
-          <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
-          <span>{connected ? 'Live' : 'Offline'}</span>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-1.5 text-xs text-text-muted">
+            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
+            <span>{connected ? 'Live' : 'Offline'}</span>
+          </div>
+          {status?.production?.last_run?.completed_at && (
+            <div
+              className="text-[10px] text-text-muted cursor-help"
+              title={`Last snapshot: ${formatDateTime(status.production.last_run.completed_at)}\nEvents processed: ${status.production.last_run.events_processed || 0}`}
+            >
+              Snapshot: {formatRelativeTime(status.production.last_run.completed_at)}
+            </div>
+          )}
         </div>
       </div>
 
