@@ -41,13 +41,13 @@ export default function PipelinePage() {
     return () => clearInterval(interval)
   }, [])
 
-  async function runPipeline(fromStep: string = '01') {
+  async function runPipeline(full: boolean = true) {
     setRunningPipeline(true)
     try {
-      const res = await fetch('http://localhost:8000/pipeline/run', {
+      const res = await fetch('http://localhost:8000/pipeline/run/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from_step: fromStep, to_step: '06_3' }),
+        body: JSON.stringify({ full }),
       })
       if (res.ok) {
         // Start polling for updates
@@ -89,7 +89,7 @@ export default function PipelinePage() {
           </p>
         </div>
         <button
-          onClick={() => runPipeline('01')}
+          onClick={() => runPipeline(true)}
           disabled={runningPipeline || status?.running}
           className="btn-primary text-xs disabled:opacity-50"
         >
@@ -136,7 +136,6 @@ export default function PipelinePage() {
                 <th className="px-3 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted">Description</th>
                 <th className="px-3 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-40">Last Run</th>
                 <th className="px-3 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-20">Status</th>
-                <th className="px-3 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-24"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -170,15 +169,6 @@ export default function PipelinePage() {
                       ) : (
                         <span className="text-xs text-text-muted">—</span>
                       )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        onClick={() => runPipeline(step.step)}
-                        disabled={runningPipeline || status?.running}
-                        className="text-xs text-text-muted hover:text-cyan disabled:opacity-50 transition-colors"
-                      >
-                        Run →
-                      </button>
                     </td>
                   </tr>
                 )

@@ -97,10 +97,13 @@ async def get_status() -> dict[str, Any]:
     except Exception:
         production_state = None
 
+    is_running = (
+        _running_pipeline is not None and _running_pipeline.get("status") == "running"
+    )
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "running": _running_pipeline is not None,
-        "current_step": _running_pipeline.get("step") if _running_pipeline else None,
+        "running": is_running,
+        "current_step": _running_pipeline.get("step") if is_running else None,
         "production": production_state,
         "steps": steps,
         "manifest": manifest,
