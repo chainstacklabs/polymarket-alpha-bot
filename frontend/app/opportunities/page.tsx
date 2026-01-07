@@ -159,6 +159,7 @@ export default function OpportunitiesPage() {
   )
 
   return (
+    <>
     <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -303,8 +304,9 @@ export default function OpportunitiesPage() {
           </div>
         </div>
       )}
+    </div>
 
-      {/* Opportunity Detail Modal */}
+      {/* Opportunity Detail Modal - outside animated container to fix fixed positioning */}
       {selectedOpportunity && (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
@@ -438,6 +440,6 @@ export default function OpportunitiesPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
