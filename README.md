@@ -16,34 +16,32 @@ cp .env.example .env  # Add OPENROUTER_API_KEY
 
 ## Usage
 
+### Run Pipeline
+
+Two options:
+
+**CLI:**
 ```bash
-# Run pipeline (fetches markets, extracts entities, builds graph, detects alpha)
-uv run poly run
-
-# Start API server
-uv run poly serve
-# API docs at http://localhost:8000/docs
-
-# Commands
-uv run poly run          # Incremental (new events only)
-uv run poly run --full   # Full reprocess
+uv run poly run          # Sync new events only
+uv run poly run --full   # Reprocess all events
 uv run poly run state    # Check pipeline status
+```
+
+**UI:** Start the frontend (see below), go to Pipeline tab. Use "Reprocess All Events" for first run, "Sync New Events" for subsequent updates.
+
+### Start Services
+
+```bash
+uv run poly serve        # API server at http://localhost:8000
+cd frontend && npm i && npm run dev  # UI at http://localhost:3000
 ```
 
 ## Experiments
 
-The `experiments/` folder contains standalone scripts extracted from the pipeline. Each script is self-contained and independent — feel free to debug, test, and modify them to experiment with different approaches. Once validated, changes can be ported to `core/`.
+Standalone scripts in `experiments/` for testing ideas before porting to `core/`.
 
 ```bash
 uv run python experiments/01_fetch_events.py
-```
-
-## UI
-
-```bash
-cd frontend && npm install
-npm run dev
-# Open http://localhost:3000
 ```
 
 ## Output
