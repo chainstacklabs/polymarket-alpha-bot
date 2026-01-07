@@ -59,7 +59,7 @@ export default function Dashboard() {
         }
         if (oppsRes.ok) {
           const data = await oppsRes.json()
-          setOpportunities(data.data || [])
+          setOpportunities(data.data?.opportunities || [])
         }
       } catch (error) {
         console.error('Failed to fetch data:', error)
