@@ -47,37 +47,31 @@ export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <div className="fixed inset-y-0 left-0 w-72 bg-surface border-r border-border/50 flex flex-col">
+    <div className="fixed inset-y-0 left-0 w-52 bg-surface border-r border-border/50 flex flex-col">
       {/* Logo */}
-      <div className="px-6 py-6 border-b border-border/50">
-        <Link href="/" className="flex items-center gap-3 group">
+      <div className="px-4 py-4 border-b border-border/50">
+        <Link href="/" className="flex items-center gap-2.5 group">
           {/* Custom logo mark */}
           <div className="relative">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan to-cyan-dim flex items-center justify-center shadow-glow-cyan">
-              <svg className="w-5 h-5 text-void" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan to-cyan-dim flex items-center justify-center shadow-glow-cyan">
+              <svg className="w-4 h-4 text-void" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.5l6.5 6.5L21 8.5" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 8l4-4 4 4" opacity={0.5} />
               </svg>
             </div>
             {/* Glow effect */}
-            <div className="absolute inset-0 rounded-xl bg-cyan/20 blur-xl opacity-50 group-hover:opacity-75 transition-opacity" />
+            <div className="absolute inset-0 rounded-lg bg-cyan/20 blur-xl opacity-50 group-hover:opacity-75 transition-opacity" />
           </div>
           <div>
-            <h1 className="font-display text-xl font-bold tracking-tight text-text-primary">
+            <h1 className="font-display text-lg font-bold tracking-tight text-text-primary">
               Alphapoly
             </h1>
-            <p className="text-[10px] uppercase tracking-[0.2em] text-text-muted font-medium">
-              Alpha Detection
-            </p>
           </div>
         </Link>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-4 py-6 space-y-1">
-        <p className="px-3 mb-3 text-[10px] uppercase tracking-[0.15em] text-text-muted font-semibold">
-          Navigation
-        </p>
+      <nav className="flex-1 px-3 py-4 space-y-0.5">
         {navigation.map((item) => {
           const isActive = pathname === item.href
           return (
@@ -85,7 +79,7 @@ export function Sidebar() {
               key={item.name}
               href={item.href}
               className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200
+                flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-200
                 ${isActive
                   ? 'bg-cyan/10 text-cyan border border-cyan/20 shadow-[inset_0_0_20px_rgba(0,212,255,0.05)]'
                   : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover border border-transparent'
@@ -102,37 +96,14 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Stats Section */}
-      <div className="px-4 py-4 border-t border-border/50">
-        <p className="px-3 mb-3 text-[10px] uppercase tracking-[0.15em] text-text-muted font-semibold">
-          Quick Stats
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="px-3 py-2 rounded-lg bg-surface-elevated border border-border/50">
-            <p className="text-[10px] uppercase tracking-wider text-text-muted">Version</p>
-            <p className="text-sm font-semibold text-amber">v0.1.0</p>
-          </div>
-          <div className="px-3 py-2 rounded-lg bg-surface-elevated border border-border/50">
-            <p className="text-[10px] uppercase tracking-wider text-text-muted">Status</p>
-            <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald animate-pulse" />
-              <p className="text-sm font-semibold text-emerald">Live</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Footer */}
-      <div className="px-6 py-4 border-t border-border/50">
-        <div className="flex items-center justify-between">
-          <p className="text-[10px] text-text-muted">
-            Polymarket Alpha Detection
-          </p>
-          <div className="flex items-center gap-1">
-            <span className="w-1 h-1 rounded-full bg-cyan/50" />
-            <span className="w-1 h-1 rounded-full bg-cyan/30" />
-            <span className="w-1 h-1 rounded-full bg-cyan/10" />
+      <div className="px-3 py-3 border-t border-border/50">
+        <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald animate-pulse" />
+            <span className="text-xs text-emerald font-medium">Live</span>
           </div>
+          <span className="text-[10px] text-text-muted">v0.1.0</span>
         </div>
       </div>
     </div>

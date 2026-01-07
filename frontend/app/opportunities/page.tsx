@@ -113,14 +113,14 @@ export default function OpportunitiesPage() {
 
   const SortHeader = ({ field, label, className = '' }: { field: SortField, label: string, className?: string }) => (
     <th
-      className={`px-4 py-3.5 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted cursor-pointer hover:text-cyan transition-colors ${className}`}
+      className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted cursor-pointer hover:text-cyan transition-colors ${className}`}
       onClick={() => handleSort(field)}
     >
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1">
         {label}
         {sortField === field && (
           <svg
-            className={`w-3.5 h-3.5 text-cyan transition-transform ${sortDirection === 'desc' ? 'rotate-180' : ''}`}
+            className={`w-3 h-3 text-cyan transition-transform ${sortDirection === 'desc' ? 'rotate-180' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -134,18 +134,18 @@ export default function OpportunitiesPage() {
   )
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-4xl font-bold tracking-tight text-text-primary">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-text-primary">
             Opportunities
           </h1>
-          <p className="text-text-secondary mt-2">
+          <p className="text-text-secondary text-sm mt-1">
             {opportunities.length} alpha signals detected
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {/* Search */}
           <div className="relative">
             <svg
@@ -159,16 +159,16 @@ export default function OpportunitiesPage() {
             </svg>
             <input
               type="text"
-              placeholder="Filter opportunities..."
+              placeholder="Filter..."
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              className="pl-10 pr-4 py-2.5 w-64 bg-surface border border-border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/20 transition-all"
+              className="pl-9 pr-3 py-2 w-48 bg-surface border border-border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/20 transition-all"
             />
           </div>
           {/* Connection status */}
           <div
             className={`
-              flex items-center gap-2 px-4 py-2.5 rounded-lg border
+              flex items-center gap-1.5 px-3 py-2 rounded-lg border
               ${connected
                 ? 'bg-emerald/5 border-emerald/20 text-emerald'
                 : 'bg-surface border-border text-text-muted'
@@ -181,7 +181,7 @@ export default function OpportunitiesPage() {
               )}
               <span className={`relative inline-flex rounded-full h-2 w-2 ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
             </span>
-            <span className="text-sm font-medium">
+            <span className="text-xs font-medium">
               {connected ? 'Live' : 'Offline'}
             </span>
           </div>
@@ -202,24 +202,24 @@ export default function OpportunitiesPage() {
       ) : (
         <div className="rounded-xl border border-border overflow-hidden bg-surface">
           <div className="overflow-x-auto">
-            <table className="w-full terminal-table">
+            <table className="w-full terminal-table table-fixed">
               <thead className="bg-surface-elevated border-b border-border">
                 <tr>
-                  <SortHeader field="rank" label="#" className="w-16" />
-                  <th className="px-4 py-3.5 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted">
+                  <SortHeader field="rank" label="#" className="w-12" />
+                  <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-[22%]">
                     Trigger Event
                   </th>
-                  <th className="px-4 py-3.5 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-32">
+                  <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-24">
                     Relation
                   </th>
-                  <th className="px-4 py-3.5 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted">
+                  <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-[22%]">
                     Consequence Event
                   </th>
-                  <SortHeader field="trigger_price" label="Trigger %" className="w-24" />
-                  <SortHeader field="consequence_price" label="Conseq %" className="w-28" />
-                  <SortHeader field="alpha" label="Alpha" className="w-28" />
+                  <SortHeader field="trigger_price" label="Trig %" className="w-16" />
+                  <SortHeader field="consequence_price" label="Cons %" className="w-20" />
+                  <SortHeader field="alpha" label="Alpha" className="w-20" />
                   <SortHeader field="confidence" label="Conf" className="w-20" />
-                  <th className="px-4 py-3.5 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-20">
+                  <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted w-16">
                     Action
                   </th>
                 </tr>
@@ -248,93 +248,88 @@ export default function OpportunitiesPage() {
                       `}
                       style={{ animationDelay: `${idx * 0.02}s` }}
                     >
-                      <td className="px-4 py-3.5">
-                        <span className="text-xs font-mono text-text-muted bg-surface-elevated px-2 py-1 rounded">
+                      <td className="px-3 py-3">
+                        <span className="text-xs font-mono text-text-muted">
                           {opp.rank}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5">
-                        <div className="max-w-xs">
-                          <p className="text-sm text-text-primary truncate" title={opp.trigger.title}>
-                            {opp.trigger.title}
-                          </p>
-                        </div>
+                      <td className="px-3 py-3">
+                        <p className="text-sm text-text-primary truncate" title={opp.trigger.title}>
+                          {opp.trigger.title}
+                        </p>
                       </td>
-                      <td className="px-4 py-3.5">
-                        <span className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider rounded-lg bg-surface-elevated text-text-secondary border border-border">
+                      <td className="px-3 py-3">
+                        <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-surface-elevated text-text-secondary border border-border truncate block">
                           {opp.relation.type}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5">
-                        <div className="max-w-xs">
-                          <p className="text-sm text-text-primary truncate" title={opp.consequence.title}>
-                            {opp.consequence.title}
-                          </p>
-                        </div>
+                      <td className="px-3 py-3">
+                        <p className="text-sm text-text-primary truncate" title={opp.consequence.title}>
+                          {opp.consequence.title}
+                        </p>
                       </td>
-                      <td className="px-4 py-3.5">
+                      <td className="px-3 py-3">
                         <span className="text-sm font-mono text-text-secondary">
                           {opp.trigger.price_display}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2">
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1">
                           <span className="text-sm font-mono text-text-secondary">
                             {opp.consequence.price_display}
                           </span>
                           {priceChange !== null && (
                             <span
                               className={`
-                                text-xs font-mono font-semibold px-1.5 py-0.5 rounded
+                                text-[10px] font-mono font-semibold
                                 ${priceChange > 0
-                                  ? 'text-alpha-buy bg-alpha-buy/10'
+                                  ? 'text-alpha-buy'
                                   : priceChange < 0
-                                    ? 'text-alpha-sell bg-alpha-sell/10'
+                                    ? 'text-alpha-sell'
                                     : 'text-text-muted'
                                 }
                               `}
                             >
-                              {priceChange > 0 ? '+' : ''}{priceChange.toFixed(1)}%
+                              {priceChange > 0 ? '+' : ''}{priceChange.toFixed(0)}%
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3.5">
+                      <td className="px-3 py-3">
                         <span
                           className={`
-                            inline-flex items-center px-2.5 py-1 text-xs font-bold rounded-lg
+                            inline-flex items-center px-2 py-0.5 text-xs font-bold rounded
                             ${isBuy
-                              ? 'bg-alpha-buy/10 text-alpha-buy border border-alpha-buy/20'
-                              : 'bg-alpha-sell/10 text-alpha-sell border border-alpha-sell/20'
+                              ? 'bg-alpha-buy/10 text-alpha-buy'
+                              : 'bg-alpha-sell/10 text-alpha-sell'
                             }
                           `}
                         >
                           {opp.alpha.signal_display}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-10 h-1.5 bg-surface-elevated rounded-full overflow-hidden">
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1">
+                          <div className="w-8 h-1 bg-surface-elevated rounded-full overflow-hidden">
                             <div
                               className="h-full bg-gradient-to-r from-cyan to-cyan-dim rounded-full"
                               style={{ width: `${opp.relation.confidence * 100}%` }}
                             />
                           </div>
-                          <span className="text-xs font-mono text-text-muted">
+                          <span className="text-[10px] font-mono text-text-muted">
                             {(opp.relation.confidence * 100).toFixed(0)}%
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3.5">
+                      <td className="px-3 py-3">
                         <button
                           onClick={() => window.open(`https://polymarket.com/event/${opp.consequence.event_id}`, '_blank')}
                           className="
-                            flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold
-                            bg-cyan/10 text-cyan border border-cyan/20 rounded-lg
+                            flex items-center gap-1 px-2 py-1 text-xs font-semibold
+                            bg-cyan/10 text-cyan border border-cyan/20 rounded
                             hover:bg-cyan/20 hover:border-cyan/30 transition-all
                           "
                         >
-                          <span>View</span>
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
                           </svg>
@@ -348,12 +343,12 @@ export default function OpportunitiesPage() {
           </div>
 
           {/* Table footer */}
-          <div className="px-4 py-3 bg-surface-elevated border-t border-border flex items-center justify-between">
+          <div className="px-3 py-2.5 bg-surface-elevated border-t border-border flex items-center justify-between">
             <p className="text-xs text-text-muted">
-              Showing {sortedOpportunities.length} of {opportunities.length} opportunities
+              Showing {sortedOpportunities.length} of {opportunities.length}
             </p>
             <p className="text-xs text-text-muted">
-              Last updated: {new Date().toLocaleTimeString()}
+              {new Date().toLocaleTimeString()}
             </p>
           </div>
         </div>
