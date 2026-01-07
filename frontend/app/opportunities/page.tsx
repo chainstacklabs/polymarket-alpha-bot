@@ -36,6 +36,23 @@ interface Opportunity {
 type SortField = 'rank' | 'alpha' | 'confidence' | 'trigger_price' | 'consequence_price'
 type SortDirection = 'asc' | 'desc'
 
+// Relation type explanations for tooltips
+const RELATION_HINTS: Record<string, string> = {
+  'DIRECT_CAUSE': 'A directly causes B to happen (high probability)',
+  'ENABLING_CONDITION': 'A makes B more likely, but doesn\'t guarantee it',
+  'INHIBITING_CONDITION': 'A reduces the likelihood of B happening',
+  'REQUIRES': 'B cannot happen unless A happens first',
+  'CORRELATED': 'A and B tend to move together, but unclear which causes which',
+  'TIMEFRAME_VARIANT': 'Same event with different time deadlines',
+  'THRESHOLD_VARIANT': 'Same event with different numeric thresholds',
+  'MUTUALLY_EXCLUSIVE': 'If A happens, B cannot happen (and vice versa)',
+}
+
+const getRelationHint = (type: string): string => {
+  const normalized = type.toUpperCase().replace(/\s+/g, '_')
+  return RELATION_HINTS[normalized] || type
+}
+
 export default function OpportunitiesPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
@@ -201,7 +218,10 @@ export default function OpportunitiesPage() {
                         </p>
                       </td>
                       <td className="px-2.5 py-2">
-                        <span className="text-[10px] uppercase text-text-muted truncate block" title={opp.relation.type}>
+                        <span
+                          className="text-[10px] uppercase text-text-muted truncate block cursor-help"
+                          title={getRelationHint(opp.relation.type)}
+                        >
                           {opp.relation.type}
                         </span>
                       </td>

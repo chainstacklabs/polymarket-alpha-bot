@@ -1,3 +1,20 @@
+// Relation type explanations for tooltips
+const RELATION_HINTS: Record<string, string> = {
+  'DIRECT_CAUSE': 'A directly causes B to happen (high probability)',
+  'ENABLING_CONDITION': 'A makes B more likely, but doesn\'t guarantee it',
+  'INHIBITING_CONDITION': 'A reduces the likelihood of B happening',
+  'REQUIRES': 'B cannot happen unless A happens first',
+  'CORRELATED': 'A and B tend to move together, but unclear which causes which',
+  'TIMEFRAME_VARIANT': 'Same event with different time deadlines',
+  'THRESHOLD_VARIANT': 'Same event with different numeric thresholds',
+  'MUTUALLY_EXCLUSIVE': 'If A happens, B cannot happen (and vice versa)',
+}
+
+const getRelationHint = (type: string): string => {
+  const normalized = type.toUpperCase().replace(/\s+/g, '_')
+  return RELATION_HINTS[normalized] || type
+}
+
 interface Opportunity {
   id: string
   rank: number
@@ -51,7 +68,10 @@ export function OpportunityCard({ opportunity, currentPrice }: OpportunityCardPr
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono text-text-muted">#{opportunity.rank}</span>
-          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border">
+          <span
+            className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border cursor-help"
+            title={getRelationHint(relation.type)}
+          >
             {relation.type}
           </span>
         </div>
