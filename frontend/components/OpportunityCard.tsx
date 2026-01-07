@@ -51,9 +51,10 @@ const getMarketUrl = (event: EventRef) => {
 interface OpportunityCardProps {
   opportunity: Opportunity
   currentPrice?: number
+  onClick?: () => void
 }
 
-export function OpportunityCard({ opportunity, currentPrice }: OpportunityCardProps) {
+export function OpportunityCard({ opportunity, currentPrice, onClick }: OpportunityCardProps) {
   const { trigger, consequence, relation, alpha } = opportunity
 
   const priceChange = currentPrice !== undefined
@@ -68,7 +69,9 @@ export function OpportunityCard({ opportunity, currentPrice }: OpportunityCardPr
         bg-surface border border-border rounded-lg p-4
         border-l-2 ${isBuy ? 'border-l-alpha-buy' : 'border-l-alpha-sell'}
         transition-colors hover:bg-surface-hover
+        ${onClick ? 'cursor-pointer' : ''}
       `}
+      onClick={onClick}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
@@ -142,7 +145,10 @@ export function OpportunityCard({ opportunity, currentPrice }: OpportunityCardPr
           </span>
         </div>
         <button
-          onClick={() => window.open(getMarketUrl(consequence), '_blank')}
+          onClick={(e) => {
+            e.stopPropagation()
+            window.open(getMarketUrl(consequence), '_blank')
+          }}
           className="text-xs text-text-secondary hover:text-cyan transition-colors"
         >
           View →
