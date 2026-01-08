@@ -13,8 +13,8 @@ alphapoly-v1/
 │   ├── models.py    # Singleton model loaders (GLiNER, embedder, LLM)
 │   └── steps/       # Pipeline steps (fetch, prepare, entities, etc.)
 ├── server/          # FastAPI backend - REST API, WebSocket prices
-├── cli/             # Typer CLI - `poly` command
-├── frontend/        # Next.js dashboard - React UI
+├── cli/             # Minimal Typer CLI - automation only (run, reset, serve)
+├── frontend/        # Next.js dashboard - primary UI
 └── data/            # Pipeline outputs (gitignored)
     └── _live/       # Production state (events.json, graph.json, opportunities.json)
 ```
@@ -54,19 +54,16 @@ alphapoly-v1/
 ## Commands
 
 ```bash
-# CLI (production)
-poly run              # Run incremental pipeline
-poly run --full       # Full reprocess (reset state first)
-poly run state        # Show pipeline state
-poly run reset        # Clear all accumulated data
-poly serve            # Start API server (localhost:8000)
-poly serve --reload   # Dev mode with auto-reload
+# CLI (minimal - for automation/cron)
+poly run              # Incremental pipeline
+poly run --full       # Full reprocess
+poly reset            # Clear state
+poly serve            # API server (localhost:8000)
 
 # Development
-uv run python experiments/01_fetch_events.py   # Run experiment script
-uv add package                                  # Add dependency
-uvx ruff check .                                # Lint
-uvx ruff format .                               # Format
+uv run python experiments/NN_name.py   # Run experiment script
+uv add package                         # Add dependency
+uvx ruff check . && uvx ruff format .  # Lint & format
 ```
 
 ## Experiment Script Structure

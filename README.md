@@ -31,7 +31,7 @@ cp .env.example .env  # Add OPENROUTER_API_KEY
 
 **UI (recommended):**
 ```bash
-uv run poly serve        # API server at http://localhost:8000
+poly serve               # API server at http://localhost:8000
 cd frontend && npm i && npm run dev  # UI at http://localhost:3000
 ```
 
@@ -40,11 +40,11 @@ Go to Pipeline tab:
 - "Sync New Events" — process only new events
 - "Reprocess All Events" — full reprocess
 
-**CLI:**
+**CLI (for automation):**
 ```bash
-uv run poly run          # Sync new events only
-uv run poly run --full   # Reprocess all events
-uv run poly run state    # Check pipeline status
+poly run          # Sync new events only
+poly run --full   # Reprocess all events
+poly reset        # Clear pipeline state
 ```
 
 ## Experiments
