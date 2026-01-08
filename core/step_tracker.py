@@ -38,7 +38,7 @@ class StepTracker:
         self.current_step: StepProgress | None = None
         self.completed_steps: list[StepProgress] = []
         self.pipeline_start: datetime = datetime.now(timezone.utc)
-        self.total_steps: int = 14
+        self.total_steps: int = 13  # Default for normal pipeline (with new events)
 
     def step(self, step_number: int, step_name: str):
         """Context manager for tracking a step."""

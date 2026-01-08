@@ -10,6 +10,8 @@ Combines logic from:
 For production pipeline with incremental support.
 """
 
+from typing import Callable
+
 import numpy as np
 from loguru import logger
 
@@ -458,6 +460,7 @@ async def classify_causal(
     semantics_by_id: dict[str, dict] | None = None,
     max_pairs: int = 500,
     batch_size: int = 5,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """
     Classify causal relations using LLM with semantics-based prioritization.
@@ -468,6 +471,7 @@ async def classify_causal(
         semantics_by_id: Optional semantic info per event (from semantics step)
         max_pairs: Maximum pairs to classify (LLM cost control)
         batch_size: Pairs per LLM batch request
+        progress_callback: Optional callback(message: str) to report progress
 
     Returns:
         List of classified causal relations with implied conditionals
@@ -497,8 +501,12 @@ async def classify_causal(
         batch = to_classify[batch_idx : batch_idx + batch_size]
         batch_num = batch_idx // batch_size + 1
 
-        if batch_num % 10 == 0:
-            logger.debug(f"Processing batch {batch_num}/{total_batches}")
+        # Report progress every 5 batches
+        if batch_num % 5 == 0 or batch_num == 1:
+            progress_msg = f"LLM batch {batch_num}/{total_batches} ({len(classified)} relations found)"
+            logger.debug(progress_msg)
+            if progress_callback:
+                progress_callback(progress_msg)
 
         try:
             prompt = _build_llm_batch_prompt(batch, events_by_id, semantics_by_id)

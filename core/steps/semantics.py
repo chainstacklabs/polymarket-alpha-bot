@@ -12,7 +12,7 @@ Parses event titles into structured semantic components:
 """
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
@@ -334,6 +334,7 @@ async def extract_semantics_batch(
 async def extract_event_semantics(
     events: list[dict],
     state: PipelineState,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> dict[str, dict]:
     """
     Extract structured semantics from all events.
@@ -341,6 +342,7 @@ async def extract_event_semantics(
     Args:
         events: NLP-prepared events
         state: Pipeline state for entity mappings
+        progress_callback: Optional callback(message: str) to report progress
 
     Returns:
         Dict mapping event_id to semantics dict
@@ -351,14 +353,22 @@ async def extract_event_semantics(
 
     all_results = []
     total = len(events)
+    total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
 
     for i in range(0, total, BATCH_SIZE):
         batch = events[i : i + BATCH_SIZE]
+        batch_num = i // BATCH_SIZE + 1
         batch_results = await extract_semantics_batch(batch, entity_lookup)
         all_results.extend(batch_results)
 
-        if (i + BATCH_SIZE) % 50 == 0 or i + BATCH_SIZE >= total:
-            logger.debug(f"Semantics: processed {min(i + BATCH_SIZE, total)}/{total}")
+        # Report progress every 3 batches
+        if batch_num % 3 == 0 or batch_num == 1:
+            progress_msg = (
+                f"Batch {batch_num}/{total_batches} ({len(all_results)}/{total} events)"
+            )
+            logger.debug(f"Semantics: {progress_msg}")
+            if progress_callback:
+                progress_callback(progress_msg)
 
     # Convert to dict by ID
     semantics_by_id = {r["id"]: r for r in all_results}

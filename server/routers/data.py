@@ -44,8 +44,6 @@ def recalculate_opportunities_with_live_prices(
 
         trigger = updated.get("trigger", {})
         consequence = updated.get("consequence", {})
-        alpha = updated.get("alpha", {})
-        relation = updated.get("relation", {})
 
         trigger_id = trigger.get("event_id")
         consequence_id = consequence.get("event_id")
@@ -54,11 +52,23 @@ def recalculate_opportunities_with_live_prices(
             recalculated.append(updated)
             continue
 
-        # Get original values
-        original_alpha = alpha.get("signal", 0)
-        original_consequence_price = consequence.get("price", 0.5)
-        original_trigger_price = trigger.get("price", 0.5)
-        confidence = relation.get("confidence", 0.7)
+        # Get original values - handle both flat and nested formats
+        # Flat format: alpha_signal, confidence at top level
+        # Nested format: alpha.signal, relation.confidence
+        if "alpha_signal" in updated:
+            # Flat format from alpha detection step
+            original_alpha = updated.get("alpha_signal", 0)
+            original_consequence_price = consequence.get("current_price", 0.5)
+            original_trigger_price = trigger.get("current_price", 0.5)
+            confidence = updated.get("confidence", 0.7)
+        else:
+            # Nested format (legacy)
+            alpha = updated.get("alpha", {})
+            relation = updated.get("relation", {})
+            original_alpha = alpha.get("signal", 0)
+            original_consequence_price = consequence.get("price", 0.5)
+            original_trigger_price = trigger.get("price", 0.5)
+            confidence = relation.get("confidence", 0.7)
 
         # Get live prices
         trigger_price_data = live_prices.get(trigger_id)
@@ -84,24 +94,24 @@ def recalculate_opportunities_with_live_prices(
         new_alpha = model_conditional - live_consequence_price
 
         # Update trigger prices
-        updated["trigger"]["price"] = round(live_trigger_price, 4)
+        updated["trigger"]["current_price"] = round(live_trigger_price, 4)
         updated["trigger"]["price_display"] = f"{int(live_trigger_price * 100)}%"
 
         # Update consequence prices
-        updated["consequence"]["price"] = round(live_consequence_price, 4)
+        updated["consequence"]["current_price"] = round(live_consequence_price, 4)
         updated["consequence"]["price_display"] = (
             f"{int(live_consequence_price * 100)}%"
         )
 
-        # Update alpha
-        updated["alpha"]["signal"] = round(new_alpha, 4)
-        updated["alpha"]["signal_display"] = (
+        # Update alpha (use flat format)
+        updated["alpha_signal"] = round(new_alpha, 4)
+        updated["alpha_signal_display"] = (
             f"+{int(new_alpha * 100)}%"
             if new_alpha >= 0
             else f"{int(new_alpha * 100)}%"
         )
-        updated["alpha"]["direction"] = "BUY" if new_alpha > 0 else "SELL"
-        updated["alpha"]["confidence_adjusted"] = round(new_alpha * confidence, 4)
+        updated["alpha_direction"] = "BUY" if new_alpha > 0 else "SELL"
+        updated["confidence_adjusted_alpha"] = round(new_alpha * confidence, 4)
 
         # Recalculate expected return
         if new_alpha > 0:
@@ -117,7 +127,7 @@ def recalculate_opportunities_with_live_prices(
 
     # Re-sort by confidence-adjusted alpha (absolute value, descending)
     recalculated.sort(
-        key=lambda x: abs(x.get("alpha", {}).get("confidence_adjusted", 0)),
+        key=lambda x: abs(x.get("confidence_adjusted_alpha", 0)),
         reverse=True,
     )
 
@@ -127,6 +137,72 @@ def recalculate_opportunities_with_live_prices(
         opp["id"] = f"opp_{i:03d}"
 
     return recalculated
+
+
+def transform_to_frontend_format(opportunities: list[dict]) -> list[dict]:
+    """Transform opportunities from flat format to nested format expected by frontend.
+
+    Backend format (flat):
+        alpha_signal, alpha_direction, confidence, relation_type, trigger.current_price
+
+    Frontend format (nested):
+        alpha.signal, alpha.direction, relation.type, relation.confidence, trigger.price
+    """
+    transformed = []
+
+    for opp in opportunities:
+        # Extract values from flat format
+        alpha_signal = opp.get("alpha_signal", 0)
+        alpha_direction = opp.get("alpha_direction", "BUY")
+        confidence = opp.get("confidence", 0.7)
+        relation_type = opp.get("relation_type", "UNKNOWN")
+
+        # Build nested structure
+        result = {
+            "id": opp.get("id", opp.get("signal_id", "")),
+            "rank": opp.get("rank", 0),
+            "trigger": {
+                "event_id": opp.get("trigger", {}).get("event_id", ""),
+                "slug": opp.get("trigger", {}).get("slug"),
+                "title": opp.get("trigger", {}).get("title", ""),
+                "price": opp.get("trigger", {}).get("current_price", 0.5),
+                "price_display": opp.get("trigger", {}).get(
+                    "price_display",
+                    f"{int(opp.get('trigger', {}).get('current_price', 0.5) * 100)}%",
+                ),
+                "market_url": opp.get("trigger", {}).get("market_url"),
+            },
+            "consequence": {
+                "event_id": opp.get("consequence", {}).get("event_id", ""),
+                "slug": opp.get("consequence", {}).get("slug"),
+                "title": opp.get("consequence", {}).get("title", ""),
+                "price": opp.get("consequence", {}).get("current_price", 0.5),
+                "price_display": opp.get("consequence", {}).get(
+                    "price_display",
+                    f"{int(opp.get('consequence', {}).get('current_price', 0.5) * 100)}%",
+                ),
+                "market_url": opp.get("consequence", {}).get("market_url"),
+            },
+            "relation": {
+                "type": relation_type.replace("_", " ").title(),
+                "type_display": relation_type.replace("_", " ").title(),
+                "confidence": confidence,
+            },
+            "alpha": {
+                "signal": alpha_signal,
+                "signal_display": (
+                    f"+{int(alpha_signal * 100)}%"
+                    if alpha_signal >= 0
+                    else f"{int(alpha_signal * 100)}%"
+                ),
+                "direction": "BUY" if alpha_signal > 0 else "SELL",
+            },
+            "strategy": opp.get("strategy"),
+        }
+
+        transformed.append(result)
+
+    return transformed
 
 
 def load_json_file(path: Path) -> Any:
@@ -207,6 +283,9 @@ async def get_opportunities(
 
         # Apply limit after re-sorting
         opportunities = opportunities[:limit]
+
+        # Transform to frontend format (nested structure)
+        opportunities = transform_to_frontend_format(opportunities)
 
         return {
             "source": "live",

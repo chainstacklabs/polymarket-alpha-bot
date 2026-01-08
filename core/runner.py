@@ -119,6 +119,8 @@ async def run_async(
         # STEP 3: Handle no new events case
         # =====================================================================
         if not new_events and not full:
+            # Adjust total steps for this shorter path (steps 1-3 only)
+            tracker.total_steps = 3
             with tracker.step(3, "Update Prices Only"):
                 logger.info("No new events - updating prices only...")
 
@@ -153,42 +155,47 @@ async def run_async(
                 return {"mode": "skipped", "reason": "no_graph"}
 
         # =====================================================================
-        # STEP 4: Preload models (do this before heavy processing)
+        # STEP 3: Preload models (do this before heavy processing)
         # =====================================================================
-        with tracker.step(4, "Load ML Models"):
-            logger.info("Loading ML models...")
+        # Step 3 "Update Prices Only" was skipped (only runs when no new events)
+        # So we continue with consecutive numbering: 3-13 (11 steps after 1-2)
+        tracker.total_steps = 13
+        with tracker.step(3, "Load ML Models"):
+            logger.info("Step 3: Loading ML models...")
             preload_models()
             tracker.update_details("Loaded GLiNER, embedder, LLM client")
 
         # =====================================================================
-        # STEP 5: Prepare NLP data for new events
+        # STEP 4: Prepare NLP data for new events
         # =====================================================================
-        with tracker.step(5, "Prepare NLP Data"):
-            logger.info("Step 5: Preparing NLP data...")
+        with tracker.step(4, "Prepare NLP Data"):
+            logger.info("Step 4: Preparing NLP data...")
             nlp_events = prepare_nlp_data(new_events)
             tracker.update_details(f"Prepared {len(nlp_events)} events")
             logger.info(f"Prepared {len(nlp_events)} events for NLP")
 
         # =====================================================================
-        # STEP 6: Extract entities
+        # STEP 5: Extract entities
         # =====================================================================
-        with tracker.step(6, "Extract Entities"):
-            logger.info("Step 6: Extracting entities...")
+        with tracker.step(5, "Extract Entities"):
+            logger.info("Step 5: Extracting entities...")
             entities = extract_and_process_entities(nlp_events, state)
             tracker.update_details(f"Extracted {len(entities)} entities")
             logger.info(f"Extracted {len(entities)} entities")
 
         # =====================================================================
-        # STEP 7: Extract event semantics
+        # STEP 6: Extract event semantics
         # =====================================================================
-        with tracker.step(7, "Extract Semantics"):
-            logger.info("Step 7: Extracting event semantics...")
+        with tracker.step(6, "Extract Semantics"):
+            logger.info("Step 6: Extracting event semantics...")
             from core.steps.semantics import (
                 extract_event_semantics,
                 get_semantics_for_prioritization,
             )
 
-            semantics_by_id = await extract_event_semantics(nlp_events, state)
+            semantics_by_id = await extract_event_semantics(
+                nlp_events, state, progress_callback=tracker.update_details
+            )
             semantics_for_pairs = get_semantics_for_prioritization(semantics_by_id)
             tracker.update_details(
                 f"Extracted semantics for {len(semantics_by_id)} events"
@@ -196,19 +203,19 @@ async def run_async(
             logger.info(f"Extracted semantics for {len(semantics_by_id)} events")
 
         # =====================================================================
-        # STEP 8: Generate embeddings
+        # STEP 7: Generate embeddings
         # =====================================================================
-        with tracker.step(8, "Generate Embeddings"):
-            logger.info("Step 8: Generating embeddings...")
+        with tracker.step(7, "Generate Embeddings"):
+            logger.info("Step 7: Generating embeddings...")
             new_embeddings, new_event_ids = embed_events(nlp_events, state)
             tracker.update_details(f"Generated {len(new_event_ids)} embeddings")
             logger.info(f"Generated embeddings for {len(new_event_ids)} events")
 
         # =====================================================================
-        # STEP 9: Enrich quality
+        # STEP 8: Enrich quality
         # =====================================================================
-        with tracker.step(9, "Enrich Quality"):
-            logger.info("Step 9: Enriching quality...")
+        with tracker.step(8, "Enrich Quality"):
+            logger.info("Step 8: Enriching quality...")
             from core.steps.quality import enrich_events_quality
 
             entity_sets = {e["id"]: e.get("entities", []) for e in nlp_events}
@@ -219,10 +226,10 @@ async def run_async(
             logger.info(f"Quality enriched: {len(negation_pairs)} negation pairs found")
 
         # =====================================================================
-        # STEP 10: Find candidate pairs (new vs all)
+        # STEP 9: Find candidate pairs (new vs all)
         # =====================================================================
-        with tracker.step(10, "Find Candidate Pairs"):
-            logger.info("Step 10: Finding candidate pairs...")
+        with tracker.step(9, "Find Candidate Pairs"):
+            logger.info("Step 9: Finding candidate pairs...")
 
             # Get all embeddings and event IDs
             all_embeddings, all_event_ids = state.get_embeddings()
@@ -247,10 +254,10 @@ async def run_async(
             logger.info(f"Found {len(candidate_pairs)} candidate pairs")
 
         # =====================================================================
-        # STEP 11: Classify structural relations
+        # STEP 10: Classify structural relations
         # =====================================================================
-        with tracker.step(11, "Classify Structural"):
-            logger.info("Step 11: Classifying structural relations...")
+        with tracker.step(10, "Classify Structural"):
+            logger.info("Step 10: Classifying structural relations...")
             events_by_id = {e["id"]: e for e in all_events_for_pairs}
             structural_relations = classify_structural(candidate_pairs, events_by_id)
 
@@ -270,10 +277,10 @@ async def run_async(
             logger.info(f"Found {len(structural_relations)} structural relations")
 
         # =====================================================================
-        # STEP 12: Classify causal relations (LLM)
+        # STEP 11: Classify causal relations (LLM)
         # =====================================================================
-        with tracker.step(12, "Classify Causal (LLM)"):
-            logger.info("Step 12: Classifying causal relations (LLM)...")
+        with tracker.step(11, "Classify Causal (LLM)"):
+            logger.info("Step 11: Classifying causal relations (LLM)...")
 
             # Filter pairs not already classified as structural
             structural_pairs = {
@@ -292,15 +299,16 @@ async def run_async(
                 events_by_id,
                 semantics_by_id=semantics_for_pairs,
                 max_pairs=MAX_LLM_PAIRS,
+                progress_callback=tracker.update_details,
             )
             tracker.update_details(f"Found {len(causal_relations)} causal relations")
             logger.info(f"Found {len(causal_relations)} causal relations")
 
         # =====================================================================
-        # STEP 13: Build/merge graph
+        # STEP 12: Build/merge graph
         # =====================================================================
-        with tracker.step(13, "Build Graph"):
-            logger.info("Step 13: Building relation graph...")
+        with tracker.step(12, "Build Graph"):
+            logger.info("Step 12: Building relation graph...")
 
             # Get existing graph
             existing_graph = state.get_graph()
@@ -346,10 +354,10 @@ async def run_async(
             logger.info(f"Graph: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
 
         # =====================================================================
-        # STEP 14: Alpha detection
+        # STEP 13: Alpha detection
         # =====================================================================
-        with tracker.step(14, "Detect Alpha"):
-            logger.info("Step 14: Detecting alpha opportunities...")
+        with tracker.step(13, "Detect Alpha"):
+            logger.info("Step 13: Detecting alpha opportunities...")
             opportunities, summary = run_alpha_detection(graph.to_dict(), all_events)
             tracker.update_details(f"Found {len(opportunities)} opportunities")
             logger.info(f"Found {len(opportunities)} alpha opportunities")

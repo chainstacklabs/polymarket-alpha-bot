@@ -29,6 +29,13 @@ export default function PipelinePage() {
     return () => clearInterval(interval)
   }, [status?.running])
 
+  // Sync local runningPipeline state with server state
+  useEffect(() => {
+    if (status?.running === false && runningPipeline) {
+      setRunningPipeline(false)
+    }
+  }, [status?.running, runningPipeline])
+
   async function runPipeline(full: boolean = true, maxEvents?: number) {
     setRunningPipeline(true)
     try {
@@ -38,20 +45,23 @@ export default function PipelinePage() {
         body: JSON.stringify({ full, max_events: maxEvents }),
       })
       if (res.ok) {
-        // Start polling for updates
+        // Start polling for updates - status.running will control the UI state
         fetchStatus()
+      } else {
+        // Only reset if request failed
+        setRunningPipeline(false)
       }
     } catch (error) {
       console.error('Failed to run pipeline:', error)
-    } finally {
       setRunningPipeline(false)
     }
+    // Don't reset runningPipeline here - let status.running control it
   }
 
   const isRunning = runningPipeline || status?.running
   const stepProgress = status?.step_progress
   const completedSteps = stepProgress?.completed_count || 0
-  const totalSteps = stepProgress?.total_steps || 14
+  const totalSteps = stepProgress?.total_steps || 13
   const progressPercent = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0
 
   return (
@@ -89,41 +99,18 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      {/* Live Pipeline Progress - shown when running */}
-      {isRunning && (
+      {/* Pipeline Progress - shown when running OR when there's step data */}
+      {(isRunning || stepProgress) ? (
         <PipelineTimeline
           stepProgress={status?.step_progress || null}
           isRunning={isRunning}
         />
-      )}
-
-      {/* Progress Overview - shown when not running */}
-      {!isRunning && (
+      ) : (
         <div className="rounded-lg border border-border bg-surface p-4">
           {loading ? (
             <div className="text-center py-2">
               <span className="text-sm text-text-muted">Loading...</span>
             </div>
-          ) : stepProgress ? (
-            <>
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-text-muted mb-1">
-                    Last Run Progress
-                  </p>
-                  <p className="text-lg font-semibold text-text-primary">
-                    {completedSteps}/{totalSteps}{' '}
-                    <span className="text-sm text-text-muted font-normal">steps</span>
-                  </p>
-                </div>
-              </div>
-              <div className="h-1.5 bg-surface-elevated rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-emerald rounded-full transition-all duration-300"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            </>
           ) : (
             <div className="text-center py-2">
               <p className="text-sm text-text-muted">No recent pipeline run</p>

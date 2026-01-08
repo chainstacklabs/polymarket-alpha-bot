@@ -158,7 +158,7 @@ export default function Dashboard() {
   }, [])
 
   const completedSteps = status?.step_progress?.completed_count || 0
-  const totalSteps = status?.step_progress?.total_steps || 14
+  const totalSteps = status?.step_progress?.total_steps || 13
 
   return (
     <>

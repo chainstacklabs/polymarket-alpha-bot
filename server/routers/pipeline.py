@@ -262,8 +262,18 @@ async def get_running() -> dict[str, Any]:
     if not _running_pipeline:
         return {"running": False}
 
+    is_running = _running_pipeline.get("status") == "running"
+
+    # Get step progress from tracker (or final state if completed)
+    step_progress = None
+    if is_running and _step_tracker is not None:
+        step_progress = _step_tracker.get_state()
+    elif "final_step_progress" in _running_pipeline:
+        step_progress = _running_pipeline["final_step_progress"]
+
     return {
-        "running": _running_pipeline.get("status") == "running",
+        "running": is_running,
+        "step_progress": step_progress,
         **_running_pipeline,
     }
 

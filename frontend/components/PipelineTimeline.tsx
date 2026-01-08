@@ -182,7 +182,9 @@ export default function PipelineTimeline({
       {/* Header */}
       <div className="px-4 py-3 border-b border-border bg-surface-elevated">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-medium text-text-primary">Pipeline Progress</h3>
+          <h3 className="text-sm font-medium text-text-primary">
+            {isRunning ? 'Pipeline Progress' : 'Last Run'}
+          </h3>
           {stepProgress && (
             <span className="text-xs text-text-muted font-mono">
               {formatElapsed(stepProgress.pipeline_elapsed_seconds)}
@@ -196,12 +198,17 @@ export default function PipelineTimeline({
             <div className="flex justify-between text-xs text-text-muted">
               <span>
                 {stepProgress.completed_count}/{stepProgress.total_steps} steps
+                {!isRunning && stepProgress.completed_count === stepProgress.total_steps && (
+                  <span className="ml-2 text-emerald">Complete</span>
+                )}
               </span>
               <span>{Math.round(progressPercent)}%</span>
             </div>
             <div className="h-1.5 bg-surface rounded-full overflow-hidden">
               <div
-                className="h-full bg-cyan rounded-full transition-all duration-300"
+                className={`h-full rounded-full transition-all duration-300 ${
+                  isRunning ? 'bg-cyan' : 'bg-emerald'
+                }`}
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
@@ -223,7 +230,7 @@ export default function PipelineTimeline({
           ))
         ) : (
           <div className="text-center py-4 text-sm text-text-muted">
-            {isRunning ? 'Starting pipeline...' : 'No steps recorded'}
+            {isRunning ? 'Starting pipeline...' : 'Run the pipeline to see step details'}
           </div>
         )}
       </div>
