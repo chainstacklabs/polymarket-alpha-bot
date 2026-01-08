@@ -2,6 +2,10 @@
 
 Polymarket alpha detection: finds conditional probability arbitrage across related prediction markets.
 
+## How It Works
+
+The pipeline fetches events from Polymarket, extracts entities and semantics using NLP/LLM, builds a knowledge graph of related markets, then detects alpha by comparing implied conditional probabilities (P(B|A) from the graph) against market prices. When the model's probability diverges significantly from what the market implies, that's a potential opportunity.
+
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) — Python package manager
