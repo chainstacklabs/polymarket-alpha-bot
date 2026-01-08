@@ -157,7 +157,9 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [])
 
-  const completedSteps = status?.step_progress?.completed_count || 0
+  // Use step_progress if available, otherwise check if last run completed
+  const lastRunCompleted = status?.production?.last_run?.status === 'completed'
+  const completedSteps = status?.step_progress?.completed_count ?? (lastRunCompleted ? 13 : 0)
   const totalSteps = status?.step_progress?.total_steps || 13
 
   return (

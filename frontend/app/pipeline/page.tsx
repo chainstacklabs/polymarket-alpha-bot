@@ -111,6 +111,21 @@ export default function PipelinePage() {
             <div className="text-center py-2">
               <span className="text-sm text-text-muted">Loading...</span>
             </div>
+          ) : status?.production?.last_run ? (
+            <div className="text-center py-4">
+              <p className="text-sm text-text-primary mb-2">Last run completed</p>
+              <div className="text-xs text-text-muted space-y-1">
+                <p>Status: <span className="text-emerald">{status.production.last_run.status}</span></p>
+                <p>Events processed: {status.production.last_run.events_processed}</p>
+                <p>New events: {status.production.last_run.new_events}</p>
+                <p className="text-text-muted/70">
+                  {new Date(status.production.last_run.completed_at).toLocaleString()}
+                </p>
+              </div>
+              <p className="text-xs text-text-muted mt-3">
+                (Step details cleared after server restart)
+              </p>
+            </div>
           ) : (
             <div className="text-center py-2">
               <p className="text-sm text-text-muted">No recent pipeline run</p>

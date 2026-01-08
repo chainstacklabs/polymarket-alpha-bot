@@ -232,7 +232,25 @@ class PriceCacheService:
                             markets = event.get("markets", [])
 
                             if markets:
-                                market = markets[0]
+                                # Find active markets (acceptingOrders=True, closed=False)
+                                active_markets = [
+                                    m
+                                    for m in markets
+                                    if m.get("acceptingOrders") and not m.get("closed")
+                                ]
+
+                                if not active_markets:
+                                    active_markets = markets
+
+                                # For multi-outcome events, select market with highest YES price
+                                # For binary events, there's typically just one active market
+                                def get_yes_price(m: dict) -> float:
+                                    prices = m.get("outcomePrices", [])
+                                    if isinstance(prices, str):
+                                        prices = json.loads(prices)
+                                    return float(prices[0]) if prices else 0.0
+
+                                market = max(active_markets, key=get_yes_price)
                                 outcome_prices = market.get("outcomePrices", [])
 
                                 # Handle string-encoded JSON
