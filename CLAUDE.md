@@ -145,3 +145,4 @@ OPENROUTER_API_KEY=sk-...
 - Types: `feat`, `fix`, `docs`, `refactor`, `chore`
 - No Claude signatures in commits
 - Never commit: API keys, `/data` contents, large files
+- **Temporary documentation:** Use `.local.md` extension for temporary docs and do not commit them
