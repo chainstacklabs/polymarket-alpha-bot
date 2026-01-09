@@ -31,6 +31,7 @@ from core.steps.entities import extract_and_process_entities
 from core.steps.fetch import extract_prices, fetch_events
 from core.steps.prepare import prepare_nlp_data
 from core.steps.relations import (
+    _build_edge_from_relation,
     block_candidate_pairs,
     build_relation_graph,
     classify_causal,
@@ -323,13 +324,9 @@ async def run_async(
                     }
                     for e in nlp_events
                 ]
+                # Build edges with full metadata
                 new_graph_edges = [
-                    {
-                        "source": r["source_id"],
-                        "target": r["target_id"],
-                        "relation_type": r["relation_type"],
-                        "confidence": r.get("confidence", 0.5),
-                    }
+                    _build_edge_from_relation(r)
                     for r in structural_relations + causal_relations
                 ]
 

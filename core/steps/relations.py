@@ -349,27 +349,95 @@ def prioritize_pairs(
 # CAUSAL CLASSIFICATION (LLM) - Enhanced with semantics
 # =============================================================================
 
-LLM_SYSTEM_PROMPT = """You are an expert geopolitical analyst assessing causal relationships between prediction market events.
+LLM_SYSTEM_PROMPT = """You are an expert analyst evaluating causal relationships between prediction market events.
 
-For each pair of events, analyze the causal relationship and determine:
-1. The relationship type
-2. The direction of causation
-3. Your confidence level
-4. The implied conditional probabilities
+ANALYSIS PROCESS (follow these steps):
 
-RELATION TYPES:
-- DIRECT_CAUSE: A directly causes B (P(B|A) > 80%). Example: Nuclear war -> Recession
-- ENABLING_CONDITION: A makes B possible/more likely (P(B|A) 50-80%). Example: Ceasefire -> Peace treaty
-- INHIBITING_CONDITION: A prevents or reduces likelihood of B. Example: Nuclear detonation -> Ceasefire (inhibits)
-- REQUIRES: B cannot happen without A (P(B|not A) = 0). Example: NATO Article 5 -> US troops in Europe
-- CORRELATED: A and B co-occur but no clear causal direction. Example: Oil spike <-> Inflation
-- INDEPENDENT: No meaningful connection between A and B.
+STEP 1: UNDERSTAND THE EVENTS
+- What is event A asking? What would make it resolve YES?
+- What is event B asking? What would make it resolve YES?
+- Are they about the same topic, related topics, or unrelated?
 
-RULES:
-- Be conservative. Only assign causal relations when the mechanism is clear.
-- Consider the direction: does A cause B, B cause A, or bidirectional?
-- For INHIBITING_CONDITION, P(B|A) should be LOW (event A reduces probability of B)
-- Output valid JSON only, no other text."""
+STEP 2: IDENTIFY CAUSAL MECHANISM
+- If A happens, what is the specific mechanism that affects B?
+- List intermediate steps: A → [mechanism] → B
+- Example: "NATO deploys" → "prevents Russian victory" → "reduces Ukraine capitulation probability"
+- If no clear mechanism exists, it may be CORRELATED or INDEPENDENT
+
+STEP 3: DETERMINE DIRECTION
+- Temporal: Which would happen first?
+- Logical: Does A cause B, B cause A, or mutual influence?
+- CAUTION: Interventions often PREVENT outcomes, not cause them
+  - Example: "Medical treatment" PREVENTS "disease" (INHIBITING)
+  - Example: "NATO deployment" PREVENTS "ally capitulation" (INHIBITING)
+
+STEP 4: CLASSIFY RELATION TYPE
+
+DIRECT_CAUSE: A directly causes B with strong mechanism
+- High confidence in causation
+- Clear, short causal chain
+- Example: "Nuclear war declared" → "Stock market crashes"
+- P(B|A) typically 70-95%
+
+ENABLING_CONDITION: A makes B possible or more likely, but doesn't guarantee it
+- A creates conditions for B
+- Other factors also matter
+- Example: "Peace talks begin" → "Ceasefire achieved"
+- P(B|A) typically 40-70%
+
+INHIBITING_CONDITION: A prevents or reduces likelihood of B
+- A blocks or counteracts B
+- Interventions, preventions, opposites
+- Example: "Military intervention" → "Aggressor victory" (A inhibits B)
+- P(B|A) typically 5-30% (LOW probability when A occurs)
+
+REQUIRES: B cannot happen without A (strong dependency)
+- B is impossible if A doesn't happen first
+- Example: "War declared" → "War casualties" (can't have casualties without war)
+- P(B|¬A) = 0 or near 0
+
+CORRELATED: A and B co-occur but causal direction unclear
+- Both might be caused by a third factor
+- Or bidirectional influence
+- Example: "Oil prices spike" ↔ "Inflation rises"
+- When unsure of direction, use CORRELATED
+
+INDEPENDENT: No meaningful connection
+- Events are about unrelated topics
+- No plausible mechanism
+- Example: "Sports championship outcome" and "Tax policy change"
+
+STEP 5: ESTIMATE P(B|A) AND P(B|¬A)
+
+Guidelines for estimation:
+- P(B|A) = Probability of B given A happens
+- P(B|¬A) = Probability of B given A does NOT happen
+
+Base rate check:
+- If events are independent: P(B|A) ≈ P(B|¬A) ≈ P(B)
+- If A causes B: P(B|A) >> P(B|¬A)
+- If A inhibits B: P(B|A) << P(B|¬A)
+
+Confidence calibration:
+- Very few events have P(B|A) > 85%
+- Most DIRECT_CAUSE relations are 60-80%
+- Be conservative: lower confidence is better than overconfidence
+
+STEP 6: SELF-CRITIQUE
+Ask yourself:
+- Does this mechanism make logical sense?
+- Am I confusing correlation with causation?
+- Is the direction correct? (does A prevent B rather than cause it?)
+- Is my P(B|A) estimate overconfident?
+- What could I be wrong about?
+
+COMMON MISTAKES TO AVOID:
+❌ "Geopolitical crisis → Inflation" (too generic, many confounders)
+❌ "Intervention → Bad outcome" (interventions often PREVENT bad outcomes)
+❌ Assigning P(B|A) > 80% without strong evidence
+❌ Ignoring temporal order (B happens before A, so A can't cause B)
+
+Output valid JSON only, no other text."""
 
 
 def _build_llm_batch_prompt(
@@ -377,7 +445,7 @@ def _build_llm_batch_prompt(
     events_by_id: dict[str, dict],
     semantics_by_id: dict[str, dict],
 ) -> str:
-    """Build prompt for batch LLM classification with semantic info."""
+    """Build prompt for batch LLM classification with semantic info and descriptions."""
     prompt_parts = ["Classify the causal relationships for these event pairs:\n"]
 
     for i, pair in enumerate(pairs):
@@ -388,6 +456,15 @@ def _build_llm_batch_prompt(
 
         prompt_parts.append(f"\n=== PAIR {i + 1} ===")
         prompt_parts.append(f'Event A: "{event_a.get("title", "N/A")}"')
+
+        # Add description (first 200 chars)
+        desc_a = event_a.get("description", "")
+        if desc_a and str(desc_a).strip():
+            truncated = desc_a[:200]
+            prompt_parts.append(
+                f'  Description: "{truncated}{"..." if len(desc_a) > 200 else ""}"'
+            )
+
         if sem_a:
             prompt_parts.append(f"  - Type: {sem_a.get('event_type', 'N/A')}")
             prompt_parts.append(f"  - Subject: {sem_a.get('subject_entity', 'N/A')}")
@@ -398,6 +475,15 @@ def _build_llm_batch_prompt(
                 )
 
         prompt_parts.append(f'Event B: "{event_b.get("title", "N/A")}"')
+
+        # Add description (first 200 chars)
+        desc_b = event_b.get("description", "")
+        if desc_b and str(desc_b).strip():
+            truncated = desc_b[:200]
+            prompt_parts.append(
+                f'  Description: "{truncated}{"..." if len(desc_b) > 200 else ""}"'
+            )
+
         if sem_b:
             prompt_parts.append(f"  - Type: {sem_b.get('event_type', 'N/A')}")
             prompt_parts.append(f"  - Subject: {sem_b.get('subject_entity', 'N/A')}")
@@ -411,12 +497,13 @@ def _build_llm_batch_prompt(
     prompt_parts.append("""[
   {
     "pair": 1,
+    "reasoning": "STEP 2 mechanism: [explain], STEP 3 direction: [explain], STEP 5 estimate: [explain]",
     "relation_type": "DIRECT_CAUSE|ENABLING_CONDITION|INHIBITING_CONDITION|REQUIRES|CORRELATED|INDEPENDENT",
     "direction": "forward|reverse|bidirectional",
     "confidence": 0.0-1.0,
-    "reasoning": "Brief explanation of causal mechanism",
     "P_B_given_A": 0.0-1.0,
-    "P_B_given_not_A": 0.0-1.0
+    "P_B_given_not_A": 0.0-1.0,
+    "self_critique": "Any doubts or alternative interpretations"
   },
   ...
 ]""")
@@ -459,7 +546,7 @@ async def classify_causal(
     events_by_id: dict[str, dict],
     semantics_by_id: dict[str, dict] | None = None,
     max_pairs: int = 500,
-    batch_size: int = 5,
+    batch_size: int = 3,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """
@@ -544,6 +631,7 @@ async def classify_causal(
                                     "P_B_given_not_A": p_b_given_not_a,
                                 },
                                 "classification_method": "llm",
+                                "self_critique": result.get("self_critique", ""),
                             }
                         )
 
@@ -558,6 +646,37 @@ async def classify_causal(
 # =============================================================================
 # GRAPH BUILDING
 # =============================================================================
+
+
+def _build_edge_from_relation(rel: dict) -> dict:
+    """
+    Build graph edge dict from relation dict.
+
+    Transforms relation with source_id/target_id into edge with source/target.
+    Preserves LLM metadata for causal relations.
+
+    Args:
+        rel: Relation dict from classify_structural() or classify_causal()
+
+    Returns:
+        Edge dict ready for graph export
+    """
+    edge = {
+        "source": rel["source_id"],
+        "target": rel["target_id"],
+        "relation_type": rel["relation_type"],
+        "confidence": rel.get("confidence", 0.5),
+        "classification_method": rel.get("classification_method", "unknown"),
+    }
+
+    # Include LLM reasoning metadata for causal relations
+    if rel.get("classification_method") == "llm":
+        edge["direction"] = rel.get("direction", "")
+        edge["reasoning"] = rel.get("reasoning", "")
+        edge["implied_conditional"] = rel.get("implied_conditional", {})
+        edge["self_critique"] = rel.get("self_critique", "")
+
+    return edge
 
 
 def build_relation_graph(
@@ -593,7 +712,7 @@ def build_relation_graph(
             }
         )
 
-    # Combine edges
+    # Combine edges with full metadata
     edges = []
     seen_edges = set()
 
@@ -602,15 +721,7 @@ def build_relation_graph(
         if edge_key in seen_edges:
             continue
         seen_edges.add(edge_key)
-
-        edges.append(
-            {
-                "source": rel["source_id"],
-                "target": rel["target_id"],
-                "relation_type": rel["relation_type"],
-                "confidence": rel.get("confidence", 0.5),
-            }
-        )
+        edges.append(_build_edge_from_relation(rel))
 
     graph = {
         "nodes": nodes,
