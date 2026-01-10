@@ -23,7 +23,8 @@ from core.models import get_llm_client
 
 # Blocking thresholds
 FAISS_TOP_K = 50
-SIMILARITY_THRESHOLD = 0.5
+SIMILARITY_THRESHOLD = 0.55  # Increased from 0.5 for stricter filtering
+REQUIRE_SHARED_ENTITY = True  # Require at least 1 shared entity between events
 
 # Bidirectional classification thresholds
 BIDIRECTIONAL_CORRELATION_THRESHOLD = 0.6  # If both directions > this, it's correlation
@@ -66,12 +67,32 @@ RELATION_LABELS = {
 # =============================================================================
 
 
+def _get_entity_canonicals(
+    event_id: str, entities_by_event: dict[str, list[dict]]
+) -> set[str]:
+    """Extract canonical entity names for an event."""
+    entities = entities_by_event.get(event_id, [])
+    return {e.get("canonical", "").lower() for e in entities if e.get("canonical")}
+
+
+def _has_shared_entities(
+    event_a_id: str,
+    event_b_id: str,
+    entities_by_event: dict[str, list[dict]],
+) -> bool:
+    """Check if two events share at least one entity."""
+    entities_a = _get_entity_canonicals(event_a_id, entities_by_event)
+    entities_b = _get_entity_canonicals(event_b_id, entities_by_event)
+    return bool(entities_a & entities_b)
+
+
 def block_candidate_pairs(
     new_events: list[dict],
     all_events: list[dict],
     new_embeddings: np.ndarray,
     all_embeddings: np.ndarray,
     all_event_ids: list[str],
+    entities_by_event: dict[str, list[dict]] | None = None,
 ) -> list[dict]:
     """
     Find candidate event pairs for relation classification.
@@ -79,12 +100,17 @@ def block_candidate_pairs(
     Uses FAISS for fast approximate nearest neighbor search.
     For incremental mode, finds pairs between new events and all events.
 
+    Filtering criteria:
+    1. Similarity > SIMILARITY_THRESHOLD (0.55)
+    2. If REQUIRE_SHARED_ENTITY is True, must have at least 1 shared entity
+
     Args:
         new_events: Newly added events
         all_events: All events (including new)
         new_embeddings: Embeddings for new events
         all_embeddings: All embeddings
         all_event_ids: IDs corresponding to all_embeddings
+        entities_by_event: Optional dict mapping event_id -> list of entity dicts
 
     Returns:
         List of candidate pairs with similarity scores
@@ -94,7 +120,7 @@ def block_candidate_pairs(
     except ImportError:
         logger.warning("FAISS not available, using brute force search")
         return _brute_force_pairs(
-            new_events, all_embeddings, all_event_ids, new_embeddings
+            new_events, all_embeddings, all_event_ids, new_embeddings, entities_by_event
         )
 
     if len(all_embeddings) == 0 or len(new_embeddings) == 0:
@@ -128,6 +154,11 @@ def block_candidate_pairs(
             if similarity < SIMILARITY_THRESHOLD:
                 continue
 
+            # Check for shared entities if required
+            if REQUIRE_SHARED_ENTITY and entities_by_event:
+                if not _has_shared_entities(event_id, other_id, entities_by_event):
+                    continue
+
             # Create canonical pair key (sorted to avoid duplicates)
             pair_key = tuple(sorted([event_id, other_id]))
             if pair_key in seen:
@@ -142,7 +173,16 @@ def block_candidate_pairs(
                 }
             )
 
-    logger.info(f"Found {len(pairs)} candidate pairs for {len(new_events)} new events")
+    # Log filtering stats
+    if REQUIRE_SHARED_ENTITY and entities_by_event:
+        logger.info(
+            f"Found {len(pairs)} candidate pairs for {len(new_events)} new events "
+            f"(threshold={SIMILARITY_THRESHOLD}, shared_entity=required)"
+        )
+    else:
+        logger.info(
+            f"Found {len(pairs)} candidate pairs for {len(new_events)} new events"
+        )
     return pairs
 
 
@@ -151,6 +191,7 @@ def _brute_force_pairs(
     all_embeddings: np.ndarray,
     all_event_ids: list[str],
     new_embeddings: np.ndarray,
+    entities_by_event: dict[str, list[dict]] | None = None,
 ) -> list[dict]:
     """Fallback brute force pair finding."""
     pairs = []
@@ -166,6 +207,11 @@ def _brute_force_pairs(
             other_id = all_event_ids[j]
             if event_id == other_id:
                 continue
+
+            # Check for shared entities if required
+            if REQUIRE_SHARED_ENTITY and entities_by_event:
+                if not _has_shared_entities(event_id, other_id, entities_by_event):
+                    continue
 
             pairs.append(
                 {

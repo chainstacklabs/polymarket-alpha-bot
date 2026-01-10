@@ -244,12 +244,19 @@ async def run_async(
             existing_events = state.get_all_events()
             all_events_for_pairs = existing_events + nlp_events
 
+            # Build entities lookup for shared entity filtering
+            from core.steps.entities import get_entities_by_event
+
+            all_entities = state.get_all_entities()
+            entities_by_event = get_entities_by_event(all_entities + entities)
+
             candidate_pairs = block_candidate_pairs(
                 new_events=nlp_events,
                 all_events=all_events_for_pairs,
                 new_embeddings=new_embeddings,
                 all_embeddings=all_embeddings,
                 all_event_ids=all_event_ids,
+                entities_by_event=entities_by_event,
             )
             tracker.update_details(f"Found {len(candidate_pairs)} pairs")
             logger.info(f"Found {len(candidate_pairs)} candidate pairs")
