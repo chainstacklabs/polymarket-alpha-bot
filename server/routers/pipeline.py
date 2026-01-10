@@ -45,35 +45,12 @@ def load_manifest() -> dict:
 
 
 def get_step_info() -> list[dict[str, Any]]:
-    """Get info about all pipeline steps."""
-    from cli.script_registry import PIPELINE_ORDER, SCRIPTS
+    """Get info about all pipeline steps.
 
-    steps = []
-    for step_id in PIPELINE_ORDER:
-        script = SCRIPTS[step_id]
-        dir_name = f"{script.step}_{script.name}"
-        step_dir = DATA_DIR / dir_name
-
-        latest_run = None
-        if step_dir.exists():
-            runs = sorted(
-                [d for d in step_dir.iterdir() if d.is_dir() and d.name[0].isdigit()],
-                reverse=True,
-            )
-            if runs:
-                latest_run = runs[0].name
-
-        steps.append(
-            {
-                "step": step_id,
-                "name": script.name,
-                "description": script.description,
-                "latest_run": latest_run,
-                "has_data": latest_run is not None,
-            }
-        )
-
-    return steps
+    Note: Returns empty list as CLI was simplified and script registry removed.
+    Step progress is now tracked via production pipeline state instead.
+    """
+    return []
 
 
 @router.get("/status")
