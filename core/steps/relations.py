@@ -25,6 +25,10 @@ from core.models import get_llm_client
 FAISS_TOP_K = 50
 SIMILARITY_THRESHOLD = 0.5
 
+# Bidirectional classification thresholds
+BIDIRECTIONAL_CORRELATION_THRESHOLD = 0.6  # If both directions > this, it's correlation
+BIDIRECTIONAL_DIRECTION_MARGIN = 0.2  # Winner must exceed loser by this margin
+
 # Relation types
 STRUCTURAL_RELATIONS = [
     "TIMEFRAME_VARIANT",
@@ -541,6 +545,238 @@ def _parse_llm_batch_response(response: str, num_pairs: int) -> list[dict]:
     return results
 
 
+def _create_reverse_pair(pair: dict) -> dict:
+    """Create a reversed pair (swap A and B) for bidirectional classification."""
+    return {
+        "event_a_id": pair["event_b_id"],
+        "event_b_id": pair["event_a_id"],
+        "similarity": pair.get("similarity", 0.5),
+    }
+
+
+def _resolve_bidirectional(
+    forward_result: dict | None,
+    reverse_result: dict | None,
+    original_pair: dict,
+) -> dict | None:
+    """
+    Resolve bidirectional classification results into a single relation.
+
+    Logic:
+    1. If both directions have high confidence (>0.6): It's correlation, not causation
+    2. If forward wins by margin (>0.2): Use forward direction (A → B)
+    3. If reverse wins by margin (>0.2): Swap to reverse direction (B → A)
+    4. Otherwise: Weak signal, treat as correlation or skip
+
+    Args:
+        forward_result: LLM result for A → B classification
+        reverse_result: LLM result for B → A classification
+        original_pair: Original pair dict with event_a_id, event_b_id
+
+    Returns:
+        Resolved relation dict, or None if no clear relationship
+    """
+    # Handle missing results
+    if not forward_result and not reverse_result:
+        return None
+
+    # Get confidence scores (default to 0 if missing)
+    forward_conf = float(forward_result.get("confidence", 0)) if forward_result else 0
+    reverse_conf = float(reverse_result.get("confidence", 0)) if reverse_result else 0
+
+    # Get relation types
+    forward_type = (
+        forward_result.get("relation_type", "INDEPENDENT")
+        if forward_result
+        else "INDEPENDENT"
+    )
+    reverse_type = (
+        reverse_result.get("relation_type", "INDEPENDENT")
+        if reverse_result
+        else "INDEPENDENT"
+    )
+
+    # Skip if both are INDEPENDENT
+    if forward_type == "INDEPENDENT" and reverse_type == "INDEPENDENT":
+        return None
+
+    # Case 1: Both directions have high confidence → correlation (not directional causation)
+    # This catches "reversed causality" errors where the LLM sees a relationship but can't
+    # determine direction - a sign that it's actually correlation or mutual influence.
+    if (
+        forward_conf > BIDIRECTIONAL_CORRELATION_THRESHOLD
+        and reverse_conf > BIDIRECTIONAL_CORRELATION_THRESHOLD
+    ):
+        # Use the lower confidence as our correlation confidence (conservative)
+        correlation_conf = min(forward_conf, reverse_conf)
+
+        # Extract probability estimates from both directions
+        # Note: LLM returns P_B_given_A at top level, not nested in implied_conditional
+        fwd_p_b_given_a = (
+            float(forward_result.get("P_B_given_A", 0.5)) if forward_result else 0.5
+        )
+        fwd_p_b_given_not_a = (
+            float(forward_result.get("P_B_given_not_A", 0.5)) if forward_result else 0.5
+        )
+        rev_p_b_given_a = (
+            float(reverse_result.get("P_B_given_A", 0.5)) if reverse_result else 0.5
+        )
+        rev_p_b_given_not_a = (
+            float(reverse_result.get("P_B_given_not_A", 0.5)) if reverse_result else 0.5
+        )
+
+        return {
+            "source_id": original_pair["event_a_id"],
+            "target_id": original_pair["event_b_id"],
+            "relation_type": "CORRELATED",
+            "confidence": correlation_conf,
+            "direction": "bidirectional",
+            "reasoning": (
+                f"Bidirectional check: Both A→B ({forward_conf:.2f}) and B→A ({reverse_conf:.2f}) "
+                f"scored high, indicating correlation rather than directional causation. "
+                f"Forward reasoning: {forward_result.get('reasoning', 'N/A')[:200] if forward_result else 'N/A'}"
+            ),
+            "implied_conditional": {
+                "P_B_given_A": fwd_p_b_given_a,
+                "P_B_given_not_A": fwd_p_b_given_not_a,
+                # Reverse result's P_B_given_A is P(original_A | original_B) = our P_A_given_B
+                "P_A_given_B": rev_p_b_given_a,
+                "P_A_given_not_B": rev_p_b_given_not_a,
+            },
+            "classification_method": "llm_bidirectional",
+            "self_critique": (
+                f"Converted to CORRELATED due to high bidirectional confidence. "
+                f"Original types: forward={forward_type}, reverse={reverse_type}"
+            ),
+        }
+
+    # Case 2: Forward direction clearly wins
+    if forward_conf > reverse_conf + BIDIRECTIONAL_DIRECTION_MARGIN:
+        if forward_type == "INDEPENDENT":
+            return None
+
+        # Extract probabilities from top-level LLM response fields
+        fwd_p_b_a = (
+            float(forward_result.get("P_B_given_A", 0.5)) if forward_result else 0.5
+        )
+        fwd_p_b_not_a = (
+            float(forward_result.get("P_B_given_not_A", 0.5)) if forward_result else 0.5
+        )
+        rev_p_b_a = (
+            float(reverse_result.get("P_B_given_A", 0.5)) if reverse_result else 0.5
+        )
+        rev_p_b_not_a = (
+            float(reverse_result.get("P_B_given_not_A", 0.5)) if reverse_result else 0.5
+        )
+
+        return {
+            "source_id": original_pair["event_a_id"],
+            "target_id": original_pair["event_b_id"],
+            "relation_type": forward_type,
+            "confidence": forward_conf,
+            "direction": "forward",
+            "reasoning": forward_result.get("reasoning", "") if forward_result else "",
+            "implied_conditional": {
+                "P_B_given_A": fwd_p_b_a,
+                "P_B_given_not_A": fwd_p_b_not_a,
+                "P_A_given_B": rev_p_b_a,
+                "P_A_given_not_B": rev_p_b_not_a,
+            },
+            "classification_method": "llm_bidirectional",
+            "self_critique": (
+                f"Forward direction confirmed ({forward_conf:.2f} vs reverse {reverse_conf:.2f}). "
+                f"{forward_result.get('self_critique', '') if forward_result else ''}"
+            ),
+        }
+
+    # Case 3: Reverse direction clearly wins → swap source and target
+    if reverse_conf > forward_conf + BIDIRECTIONAL_DIRECTION_MARGIN:
+        if reverse_type == "INDEPENDENT":
+            return None
+
+        # Extract probabilities from top-level LLM response fields
+        # Note: When swapping direction, the reverse result's P_B_given_A becomes our P_B_given_A
+        # because in the reverse prompt, event_b was "A" and event_a was "B"
+        rev_p_b_a = (
+            float(reverse_result.get("P_B_given_A", 0.5)) if reverse_result else 0.5
+        )
+        rev_p_b_not_a = (
+            float(reverse_result.get("P_B_given_not_A", 0.5)) if reverse_result else 0.5
+        )
+        fwd_p_b_a = (
+            float(forward_result.get("P_B_given_A", 0.5)) if forward_result else 0.5
+        )
+        fwd_p_b_not_a = (
+            float(forward_result.get("P_B_given_not_A", 0.5)) if forward_result else 0.5
+        )
+
+        return {
+            # SWAP source and target
+            "source_id": original_pair["event_b_id"],
+            "target_id": original_pair["event_a_id"],
+            "relation_type": reverse_type,
+            "confidence": reverse_conf,
+            "direction": "forward",  # Now it's forward from the new source
+            "reasoning": (
+                f"Direction corrected via bidirectional check. "
+                f"{reverse_result.get('reasoning', '') if reverse_result else ''}"
+            ),
+            "implied_conditional": {
+                "P_B_given_A": rev_p_b_a,
+                "P_B_given_not_A": rev_p_b_not_a,
+                "P_A_given_B": fwd_p_b_a,
+                "P_A_given_not_B": fwd_p_b_not_a,
+            },
+            "classification_method": "llm_bidirectional",
+            "self_critique": (
+                f"Reversed direction: B→A ({reverse_conf:.2f}) beat A→B ({forward_conf:.2f}). "
+                f"{reverse_result.get('self_critique', '') if reverse_result else ''}"
+            ),
+        }
+
+    # Case 4: No clear winner and at least one is non-INDEPENDENT
+    # Treat as weak correlation or skip
+    if forward_type != "INDEPENDENT" or reverse_type != "INDEPENDENT":
+        # Use the higher confidence result but mark as CORRELATED (uncertain direction)
+        if forward_conf >= reverse_conf and forward_type != "INDEPENDENT":
+            base = forward_result
+            other = reverse_result
+        elif reverse_type != "INDEPENDENT":
+            base = reverse_result
+            other = forward_result
+        else:
+            return None
+
+        # Extract probabilities from top-level LLM response fields
+        base_p_b_a = float(base.get("P_B_given_A", 0.5)) if base else 0.5
+        base_p_b_not_a = float(base.get("P_B_given_not_A", 0.5)) if base else 0.5
+        other_p_b_a = float(other.get("P_B_given_A", 0.5)) if other else 0.5
+        other_p_b_not_a = float(other.get("P_B_given_not_A", 0.5)) if other else 0.5
+
+        return {
+            "source_id": original_pair["event_a_id"],
+            "target_id": original_pair["event_b_id"],
+            "relation_type": "CORRELATED",
+            "confidence": max(forward_conf, reverse_conf)
+            * 0.8,  # Reduce for ambiguous direction
+            "direction": "bidirectional",
+            "reasoning": (
+                f"Direction ambiguous (forward: {forward_conf:.2f}, reverse: {reverse_conf:.2f}). "
+                f"Treating as correlation. {base.get('reasoning', '')[:200] if base else ''}"
+            ),
+            "implied_conditional": {
+                "P_B_given_A": base_p_b_a,
+                "P_B_given_not_A": base_p_b_not_a,
+                "P_A_given_B": other_p_b_a,
+                "P_A_given_not_B": other_p_b_not_a,
+            },
+            "classification_method": "llm_bidirectional",
+            "self_critique": f"Ambiguous direction, converted to CORRELATED. Forward type: {forward_type}, Reverse type: {reverse_type}",
+        }
+
+    return None
+
+
 async def classify_causal(
     pairs: list[dict],
     events_by_id: dict[str, dict],
@@ -550,7 +786,13 @@ async def classify_causal(
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """
-    Classify causal relations using LLM with semantics-based prioritization.
+    Classify causal relations using LLM with bidirectional verification.
+
+    Uses bidirectional classification to prevent reversed causality errors:
+    - Classifies both A→B and B→A directions for each pair
+    - If both directions score high (>0.6), treats as CORRELATED (not directional)
+    - If one direction clearly wins (>0.2 margin), uses that direction
+    - Stores both P(B|A) and P(A|B) conditional probability estimates
 
     Args:
         pairs: Candidate pairs (already filtered by blocking)
@@ -563,6 +805,8 @@ async def classify_causal(
     Returns:
         List of classified causal relations with implied conditionals
     """
+    import asyncio
+
     llm = get_llm_client()
     semantics_by_id = semantics_by_id or {}
 
@@ -578,11 +822,14 @@ async def classify_causal(
         return []
 
     logger.info(
-        f"Classifying {len(to_classify)} pairs with LLM (batch size {batch_size})..."
+        f"Classifying {len(to_classify)} pairs bidirectionally with LLM "
+        f"(batch size {batch_size}, 2x calls per batch)..."
     )
 
     classified = []
     total_batches = (len(to_classify) + batch_size - 1) // batch_size
+    direction_corrections = 0
+    correlation_conversions = 0
 
     for batch_idx in range(0, len(to_classify), batch_size):
         batch = to_classify[batch_idx : batch_idx + batch_size]
@@ -590,56 +837,101 @@ async def classify_causal(
 
         # Report progress every 5 batches
         if batch_num % 5 == 0 or batch_num == 1:
-            progress_msg = f"LLM batch {batch_num}/{total_batches} ({len(classified)} relations found)"
+            progress_msg = (
+                f"Bidirectional batch {batch_num}/{total_batches} "
+                f"({len(classified)} relations, {direction_corrections} dir corrections, "
+                f"{correlation_conversions} → CORRELATED)"
+            )
             logger.debug(progress_msg)
             if progress_callback:
                 progress_callback(progress_msg)
 
         try:
-            prompt = _build_llm_batch_prompt(batch, events_by_id, semantics_by_id)
-            messages = [
+            # Create forward and reverse batches
+            forward_batch = batch
+            reverse_batch = [_create_reverse_pair(p) for p in batch]
+
+            # Build prompts for both directions
+            forward_prompt = _build_llm_batch_prompt(
+                forward_batch, events_by_id, semantics_by_id
+            )
+            reverse_prompt = _build_llm_batch_prompt(
+                reverse_batch, events_by_id, semantics_by_id
+            )
+
+            # Execute both LLM calls concurrently for efficiency
+            forward_messages = [
                 {"role": "system", "content": LLM_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": forward_prompt},
             ]
-            response = await llm.complete(messages, temperature=0.1)
-            parsed = _parse_llm_batch_response(response, len(batch))
+            reverse_messages = [
+                {"role": "system", "content": LLM_SYSTEM_PROMPT},
+                {"role": "user", "content": reverse_prompt},
+            ]
 
+            forward_response, reverse_response = await asyncio.gather(
+                llm.complete(forward_messages, temperature=0.1),
+                llm.complete(reverse_messages, temperature=0.1),
+                return_exceptions=True,
+            )
+
+            # Handle potential exceptions from gather
+            forward_str: str = ""
+            reverse_str: str = ""
+            if isinstance(forward_response, Exception):
+                logger.warning(f"Forward LLM call failed: {forward_response}")
+            else:
+                forward_str = str(forward_response)
+            if isinstance(reverse_response, Exception):
+                logger.warning(f"Reverse LLM call failed: {reverse_response}")
+            else:
+                reverse_str = str(reverse_response)
+
+            # Parse both responses
+            forward_parsed = _parse_llm_batch_response(forward_str, len(batch))
+            reverse_parsed = _parse_llm_batch_response(reverse_str, len(batch))
+
+            # Resolve each pair using bidirectional logic
             for i, pair in enumerate(batch):
-                if i < len(parsed):
-                    result = parsed[i]
-                    relation_type = result.get("relation_type", "INDEPENDENT")
+                forward_result = forward_parsed[i] if i < len(forward_parsed) else None
+                reverse_result = reverse_parsed[i] if i < len(reverse_parsed) else None
 
-                    # Validate relation type
-                    if relation_type not in CAUSAL_RELATIONS:
-                        relation_type = "INDEPENDENT"
+                # Validate relation types
+                if forward_result:
+                    rel_type = forward_result.get("relation_type", "INDEPENDENT")
+                    if rel_type not in CAUSAL_RELATIONS:
+                        forward_result["relation_type"] = "INDEPENDENT"
 
-                    if relation_type != "INDEPENDENT":
-                        confidence = float(result.get("confidence", 0.7))
-                        p_b_given_a = float(result.get("P_B_given_A", 0.5))
-                        p_b_given_not_a = float(result.get("P_B_given_not_A", 0.5))
+                if reverse_result:
+                    rel_type = reverse_result.get("relation_type", "INDEPENDENT")
+                    if rel_type not in CAUSAL_RELATIONS:
+                        reverse_result["relation_type"] = "INDEPENDENT"
 
-                        classified.append(
-                            {
-                                "source_id": pair["event_a_id"],
-                                "target_id": pair["event_b_id"],
-                                "relation_type": relation_type,
-                                "confidence": confidence,
-                                "direction": result.get("direction", "forward"),
-                                "reasoning": result.get("reasoning", ""),
-                                "implied_conditional": {
-                                    "P_B_given_A": p_b_given_a,
-                                    "P_B_given_not_A": p_b_given_not_a,
-                                },
-                                "classification_method": "llm",
-                                "self_critique": result.get("self_critique", ""),
-                            }
-                        )
+                # Resolve using bidirectional check
+                resolved = _resolve_bidirectional(forward_result, reverse_result, pair)
+
+                if resolved:
+                    classified.append(resolved)
+
+                    # Track corrections for logging
+                    if resolved.get("classification_method") == "llm_bidirectional":
+                        if "Direction corrected" in resolved.get("reasoning", ""):
+                            direction_corrections += 1
+                        if resolved["relation_type"] == "CORRELATED" and (
+                            "Bidirectional check" in resolved.get("reasoning", "")
+                            or "Ambiguous direction" in resolved.get("reasoning", "")
+                        ):
+                            correlation_conversions += 1
 
         except Exception as e:
-            logger.warning(f"LLM batch classification failed: {e}")
+            logger.warning(f"Bidirectional batch classification failed: {e}")
             continue
 
-    logger.info(f"Classified {len(classified)} causal relations")
+    logger.info(
+        f"Classified {len(classified)} causal relations with bidirectional check: "
+        f"{direction_corrections} direction corrections, "
+        f"{correlation_conversions} converted to CORRELATED"
+    )
     return classified
 
 
@@ -670,7 +962,7 @@ def _build_edge_from_relation(rel: dict) -> dict:
     }
 
     # Include LLM reasoning metadata for causal relations
-    if rel.get("classification_method") == "llm":
+    if rel.get("classification_method") in ("llm", "llm_bidirectional"):
         edge["direction"] = rel.get("direction", "")
         edge["reasoning"] = rel.get("reasoning", "")
         edge["implied_conditional"] = rel.get("implied_conditional", {})
