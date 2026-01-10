@@ -48,6 +48,71 @@ CAUSAL_RELATIONS = [
     "INDEPENDENT",
 ]
 
+# Confounding variable detection - groups of entities that share common causes
+# When a pair has entities from the same confounder group, the LLM is warned
+CONFOUNDERS = {
+    "trump_admin": {
+        "entities": [
+            "trump",
+            "donald trump",
+            "elon",
+            "elon musk",
+            "doge",
+            "musk",
+            "administration",
+            "cabinet",
+            "white house",
+            "executive order",
+        ],
+        "warning": "Both events depend on Trump administration actions/decisions",
+    },
+    "ukraine_conflict": {
+        "entities": [
+            "ukraine",
+            "russia",
+            "nato",
+            "zelensky",
+            "putin",
+            "kyiv",
+            "moscow",
+            "crimea",
+            "donbas",
+            "ceasefire",
+        ],
+        "warning": "Both events are outcomes of the ongoing Ukraine conflict",
+    },
+    "macro_economy": {
+        "entities": [
+            "inflation",
+            "deficit",
+            "fed",
+            "federal reserve",
+            "interest rate",
+            "recession",
+            "gdp",
+            "unemployment",
+            "treasury",
+            "fiscal",
+        ],
+        "warning": "Both events respond to macroeconomic conditions (common driver)",
+    },
+    "us_elections": {
+        "entities": [
+            "election",
+            "vote",
+            "ballot",
+            "campaign",
+            "democrat",
+            "republican",
+            "congress",
+            "senate",
+            "house",
+            "midterm",
+        ],
+        "warning": "Both events are influenced by US electoral dynamics",
+    },
+}
+
 # GLiNER2 relation labels
 RELATION_LABELS = {
     "causes": "A causes or leads to B happening",
@@ -84,6 +149,53 @@ def _has_shared_entities(
     entities_a = _get_entity_canonicals(event_a_id, entities_by_event)
     entities_b = _get_entity_canonicals(event_b_id, entities_by_event)
     return bool(entities_a & entities_b)
+
+
+def _detect_confounders(
+    event_a: dict,
+    event_b: dict,
+    entities_by_event: dict[str, list[dict]] | None = None,
+) -> list[str]:
+    """
+    Detect potential confounding variables between two events.
+
+    Checks if both events share entities from known confounder groups
+    (e.g., Trump administration, Ukraine conflict, macroeconomic factors).
+
+    Args:
+        event_a: First event dict (with 'id' and 'title')
+        event_b: Second event dict (with 'id' and 'title')
+        entities_by_event: Optional dict mapping event_id -> list of entity dicts
+
+    Returns:
+        List of warning messages for detected confounders
+    """
+    warnings = []
+
+    # Collect all text to check for confounder entities
+    text_a = event_a.get("title", "").lower()
+    text_b = event_b.get("title", "").lower()
+
+    # Add entity canonicals if available
+    if entities_by_event:
+        entities_a = _get_entity_canonicals(event_a.get("id", ""), entities_by_event)
+        entities_b = _get_entity_canonicals(event_b.get("id", ""), entities_by_event)
+        text_a = f"{text_a} {' '.join(entities_a)}"
+        text_b = f"{text_b} {' '.join(entities_b)}"
+
+    # Check each confounder group
+    for confounder_name, confounder_data in CONFOUNDERS.items():
+        entities = confounder_data["entities"]
+        warning = confounder_data["warning"]
+
+        # Check if both events have entities from this confounder group
+        a_has_confounder = any(entity in text_a for entity in entities)
+        b_has_confounder = any(entity in text_b for entity in entities)
+
+        if a_has_confounder and b_has_confounder:
+            warnings.append(f"⚠️ CONFOUNDER ({confounder_name}): {warning}")
+
+    return warnings
 
 
 def block_candidate_pairs(
@@ -494,8 +606,9 @@ def _build_llm_batch_prompt(
     pairs: list[dict],
     events_by_id: dict[str, dict],
     semantics_by_id: dict[str, dict],
+    entities_by_event: dict[str, list[dict]] | None = None,
 ) -> str:
-    """Build prompt for batch LLM classification with semantic info and descriptions."""
+    """Build prompt for batch LLM classification with semantic info, descriptions, and confounder warnings."""
     prompt_parts = ["Classify the causal relationships for these event pairs:\n"]
 
     for i, pair in enumerate(pairs):
@@ -505,6 +618,14 @@ def _build_llm_batch_prompt(
         sem_b = semantics_by_id.get(pair["event_b_id"], {})
 
         prompt_parts.append(f"\n=== PAIR {i + 1} ===")
+
+        # Check for confounders and add warnings at the top of each pair
+        confounder_warnings = _detect_confounders(event_a, event_b, entities_by_event)
+        if confounder_warnings:
+            prompt_parts.append("\n".join(confounder_warnings))
+            prompt_parts.append(
+                "Consider: Is this CAUSAL or just CORRELATED due to shared context?\n"
+            )
         prompt_parts.append(f'Event A: "{event_a.get("title", "N/A")}"')
 
         # Add description (first 200 chars)
@@ -827,6 +948,7 @@ async def classify_causal(
     pairs: list[dict],
     events_by_id: dict[str, dict],
     semantics_by_id: dict[str, dict] | None = None,
+    entities_by_event: dict[str, list[dict]] | None = None,
     max_pairs: int = 500,
     batch_size: int = 3,
     progress_callback: Callable[[str], None] | None = None,
@@ -839,11 +961,13 @@ async def classify_causal(
     - If both directions score high (>0.6), treats as CORRELATED (not directional)
     - If one direction clearly wins (>0.2 margin), uses that direction
     - Stores both P(B|A) and P(A|B) conditional probability estimates
+    - Warns the LLM about potential confounding variables (shared context)
 
     Args:
         pairs: Candidate pairs (already filtered by blocking)
         events_by_id: Event lookup dict
         semantics_by_id: Optional semantic info per event (from semantics step)
+        entities_by_event: Optional dict mapping event_id -> list of entity dicts for confounder detection
         max_pairs: Maximum pairs to classify (LLM cost control)
         batch_size: Pairs per LLM batch request
         progress_callback: Optional callback(message: str) to report progress
@@ -897,12 +1021,12 @@ async def classify_causal(
             forward_batch = batch
             reverse_batch = [_create_reverse_pair(p) for p in batch]
 
-            # Build prompts for both directions
+            # Build prompts for both directions (with confounder warnings)
             forward_prompt = _build_llm_batch_prompt(
-                forward_batch, events_by_id, semantics_by_id
+                forward_batch, events_by_id, semantics_by_id, entities_by_event
             )
             reverse_prompt = _build_llm_batch_prompt(
-                reverse_batch, events_by_id, semantics_by_id
+                reverse_batch, events_by_id, semantics_by_id, entities_by_event
             )
 
             # Execute both LLM calls concurrently for efficiency

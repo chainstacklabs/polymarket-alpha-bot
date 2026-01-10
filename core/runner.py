@@ -306,6 +306,7 @@ async def run_async(
                 pairs_for_causal,
                 events_by_id,
                 semantics_by_id=semantics_for_pairs,
+                entities_by_event=entities_by_event,
                 max_pairs=MAX_LLM_PAIRS,
                 progress_callback=tracker.update_details,
             )
