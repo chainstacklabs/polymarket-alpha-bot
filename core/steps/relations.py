@@ -10,6 +10,7 @@ Combines logic from:
 For production pipeline with incremental support.
 """
 
+import asyncio
 from typing import Callable
 
 import numpy as np
@@ -29,6 +30,12 @@ REQUIRE_SHARED_ENTITY = True  # Require at least 1 shared entity between events
 # Bidirectional classification thresholds
 BIDIRECTIONAL_CORRELATION_THRESHOLD = 0.6  # If both directions > this, it's correlation
 BIDIRECTIONAL_DIRECTION_MARGIN = 0.2  # Winner must exceed loser by this margin
+
+# Performance optimization thresholds
+CONCURRENT_BATCHES = 4  # Number of batch requests to run in parallel
+PRE_FILTER_HIGH_SIM = 0.95  # Auto-classify as CORRELATED if similarity > this
+PRE_FILTER_LOW_SIM = 0.58  # Auto-classify as INDEPENDENT if similarity < this
+SKIP_BIDIRECTIONAL_CONFIDENCE = 0.85  # Skip reverse check if forward confidence > this
 
 # Relation types
 STRUCTURAL_RELATIONS = [
@@ -721,6 +728,62 @@ def _create_reverse_pair(pair: dict) -> dict:
     }
 
 
+def _pre_filter_pair(pair: dict) -> dict | None:
+    """
+    Pre-filter obvious cases based on similarity to skip LLM calls.
+
+    High similarity (>0.95): Likely CORRELATED (same topic)
+    Low similarity (<0.58): Likely INDEPENDENT (no relation)
+
+    Args:
+        pair: Candidate pair with similarity score
+
+    Returns:
+        Pre-classified relation dict, or None if LLM classification needed
+    """
+    similarity = pair.get("similarity", 0.5)
+
+    # Very high similarity = likely same topic, correlation not causation
+    if similarity > PRE_FILTER_HIGH_SIM:
+        return {
+            "source_id": pair["event_a_id"],
+            "target_id": pair["event_b_id"],
+            "relation_type": "CORRELATED",
+            "confidence": 0.9,
+            "direction": "bidirectional",
+            "reasoning": f"Auto-classified: Very high similarity ({similarity:.2f}) suggests same-topic correlation",
+            "implied_conditional": {
+                "P_B_given_A": 0.6,
+                "P_B_given_not_A": 0.4,
+                "P_A_given_B": 0.6,
+                "P_A_given_not_B": 0.4,
+            },
+            "classification_method": "auto_high_sim",
+            "self_critique": "Pre-filtered due to extreme similarity - may miss nuanced causal relations",
+        }
+
+    # Low similarity (but above blocking threshold) = likely independent
+    if similarity < PRE_FILTER_LOW_SIM:
+        return {
+            "source_id": pair["event_a_id"],
+            "target_id": pair["event_b_id"],
+            "relation_type": "INDEPENDENT",
+            "confidence": 0.7,
+            "direction": "none",
+            "reasoning": f"Auto-classified: Low similarity ({similarity:.2f}) suggests no meaningful relation",
+            "implied_conditional": {
+                "P_B_given_A": 0.5,
+                "P_B_given_not_A": 0.5,
+                "P_A_given_B": 0.5,
+                "P_A_given_not_B": 0.5,
+            },
+            "classification_method": "auto_low_sim",
+            "self_critique": "Pre-filtered due to low similarity - may miss weak causal connections",
+        }
+
+    return None  # Needs LLM classification
+
+
 def _resolve_bidirectional(
     forward_result: dict | None,
     reverse_result: dict | None,
@@ -944,17 +1007,143 @@ def _resolve_bidirectional(
     return None
 
 
+async def _process_batch_with_semaphore(
+    semaphore: asyncio.Semaphore,
+    batch: list[dict],
+    events_by_id: dict[str, dict],
+    semantics_by_id: dict[str, dict],
+    entities_by_event: dict[str, list[dict]] | None,
+    llm,
+    skip_bidirectional_on_high_conf: bool = True,
+) -> list[dict]:
+    """
+    Process a single batch with semaphore rate limiting.
+
+    Implements optimization 5d: Skip reverse check if forward confidence > 0.85
+    for clear directional relations (ENABLING_CONDITION, INHIBITING_CONDITION).
+    """
+    async with semaphore:
+        results = []
+
+        # Create forward batch
+        forward_batch = batch
+        forward_prompt = _build_llm_batch_prompt(
+            forward_batch, events_by_id, semantics_by_id, entities_by_event
+        )
+        forward_messages = [
+            {"role": "system", "content": LLM_SYSTEM_PROMPT},
+            {"role": "user", "content": forward_prompt},
+        ]
+
+        # First, get forward results
+        try:
+            forward_response = await llm.complete(forward_messages, temperature=0.1)
+            forward_str = str(forward_response)
+        except Exception as e:
+            logger.warning(f"Forward LLM call failed: {e}")
+            forward_str = ""
+
+        forward_parsed = _parse_llm_batch_response(forward_str, len(batch))
+
+        # Determine which pairs need reverse check
+        pairs_needing_reverse = []
+        forward_results_map = {}  # pair index -> forward result
+
+        for i, pair in enumerate(batch):
+            forward_result = forward_parsed[i] if i < len(forward_parsed) else None
+            forward_results_map[i] = forward_result
+
+            # Validate forward relation type
+            if forward_result:
+                rel_type = forward_result.get("relation_type", "INDEPENDENT")
+                if rel_type not in CAUSAL_RELATIONS:
+                    forward_result["relation_type"] = "INDEPENDENT"
+
+                # Optimization 5d: Skip reverse for high-confidence directional relations
+                forward_conf = float(forward_result.get("confidence", 0))
+                forward_type = forward_result.get("relation_type", "INDEPENDENT")
+
+                if (
+                    skip_bidirectional_on_high_conf
+                    and forward_conf > SKIP_BIDIRECTIONAL_CONFIDENCE
+                    and forward_type
+                    in ["ENABLING_CONDITION", "INHIBITING_CONDITION", "DIRECT_CAUSE"]
+                ):
+                    # Skip reverse check - use forward result directly
+                    results.append(
+                        {
+                            "pair": pair,
+                            "forward": forward_result,
+                            "reverse": None,
+                            "skipped_reverse": True,
+                        }
+                    )
+                    continue
+
+            # This pair needs reverse check
+            pairs_needing_reverse.append((i, pair))
+
+        # Get reverse results only for pairs that need them
+        if pairs_needing_reverse:
+            reverse_batch = [_create_reverse_pair(p) for _, p in pairs_needing_reverse]
+            reverse_prompt = _build_llm_batch_prompt(
+                reverse_batch, events_by_id, semantics_by_id, entities_by_event
+            )
+            reverse_messages = [
+                {"role": "system", "content": LLM_SYSTEM_PROMPT},
+                {"role": "user", "content": reverse_prompt},
+            ]
+
+            try:
+                reverse_response = await llm.complete(reverse_messages, temperature=0.1)
+                reverse_str = str(reverse_response)
+            except Exception as e:
+                logger.warning(f"Reverse LLM call failed: {e}")
+                reverse_str = ""
+
+            reverse_parsed = _parse_llm_batch_response(
+                reverse_str, len(pairs_needing_reverse)
+            )
+
+            # Map reverse results back to original indices
+            for j, (orig_idx, pair) in enumerate(pairs_needing_reverse):
+                reverse_result = reverse_parsed[j] if j < len(reverse_parsed) else None
+
+                # Validate reverse relation type
+                if reverse_result:
+                    rel_type = reverse_result.get("relation_type", "INDEPENDENT")
+                    if rel_type not in CAUSAL_RELATIONS:
+                        reverse_result["relation_type"] = "INDEPENDENT"
+
+                results.append(
+                    {
+                        "pair": pair,
+                        "forward": forward_results_map[orig_idx],
+                        "reverse": reverse_result,
+                        "skipped_reverse": False,
+                    }
+                )
+
+        return results
+
+
 async def classify_causal(
     pairs: list[dict],
     events_by_id: dict[str, dict],
     semantics_by_id: dict[str, dict] | None = None,
     entities_by_event: dict[str, list[dict]] | None = None,
-    max_pairs: int = 500,
-    batch_size: int = 3,
+    max_pairs: int = 10000,
+    batch_size: int = 10,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """
     Classify causal relations using LLM with bidirectional verification.
+
+    Performance optimizations (fix #5 from quality-review.local.md):
+    - Batch size increased from 3 to 10 (3x fewer API calls)
+    - Concurrent batch processing with semaphore (4 parallel batches)
+    - Pre-filtering of obvious cases by similarity (skip LLM for extremes)
+    - Skip bidirectional check for high-confidence directional relations
 
     Uses bidirectional classification to prevent reversed causality errors:
     - Classifies both A→B and B→A directions for each pair
@@ -969,14 +1158,12 @@ async def classify_causal(
         semantics_by_id: Optional semantic info per event (from semantics step)
         entities_by_event: Optional dict mapping event_id -> list of entity dicts for confounder detection
         max_pairs: Maximum pairs to classify (LLM cost control)
-        batch_size: Pairs per LLM batch request
+        batch_size: Pairs per LLM batch request (default 10)
         progress_callback: Optional callback(message: str) to report progress
 
     Returns:
         List of classified causal relations with implied conditionals
     """
-    import asyncio
-
     llm = get_llm_client()
     semantics_by_id = semantics_by_id or {}
 
@@ -991,92 +1178,135 @@ async def classify_causal(
     if not to_classify:
         return []
 
+    # ==========================================================================
+    # OPTIMIZATION 5c: Pre-filter obvious cases before LLM
+    # ==========================================================================
+    pre_filtered = []
+    llm_pairs = []
+    auto_high_sim = 0
+    auto_low_sim = 0
+
+    for pair in to_classify:
+        pre_result = _pre_filter_pair(pair)
+        if pre_result:
+            pre_filtered.append(pre_result)
+            if pre_result["classification_method"] == "auto_high_sim":
+                auto_high_sim += 1
+            else:
+                auto_low_sim += 1
+        else:
+            llm_pairs.append(pair)
+
+    if pre_filtered:
+        logger.info(
+            f"Pre-filtered {len(pre_filtered)} pairs "
+            f"({auto_high_sim} high-sim → CORRELATED, {auto_low_sim} low-sim → INDEPENDENT)"
+        )
+
+    if not llm_pairs:
+        logger.info("All pairs pre-filtered, no LLM classification needed")
+        return pre_filtered
+
+    # ==========================================================================
+    # OPTIMIZATION 5a + 5b: Larger batches + concurrent processing
+    # ==========================================================================
     logger.info(
-        f"Classifying {len(to_classify)} pairs bidirectionally with LLM "
-        f"(batch size {batch_size}, 2x calls per batch)..."
+        f"Classifying {len(llm_pairs)} pairs with LLM "
+        f"(batch_size={batch_size}, concurrency={CONCURRENT_BATCHES})..."
     )
 
-    classified = []
-    total_batches = (len(to_classify) + batch_size - 1) // batch_size
+    classified = list(pre_filtered)  # Start with pre-filtered results
+    total_batches = (len(llm_pairs) + batch_size - 1) // batch_size
     direction_corrections = 0
     correlation_conversions = 0
+    skipped_bidirectional = 0
 
-    for batch_idx in range(0, len(to_classify), batch_size):
-        batch = to_classify[batch_idx : batch_idx + batch_size]
-        batch_num = batch_idx // batch_size + 1
+    # Create semaphore for concurrent batch limiting
+    semaphore = asyncio.Semaphore(CONCURRENT_BATCHES)
 
-        # Report progress every 5 batches
-        if batch_num % 5 == 0 or batch_num == 1:
+    # Split into batches
+    batches = [
+        llm_pairs[i : i + batch_size] for i in range(0, len(llm_pairs), batch_size)
+    ]
+
+    # Process batches concurrently with progress reporting
+    completed_batches = 0
+
+    async def process_and_report(batch: list[dict]) -> list[dict]:
+        nonlocal completed_batches
+
+        results = await _process_batch_with_semaphore(
+            semaphore,
+            batch,
+            events_by_id,
+            semantics_by_id,
+            entities_by_event,
+            llm,
+            skip_bidirectional_on_high_conf=True,
+        )
+
+        completed_batches += 1
+
+        # Report progress every 5 batches or at milestones
+        if completed_batches % 5 == 0 or completed_batches == total_batches:
             progress_msg = (
-                f"Bidirectional batch {batch_num}/{total_batches} "
-                f"({len(classified)} relations, {direction_corrections} dir corrections, "
-                f"{correlation_conversions} → CORRELATED)"
+                f"LLM batch {completed_batches}/{total_batches} "
+                f"({len(classified) + sum(1 for r in results if r)} relations)"
             )
             logger.debug(progress_msg)
             if progress_callback:
                 progress_callback(progress_msg)
 
-        try:
-            # Create forward and reverse batches
-            forward_batch = batch
-            reverse_batch = [_create_reverse_pair(p) for p in batch]
+        return results
 
-            # Build prompts for both directions (with confounder warnings)
-            forward_prompt = _build_llm_batch_prompt(
-                forward_batch, events_by_id, semantics_by_id, entities_by_event
-            )
-            reverse_prompt = _build_llm_batch_prompt(
-                reverse_batch, events_by_id, semantics_by_id, entities_by_event
-            )
+    # Launch all batches concurrently (semaphore controls actual parallelism)
+    batch_results = await asyncio.gather(
+        *[process_and_report(batch) for batch in batches],
+        return_exceptions=True,
+    )
 
-            # Execute both LLM calls concurrently for efficiency
-            forward_messages = [
-                {"role": "system", "content": LLM_SYSTEM_PROMPT},
-                {"role": "user", "content": forward_prompt},
-            ]
-            reverse_messages = [
-                {"role": "system", "content": LLM_SYSTEM_PROMPT},
-                {"role": "user", "content": reverse_prompt},
-            ]
+    # Process results from all batches
+    for batch_result in batch_results:
+        if isinstance(batch_result, Exception):
+            logger.warning(f"Batch processing failed: {batch_result}")
+            continue
 
-            forward_response, reverse_response = await asyncio.gather(
-                llm.complete(forward_messages, temperature=0.1),
-                llm.complete(reverse_messages, temperature=0.1),
-                return_exceptions=True,
-            )
+        for item in batch_result:
+            pair = item["pair"]
+            forward_result = item["forward"]
+            reverse_result = item["reverse"]
 
-            # Handle potential exceptions from gather
-            forward_str: str = ""
-            reverse_str: str = ""
-            if isinstance(forward_response, Exception):
-                logger.warning(f"Forward LLM call failed: {forward_response}")
+            if item.get("skipped_reverse"):
+                skipped_bidirectional += 1
+                # Use forward result directly for skipped pairs
+                if (
+                    forward_result
+                    and forward_result.get("relation_type") != "INDEPENDENT"
+                ):
+                    classified.append(
+                        {
+                            "source_id": pair["event_a_id"],
+                            "target_id": pair["event_b_id"],
+                            "relation_type": forward_result.get("relation_type"),
+                            "confidence": float(forward_result.get("confidence", 0)),
+                            "direction": "forward",
+                            "reasoning": forward_result.get("reasoning", ""),
+                            "implied_conditional": {
+                                "P_B_given_A": float(
+                                    forward_result.get("P_B_given_A", 0.5)
+                                ),
+                                "P_B_given_not_A": float(
+                                    forward_result.get("P_B_given_not_A", 0.5)
+                                ),
+                            },
+                            "classification_method": "llm_unidirectional",
+                            "self_critique": (
+                                f"Skipped reverse check due to high confidence ({forward_result.get('confidence', 0):.2f}). "
+                                f"{forward_result.get('self_critique', '')}"
+                            ),
+                        }
+                    )
             else:
-                forward_str = str(forward_response)
-            if isinstance(reverse_response, Exception):
-                logger.warning(f"Reverse LLM call failed: {reverse_response}")
-            else:
-                reverse_str = str(reverse_response)
-
-            # Parse both responses
-            forward_parsed = _parse_llm_batch_response(forward_str, len(batch))
-            reverse_parsed = _parse_llm_batch_response(reverse_str, len(batch))
-
-            # Resolve each pair using bidirectional logic
-            for i, pair in enumerate(batch):
-                forward_result = forward_parsed[i] if i < len(forward_parsed) else None
-                reverse_result = reverse_parsed[i] if i < len(reverse_parsed) else None
-
-                # Validate relation types
-                if forward_result:
-                    rel_type = forward_result.get("relation_type", "INDEPENDENT")
-                    if rel_type not in CAUSAL_RELATIONS:
-                        forward_result["relation_type"] = "INDEPENDENT"
-
-                if reverse_result:
-                    rel_type = reverse_result.get("relation_type", "INDEPENDENT")
-                    if rel_type not in CAUSAL_RELATIONS:
-                        reverse_result["relation_type"] = "INDEPENDENT"
-
                 # Resolve using bidirectional check
                 resolved = _resolve_bidirectional(forward_result, reverse_result, pair)
 
@@ -1093,14 +1323,13 @@ async def classify_causal(
                         ):
                             correlation_conversions += 1
 
-        except Exception as e:
-            logger.warning(f"Bidirectional batch classification failed: {e}")
-            continue
-
+    # Final summary
     logger.info(
-        f"Classified {len(classified)} causal relations with bidirectional check: "
-        f"{direction_corrections} direction corrections, "
-        f"{correlation_conversions} converted to CORRELATED"
+        f"Classified {len(classified)} causal relations: "
+        f"{len(pre_filtered)} pre-filtered, "
+        f"{skipped_bidirectional} skipped bidirectional, "
+        f"{direction_corrections} dir corrections, "
+        f"{correlation_conversions} → CORRELATED"
     )
     return classified
 
