@@ -422,6 +422,51 @@ class PipelineState:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def get_orphaned_runs(self) -> list[dict]:
+        """
+        Find runs that are stuck in 'running' status.
+
+        These are runs that started but never completed, likely due to crashes.
+        """
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM runs
+            WHERE status = 'running'
+            ORDER BY id DESC
+            """
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def mark_run_failed(self, run_id: int, reason: str = "crashed") -> None:
+        """Mark a run as failed (used for orphaned run cleanup)."""
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute(
+            """
+            UPDATE runs
+            SET status = 'failed', completed_at = ?
+            WHERE id = ?
+            """,
+            (now, run_id),
+        )
+        self.conn.commit()
+        logger.warning(f"Marked run {run_id} as failed: {reason}")
+
+    def cleanup_orphaned_runs(self) -> int:
+        """
+        Clean up any orphaned 'running' runs by marking them as failed.
+
+        Returns the number of orphaned runs cleaned up.
+        """
+        orphaned = self.get_orphaned_runs()
+        for run in orphaned:
+            run_id = run["id"]
+            started_at = run.get("started_at", "unknown")
+            logger.warning(
+                f"Found orphaned run {run_id} (started: {started_at}), marking as failed"
+            )
+            self.mark_run_failed(run_id, reason="orphaned_cleanup")
+        return len(orphaned)
+
     # =========================================================================
     # METADATA
     # =========================================================================
@@ -480,10 +525,18 @@ class PipelineState:
         self._processed_ids_cache = None
         self._entity_mappings_cache = None
 
-        # Remove files
-        for path in [EMBEDDINGS_PATH, EMBEDDINGS_META_PATH, GRAPH_PATH]:
+        # Remove ALL _live files (including events.json and opportunities.json)
+        live_files = [
+            EMBEDDINGS_PATH,
+            EMBEDDINGS_META_PATH,
+            GRAPH_PATH,
+            EVENTS_PATH,
+            OPPORTUNITIES_PATH,
+        ]
+        for path in live_files:
             if path.exists():
                 path.unlink()
+                logger.debug(f"Deleted {path.name}")
 
         logger.info("Pipeline state reset complete")
 
@@ -514,14 +567,33 @@ def export_live_data(
     opportunities: list[dict],
 ) -> None:
     """Export data to _live/ directory for API consumption."""
-    # Events with current prices
-    EVENTS_PATH.write_text(json.dumps(events, indent=2))
+    export_timestamp = datetime.now(timezone.utc).isoformat()
 
-    # Opportunities
-    OPPORTUNITIES_PATH.write_text(json.dumps(opportunities, indent=2))
+    # Events with metadata
+    events_data = {
+        "_meta": {
+            "exported_at": export_timestamp,
+            "count": len(events),
+            "source": "pipeline",
+        },
+        "events": events,
+    }
+    EVENTS_PATH.write_text(json.dumps(events_data, indent=2))
+
+    # Opportunities with metadata
+    opportunities_data = {
+        "_meta": {
+            "exported_at": export_timestamp,
+            "count": len(opportunities),
+            "source": "pipeline",
+        },
+        "opportunities": opportunities,
+    }
+    OPPORTUNITIES_PATH.write_text(json.dumps(opportunities_data, indent=2))
 
     # Graph is saved separately via state.save_graph()
 
     logger.info(
-        f"Exported to _live/: {len(events)} events, {len(opportunities)} opportunities"
+        f"Exported to _live/: {len(events)} events, {len(opportunities)} opportunities "
+        f"(timestamp: {export_timestamp})"
     )

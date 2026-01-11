@@ -381,9 +381,10 @@ def get_semantics_for_prioritization(
     semantics_by_id: dict[str, dict],
 ) -> dict[str, dict[str, Any]]:
     """
-    Extract key fields for pair prioritization.
+    Extract key fields for pair prioritization and classification.
 
-    Returns dict of event_id -> {outcome_states, polarity, subject_entity, predicate}
+    Returns dict of event_id -> {outcome_states, polarity, subject_entity, predicate,
+                                 event_type, condition, title}
     """
     result = {}
     for event_id, data in semantics_by_id.items():
@@ -394,5 +395,8 @@ def get_semantics_for_prioritization(
             "subject_entity": sem.get("subject_entity"),
             "predicate": sem.get("predicate"),
             "title": data.get("title", ""),
+            # Add event_type and condition for threshold detection
+            "event_type": sem.get("event_type", "OCCURRENCE"),
+            "condition": sem.get("condition"),
         }
     return result

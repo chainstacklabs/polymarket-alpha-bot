@@ -356,11 +356,24 @@ async def get_events(
     # Try live data first
     live_path = LIVE_DIR / "events.json"
     if live and run_id is None and live_path.exists():
-        events = load_json_file(live_path)
+        data = load_json_file(live_path)
+
+        # Handle nested format: {"_meta": {...}, "events": [...]}
+        if isinstance(data, dict) and "events" in data:
+            events = data["events"]
+            meta = data.get("_meta", {})
+        elif isinstance(data, list):
+            events = data
+            meta = {}
+        else:
+            events = []
+            meta = {}
+
         return {
             "source": "live",
-            "count": len(events) if isinstance(events, list) else 1,
-            "data": events,
+            "count": len(events),
+            "data": {"events": events},
+            "meta": meta,
         }
 
     # Fall back to historical runs

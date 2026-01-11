@@ -360,6 +360,7 @@ def _brute_force_pairs(
 def classify_structural(
     pairs: list[dict],
     events_by_id: dict[str, dict],
+    semantics_by_id: dict[str, dict] | None = None,
 ) -> list[dict]:
     """
     Classify structural relations using rules.
@@ -368,8 +369,10 @@ def classify_structural(
     - Shared entities
     - Title/question similarity patterns
     - Time/threshold patterns
+    - Event type relationships (COUNT meta-market + THRESHOLD)
     """
     classified = []
+    semantics_by_id = semantics_by_id or {}
 
     for pair in pairs:
         event_a = events_by_id.get(pair["event_a_id"])
@@ -381,11 +384,21 @@ def classify_structural(
         title_a = event_a.get("title", "").lower()
         title_b = event_b.get("title", "").lower()
 
+        # Get semantic data if available
+        sem_a = semantics_by_id.get(pair["event_a_id"], {})
+        sem_b = semantics_by_id.get(pair["event_b_id"], {})
+
         relation_type = None
         confidence = 0.0
 
+        # Check for hierarchical relationship (COUNT meta-market + specific THRESHOLD)
+        # e.g., "How many X?" + "Will X exceed 750k?"
+        if _is_hierarchical_threshold(title_a, title_b, sem_a, sem_b):
+            relation_type = "HIERARCHICAL"
+            confidence = 0.95
+
         # Check for timeframe variants (e.g., "by end of 2024" vs "by end of 2025")
-        if _is_timeframe_variant(title_a, title_b):
+        elif _is_timeframe_variant(title_a, title_b):
             relation_type = "TIMEFRAME_VARIANT"
             confidence = 0.9
 
@@ -412,6 +425,78 @@ def classify_structural(
 
     logger.info(f"Classified {len(classified)} structural relations")
     return classified
+
+
+def _is_hierarchical_threshold(
+    title_a: str,
+    title_b: str,
+    sem_a: dict,
+    sem_b: dict,
+) -> bool:
+    """
+    Check if one event is a COUNT/meta-market and the other is a specific THRESHOLD.
+
+    Examples:
+    - "How many people will Trump deport?" (COUNT) + "Will Trump deport 750k+?" (THRESHOLD)
+    - "What will GDP growth be?" (COUNT) + "Will GDP exceed 3%?" (THRESHOLD)
+
+    These are HIERARCHICAL: the COUNT market encompasses multiple threshold outcomes,
+    so treating them as correlated with equal probability is incorrect.
+    """
+    import re
+    from rapidfuzz import fuzz
+
+    type_a = sem_a.get("event_type", "OCCURRENCE")
+    type_b = sem_b.get("event_type", "OCCURRENCE")
+    cond_a = sem_a.get("condition")
+    cond_b = sem_b.get("condition")
+
+    # Pattern 1: One is COUNT, the other has a threshold condition
+    # COUNT = "how many", "what will", "# of" type questions
+    if type_a == "COUNT" and type_b == "THRESHOLD" and cond_b:
+        return True
+    if type_b == "COUNT" and type_a == "THRESHOLD" and cond_a:
+        return True
+
+    # Pattern 2: Detect "how many" / "# of" in title without semantic data
+    meta_patterns = [
+        r"^how many\b",
+        r"^# of\b",
+        r"^number of\b",
+        r"^what will .+ be\??$",
+        r"^what .+ will\b",
+    ]
+
+    def is_meta_market(title: str) -> bool:
+        for pattern in meta_patterns:
+            if re.search(pattern, title, re.IGNORECASE):
+                return True
+        return False
+
+    # Pattern 3: One is meta-market title, other has specific threshold number
+    threshold_pattern = r"\b\d{1,3}(?:,\d{3})+\b|\b\d+%\b|\b(?:at least|or more|exceed|over|above)\s+\d+"
+
+    a_is_meta = is_meta_market(title_a)
+    b_is_meta = is_meta_market(title_b)
+    a_has_threshold = bool(re.search(threshold_pattern, title_a, re.IGNORECASE))
+    b_has_threshold = bool(re.search(threshold_pattern, title_b, re.IGNORECASE))
+
+    if a_is_meta and b_has_threshold and not a_has_threshold:
+        # Check if they're about the same topic (fuzzy match after removing numbers)
+        clean_pattern = r"\b\d+(?:,\d+)*(?:\.\d+)?%?\b"
+        a_clean = re.sub(clean_pattern, "", title_a).strip()
+        b_clean = re.sub(clean_pattern, "", title_b).strip()
+        if fuzz.token_set_ratio(a_clean, b_clean) > 60:
+            return True
+
+    if b_is_meta and a_has_threshold and not b_has_threshold:
+        clean_pattern = r"\b\d+(?:,\d+)*(?:\.\d+)?%?\b"
+        a_clean = re.sub(clean_pattern, "", title_a).strip()
+        b_clean = re.sub(clean_pattern, "", title_b).strip()
+        if fuzz.token_set_ratio(a_clean, b_clean) > 60:
+            return True
+
+    return False
 
 
 def _is_timeframe_variant(title_a: str, title_b: str) -> bool:

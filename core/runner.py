@@ -80,6 +80,13 @@ async def run_async(
     # Load state
     state = load_state()
 
+    # Check for and clean up orphaned runs (crashed/interrupted runs)
+    orphaned_count = state.cleanup_orphaned_runs()
+    if orphaned_count > 0:
+        logger.warning(
+            f"Cleaned up {orphaned_count} orphaned run(s) from previous crashes"
+        )
+
     if full:
         logger.warning("Full mode: resetting state...")
         state.reset()
@@ -267,7 +274,9 @@ async def run_async(
         with tracker.step(10, "Classify Structural"):
             logger.info("Step 10: Classifying structural relations...")
             events_by_id = {e["id"]: e for e in all_events_for_pairs}
-            structural_relations = classify_structural(candidate_pairs, events_by_id)
+            structural_relations = classify_structural(
+                candidate_pairs, events_by_id, semantics_by_id=semantics_for_pairs
+            )
 
             # Add negation pairs as MUTUALLY_EXCLUSIVE (from quality enrichment)
             for pair in negation_pairs:
