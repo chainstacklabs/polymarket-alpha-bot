@@ -361,8 +361,19 @@ async def run_async(
                 )
                 graph = GraphData.from_dict(graph_dict)
 
-            # Save graph
+            # Save graph (to JSON file and edges to SQLite)
             state.save_graph(graph)
+            # Map edge keys: graph uses source/target, DB expects source_id/target_id
+            edges_for_db = [
+                {
+                    "source_id": e["source"],
+                    "target_id": e["target"],
+                    "relation_type": e["relation_type"],
+                    "confidence": e.get("confidence", 0.5),
+                }
+                for e in graph.edges
+            ]
+            state.add_graph_edges(edges_for_db)
             tracker.update_details(
                 f"{len(graph.nodes)} nodes, {len(graph.edges)} edges"
             )
