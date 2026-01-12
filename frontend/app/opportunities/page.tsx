@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { usePrices } from '@/hooks/usePrices'
-import { ArbitrageTable } from '@/components/ArbitrageTable'
+import { ArbitrageTable, ArbitrageDetailModal, ArbitrageOpportunity } from '@/components/ArbitrageTable'
 
 // =============================================================================
 // TYPES
@@ -42,34 +42,6 @@ interface ConditionalOpportunity {
     summary?: string
     detailed?: string
     action?: string
-  }
-}
-
-interface ArbitragePosition {
-  event_id: string
-  title: string
-  slug: string | null
-  position: 'YES' | 'NO'
-  price: number
-  price_display: string
-  outcome_covered: string
-  market_url: string
-}
-
-interface ArbitrageOpportunity {
-  signal_id: string
-  opportunity_type: 'arbitrage'
-  positions: ArbitragePosition[]
-  total_cost: number
-  total_cost_display: string
-  profit: number
-  profit_display: string
-  num_markets: number
-  confidence: number
-  confidence_adjusted_profit: number
-  reasoning: string
-  strategy: {
-    description: string
   }
 }
 
@@ -117,6 +89,7 @@ export default function OpportunitiesPage() {
   const [sortField, setSortField] = useState<SortField>('rank')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [selectedOpportunity, setSelectedOpportunity] = useState<ConditionalOpportunity | null>(null)
+  const [selectedArbitrage, setSelectedArbitrage] = useState<ArbitrageOpportunity | null>(null)
   const [filter, setFilter] = useState('')
   const { connected } = usePrices()
 
@@ -270,6 +243,7 @@ export default function OpportunitiesPage() {
         <ArbitrageTable
           opportunities={arbitrageOpportunities}
           loading={loading}
+          onSelect={setSelectedArbitrage}
         />
       ) : (
         <>
@@ -516,6 +490,14 @@ export default function OpportunitiesPage() {
         </div>
         )
       })()}
+
+      {/* Arbitrage Detail Modal - outside animated container to fix fixed positioning */}
+      {selectedArbitrage && (
+        <ArbitrageDetailModal
+          opportunity={selectedArbitrage}
+          onClose={() => setSelectedArbitrage(null)}
+        />
+      )}
     </>
   )
 }

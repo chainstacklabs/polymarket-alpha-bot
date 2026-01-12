@@ -6,7 +6,7 @@ import { useState } from 'react'
 // TYPES
 // =============================================================================
 
-interface ArbitragePosition {
+export interface ArbitragePosition {
   event_id: string
   title: string
   slug: string | null
@@ -17,7 +17,7 @@ interface ArbitragePosition {
   market_url: string
 }
 
-interface ArbitrageOpportunity {
+export interface ArbitrageOpportunity {
   signal_id: string
   opportunity_type: 'arbitrage'
   positions: ArbitragePosition[]
@@ -37,15 +37,25 @@ interface ArbitrageOpportunity {
 interface ArbitrageTableProps {
   opportunities: ArbitrageOpportunity[]
   loading?: boolean
+  onSelect?: (opportunity: ArbitrageOpportunity) => void
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export function ArbitrageTable({ opportunities, loading }: ArbitrageTableProps) {
-  const [selectedOpportunity, setSelectedOpportunity] = useState<ArbitrageOpportunity | null>(null)
+export function ArbitrageTable({ opportunities, loading, onSelect }: ArbitrageTableProps) {
+  // Only use internal state if no onSelect callback provided (backwards compatibility)
+  const [internalSelected, setInternalSelected] = useState<ArbitrageOpportunity | null>(null)
   const [filter, setFilter] = useState('')
+
+  const handleSelect = (opp: ArbitrageOpportunity) => {
+    if (onSelect) {
+      onSelect(opp)
+    } else {
+      setInternalSelected(opp)
+    }
+  }
 
   const filteredOpportunities = opportunities.filter(opp => {
     if (!filter) return true
@@ -99,17 +109,17 @@ export function ArbitrageTable({ opportunities, loading }: ArbitrageTableProps) 
             <ArbitrageCard
               key={opp.signal_id}
               opportunity={opp}
-              onClick={() => setSelectedOpportunity(opp)}
+              onClick={() => handleSelect(opp)}
             />
           ))}
         </div>
       </div>
 
-      {/* Detail Modal */}
-      {selectedOpportunity && (
+      {/* Detail Modal - only render internally if no onSelect callback */}
+      {!onSelect && internalSelected && (
         <ArbitrageDetailModal
-          opportunity={selectedOpportunity}
-          onClose={() => setSelectedOpportunity(null)}
+          opportunity={internalSelected}
+          onClose={() => setInternalSelected(null)}
         />
       )}
     </>
@@ -206,7 +216,7 @@ function ArbitrageCard({
 // DETAIL MODAL
 // =============================================================================
 
-function ArbitrageDetailModal({
+export function ArbitrageDetailModal({
   opportunity,
   onClose,
 }: {
@@ -230,7 +240,7 @@ function ArbitrageDetailModal({
           <div className="flex items-center gap-3">
             <span className="text-sm font-mono text-text-muted">{opportunity.signal_id}</span>
             <span className="text-sm font-semibold text-emerald">
-              +{profitPercent}% Guaranteed Profit
+              +{profitPercent}% Potential Profit
             </span>
           </div>
           <button
@@ -307,7 +317,7 @@ function ArbitrageDetailModal({
                     </td>
                     <td className="px-3 py-2 text-right">
                       <span className="text-sm font-mono text-text-primary">
-                        {position.price_display}
+                        ${position.price.toFixed(2)}
                       </span>
                     </td>
                   </tr>
@@ -320,17 +330,17 @@ function ArbitrageDetailModal({
                   </td>
                   <td className="px-3 py-2 text-right">
                     <span className="text-sm font-mono font-semibold text-text-primary">
-                      {totalCostPercent}%
+                      ${opportunity.total_cost.toFixed(2)}
                     </span>
                   </td>
                 </tr>
                 <tr className="bg-emerald/5">
                   <td colSpan={3} className="px-3 py-2 text-sm text-emerald text-right font-medium">
-                    Guaranteed Profit
+                    Potential Profit
                   </td>
                   <td className="px-3 py-2 text-right">
                     <span className="text-sm font-mono font-semibold text-emerald">
-                      +{profitPercent}%
+                      +${opportunity.profit.toFixed(2)}
                     </span>
                   </td>
                 </tr>
@@ -345,9 +355,15 @@ function ArbitrageDetailModal({
             </h4>
             <p className="text-sm text-text-secondary">
               {opportunity.reasoning ||
-                `These ${opportunity.num_markets} outcomes are mutually exclusive and exhaustive - exactly one must occur. Since the combined cost (${totalCostPercent}%) is less than the guaranteed payout ($1.00 = 100%), buying all positions guarantees a ${profitPercent}% profit regardless of which outcome occurs.`
+                `These ${opportunity.num_markets} outcomes are mutually exclusive and exhaustive - exactly one must occur. Since the combined cost ($${opportunity.total_cost.toFixed(2)}) is less than the payout ($1.00), buying all positions yields a $${opportunity.profit.toFixed(2)} profit margin regardless of which outcome occurs.`
               }
             </p>
+          </div>
+
+          {/* Risk Disclaimer */}
+          <div className="text-[10px] text-text-muted bg-surface-elevated/50 rounded p-2 border border-border/50">
+            <span className="font-medium">Note:</span> This analysis assumes markets resolve correctly and the platform operates normally.
+            Actual returns may vary due to liquidity, slippage, resolution disputes, or platform risks.
           </div>
 
           {/* Confidence */}
