@@ -348,6 +348,9 @@ def get_run_path(output_name: str, run_id: str | None = None) -> Path:
 @router.get("/opportunities")
 async def get_opportunities(
     limit: int = Query(100, description="Max number of opportunities to return"),
+    offset: int = Query(
+        0, description="Number of opportunities to skip (for pagination)"
+    ),
     live: bool = Query(True, description="Use live data (default) or historical"),
     run_id: str | None = Query(None, description="Specific historical run ID"),
     type: str | None = Query(
@@ -398,8 +401,11 @@ async def get_opportunities(
                 o for o in opportunities if o.get("opportunity_type") == type
             ]
 
-        # Apply limit after filtering
-        opportunities = opportunities[:limit]
+        # Get total before pagination
+        total_count = len(opportunities)
+
+        # Apply offset and limit for pagination
+        opportunities = opportunities[offset : offset + limit]
 
         # Transform to frontend format (nested structure)
         opportunities = transform_to_frontend_format(opportunities)
@@ -415,6 +421,7 @@ async def get_opportunities(
         return {
             "source": "live",
             "count": len(opportunities),
+            "total_count": total_count,
             "arbitrage_count": arbitrage_count,
             "conditional_count": conditional_count,
             "data": {"opportunities": opportunities},
@@ -429,16 +436,41 @@ async def get_opportunities(
 
     # Fall back to historical runs (no live recalculation)
     run_path = get_run_path("06_3_export_opportunities", run_id)
-    opportunities = load_json_file(run_path / "opportunities.json")
+    data = load_json_file(run_path / "opportunities.json")
 
-    if isinstance(opportunities, list):
-        opportunities = opportunities[:limit]
+    # Handle nested format: {"_meta": {...}, "opportunities": [...]}
+    if isinstance(data, dict) and "opportunities" in data:
+        opportunities = data["opportunities"]
+    elif isinstance(data, list):
+        opportunities = data
+    else:
+        opportunities = []
+
+    # Infer opportunity_type from structure if not set
+    for opp in opportunities:
+        if "opportunity_type" not in opp:
+            # If it has positions, it's arbitrage; if trigger/consequence, it's conditional
+            if "positions" in opp:
+                opp["opportunity_type"] = "arbitrage"
+            elif "trigger" in opp or "consequence" in opp:
+                opp["opportunity_type"] = "conditional"
+
+    # Filter by opportunity type if specified
+    if type in ("arbitrage", "conditional"):
+        opportunities = [o for o in opportunities if o.get("opportunity_type") == type]
+
+    # Get total before pagination
+    total_count = len(opportunities)
+
+    # Apply offset and limit for pagination
+    opportunities = opportunities[offset : offset + limit]
 
     return {
         "source": "historical",
         "run_id": run_path.name,
-        "count": len(opportunities) if isinstance(opportunities, list) else 1,
-        "data": opportunities,
+        "count": len(opportunities),
+        "total_count": total_count,
+        "data": {"opportunities": opportunities},
     }
 
 

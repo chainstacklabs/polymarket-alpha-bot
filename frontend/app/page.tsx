@@ -167,6 +167,8 @@ export default function Dashboard() {
   const [status, setStatus] = useState<PipelineStatus | null>(null)
   const [arbitrageOpportunities, setArbitrageOpportunities] = useState<ArbitrageOpportunity[]>([])
   const [conditionalOpportunities, setConditionalOpportunities] = useState<ConditionalOpportunity[]>([])
+  const [arbitrageTotalCount, setArbitrageTotalCount] = useState(0)
+  const [conditionalTotalCount, setConditionalTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [selectedOpportunity, setSelectedOpportunity] = useState<ConditionalOpportunity | null>(null)
   const { prices, connected } = usePrices()
@@ -186,10 +188,12 @@ export default function Dashboard() {
         if (arbRes.ok) {
           const data = await arbRes.json()
           setArbitrageOpportunities(data.data?.opportunities || [])
+          setArbitrageTotalCount(data.total_count || 0)
         }
         if (condRes.ok) {
           const data = await condRes.json()
           setConditionalOpportunities(data.data?.opportunities || [])
+          setConditionalTotalCount(data.total_count || 0)
         }
       } catch (error) {
         console.error('Failed to fetch data:', error)
@@ -245,13 +249,13 @@ export default function Dashboard() {
         />
         <StatusCard
           title="Arbitrage"
-          value={arbitrageOpportunities.length.toString()}
+          value={arbitrageTotalCount.toString()}
           subtitle="cross-market"
-          status={arbitrageOpportunities.length > 0 ? 'success' : 'info'}
+          status={arbitrageTotalCount > 0 ? 'success' : 'info'}
         />
         <StatusCard
           title="Conditional"
-          value={conditionalOpportunities.length.toString()}
+          value={conditionalTotalCount.toString()}
           subtitle="dependencies"
           status="info"
         />
@@ -294,7 +298,7 @@ export default function Dashboard() {
               <p className="text-sm text-text-secondary mb-1">No arbitrage opportunities detected</p>
               <p className="text-xs text-text-muted max-w-md">
                 Monitoring for mispriced exhaustive sets across different markets.
-                Arbitrage appears when outcomes from multiple events can be fully hedged at a combined cost below 100%.
+                Arbitrage appears when outcomes from multiple events can be fully hedged at a combined cost below $1.00.
               </p>
             </div>
           </div>

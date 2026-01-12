@@ -34,17 +34,26 @@ export interface ArbitrageOpportunity {
   }
 }
 
+interface PaginationProps {
+  currentPage: number
+  totalPages: number
+  totalCount: number
+  pageSize: number
+  onPageChange: (page: number) => void
+}
+
 interface ArbitrageTableProps {
   opportunities: ArbitrageOpportunity[]
   loading?: boolean
   onSelect?: (opportunity: ArbitrageOpportunity) => void
+  pagination?: PaginationProps
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export function ArbitrageTable({ opportunities, loading, onSelect }: ArbitrageTableProps) {
+export function ArbitrageTable({ opportunities, loading, onSelect, pagination }: ArbitrageTableProps) {
   // Only use internal state if no onSelect callback provided (backwards compatibility)
   const [internalSelected, setInternalSelected] = useState<ArbitrageOpportunity | null>(null)
   const [filter, setFilter] = useState('')
@@ -77,10 +86,10 @@ export function ArbitrageTable({ opportunities, loading, onSelect }: ArbitrageTa
   if (opportunities.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <span className="text-sm text-text-muted">No arbitrage opportunities found</span>
+        <span className="text-sm text-text-muted">No arbitrage opportunities detected</span>
         <p className="text-xs text-text-muted mt-2 max-w-md">
-          Cross-market arbitrage requires semantically similar events from different markets
-          where the sum of prices for covering all outcomes differs from 100%.
+          Monitoring for mispriced exhaustive sets across different markets.
+          Arbitrage appears when outcomes from multiple events can be fully hedged at a combined cost below $1.00.
         </p>
       </div>
     )
@@ -92,7 +101,9 @@ export function ArbitrageTable({ opportunities, loading, onSelect }: ArbitrageTa
         {/* Filter */}
         <div className="flex items-center justify-between">
           <span className="text-sm text-text-muted">
-            {filteredOpportunities.length} arbitrage opportunities
+            {pagination
+              ? `Showing ${filteredOpportunities.length} of ${pagination.totalCount}`
+              : `${filteredOpportunities.length} arbitrage opportunities`}
           </span>
           <input
             type="text"
@@ -113,6 +124,66 @@ export function ArbitrageTable({ opportunities, loading, onSelect }: ArbitrageTa
             />
           ))}
         </div>
+
+        {/* Pagination Controls */}
+        {pagination && pagination.totalPages > 1 && (
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-xs text-text-muted">
+              Page {pagination.currentPage} of {pagination.totalPages}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => pagination.onPageChange(1)}
+                disabled={pagination.currentPage === 1}
+                className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title="First page"
+              >
+                ««
+              </button>
+              <button
+                onClick={() => pagination.onPageChange(pagination.currentPage - 1)}
+                disabled={pagination.currentPage === 1}
+                className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Prev
+              </button>
+              {/* Page numbers */}
+              {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                const startPage = Math.max(1, Math.min(pagination.currentPage - 2, pagination.totalPages - 4))
+                const page = startPage + i
+                if (page > pagination.totalPages) return null
+                return (
+                  <button
+                    key={page}
+                    onClick={() => pagination.onPageChange(page)}
+                    className={`px-2.5 py-1 text-xs rounded border transition-colors ${
+                      page === pagination.currentPage
+                        ? 'bg-cyan/20 border-cyan/50 text-cyan'
+                        : 'bg-surface-elevated border-border text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                )
+              })}
+              <button
+                onClick={() => pagination.onPageChange(pagination.currentPage + 1)}
+                disabled={pagination.currentPage === pagination.totalPages}
+                className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
+              <button
+                onClick={() => pagination.onPageChange(pagination.totalPages)}
+                disabled={pagination.currentPage === pagination.totalPages}
+                className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title="Last page"
+              >
+                »»
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Detail Modal - only render internally if no onSelect callback */}

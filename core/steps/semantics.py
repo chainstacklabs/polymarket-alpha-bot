@@ -384,7 +384,7 @@ def get_semantics_for_prioritization(
     Extract key fields for pair prioritization and classification.
 
     Returns dict of event_id -> {outcome_states, polarity, subject_entity, predicate,
-                                 event_type, condition, title}
+                                 event_type, condition, timeframe, title}
     """
     result = {}
     for event_id, data in semantics_by_id.items():
@@ -398,5 +398,7 @@ def get_semantics_for_prioritization(
             # Add event_type and condition for threshold detection
             "event_type": sem.get("event_type", "OCCURRENCE"),
             "condition": sem.get("condition"),
+            # Add timeframe for timeframe variant detection
+            "timeframe": data.get("timeframe"),
         }
     return result

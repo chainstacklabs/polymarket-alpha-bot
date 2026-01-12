@@ -41,10 +41,35 @@ SKIP_BIDIRECTIONAL_CONFIDENCE = 0.85  # Skip reverse check if forward confidence
 STRUCTURAL_RELATIONS = [
     "TIMEFRAME_VARIANT",
     "THRESHOLD_VARIANT",
+    "SUBSET_VARIANT",  # Specific instance implies general category (Cuba → Latin America)
     "HIERARCHICAL",
     "SERIES_MEMBER",
     "MUTUALLY_EXCLUSIVE",
 ]
+
+# Geographic subset relationships for SUBSET_VARIANT detection
+GEOGRAPHIC_SUBSETS = {
+    "cuba": ["latin america", "latin american country", "caribbean"],
+    "mexico": ["latin america", "latin american country", "north america"],
+    "venezuela": ["latin america", "latin american country", "south america"],
+    "brazil": ["latin america", "latin american country", "south america"],
+    "argentina": ["latin america", "latin american country", "south america"],
+    "colombia": ["latin america", "latin american country", "south america"],
+    "chile": ["latin america", "latin american country", "south america"],
+    "peru": ["latin america", "latin american country", "south america"],
+    "taiwan": ["asia", "east asia", "indo-pacific"],
+    "japan": ["asia", "east asia"],
+    "south korea": ["asia", "east asia"],
+    "ukraine": ["europe", "eastern europe"],
+    "poland": ["europe", "eastern europe", "nato country"],
+    "germany": ["europe", "western europe", "nato country", "eu country"],
+    "france": ["europe", "western europe", "nato country", "eu country"],
+    "iran": ["middle east", "persian gulf"],
+    "iraq": ["middle east", "persian gulf"],
+    "syria": ["middle east"],
+    "israel": ["middle east"],
+    "saudi arabia": ["middle east", "persian gulf", "gulf state"],
+}
 
 CAUSAL_RELATIONS = [
     "DIRECT_CAUSE",
@@ -390,6 +415,7 @@ def classify_structural(
 
         relation_type = None
         confidence = 0.0
+        evidence = {}
 
         # Check for hierarchical relationship (COUNT meta-market + specific THRESHOLD)
         # e.g., "How many X?" + "Will X exceed 750k?"
@@ -398,9 +424,27 @@ def classify_structural(
             confidence = 0.95
 
         # Check for timeframe variants (e.g., "by end of 2024" vs "by end of 2025")
+        # First try title-based detection
         elif _is_timeframe_variant(title_a, title_b):
             relation_type = "TIMEFRAME_VARIANT"
             confidence = 0.9
+            evidence = {"method": "title_pattern"}
+
+        # Then try semantic-based timeframe detection (using parsed end_dates)
+        elif _is_semantic_timeframe_variant(sem_a, sem_b, title_a, title_b):
+            relation_type = "TIMEFRAME_VARIANT"
+            confidence = 0.95
+            evidence = {
+                "method": "semantic",
+                "subject": sem_a.get("subject_entity"),
+                "predicate": sem_a.get("predicate"),
+            }
+
+        # Check for subset variants (Cuba → Latin America)
+        elif (is_subset := _is_subset_variant(title_a, title_b))[0]:
+            relation_type = "SUBSET_VARIANT"
+            confidence = 0.9
+            evidence = is_subset[1]
 
         # Check for threshold variants (e.g., ">50%" vs ">60%")
         elif _is_threshold_variant(title_a, title_b):
@@ -413,15 +457,16 @@ def classify_structural(
             confidence = 0.85
 
         if relation_type:
-            classified.append(
-                {
-                    "source_id": pair["event_a_id"],
-                    "target_id": pair["event_b_id"],
-                    "relation_type": relation_type,
-                    "confidence": confidence,
-                    "classification_method": "structural_rules",
-                }
-            )
+            result = {
+                "source_id": pair["event_a_id"],
+                "target_id": pair["event_b_id"],
+                "relation_type": relation_type,
+                "confidence": confidence,
+                "classification_method": "structural_rules",
+            }
+            if evidence:
+                result["evidence"] = evidence
+            classified.append(result)
 
     logger.info(f"Classified {len(classified)} structural relations")
     return classified
@@ -500,17 +545,58 @@ def _is_hierarchical_threshold(
 
 
 def _is_timeframe_variant(title_a: str, title_b: str) -> bool:
-    """Check if titles differ only by timeframe."""
+    """
+    Check if titles differ only by timeframe.
+
+    Enhanced patterns to catch:
+    - Years: 2024, 2025, 2026
+    - Month names: January, Feb, etc.
+    - Day numbers with months: "June 30", "March 31"
+    - Date phrases: "end of", "before", "by"
+    - Quarters: Q1, Q2
+    """
     import re
 
-    # Remove year/date patterns and compare
-    pattern = r"\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december)\b"
-    a_clean = re.sub(pattern, "", title_a)
-    b_clean = re.sub(pattern, "", title_b)
-    # Check if >80% similar after removing dates
+    # Comprehensive date removal patterns (order matters - more specific first)
+    date_patterns = [
+        # Full dates: "June 30, 2026", "March 31"
+        r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(?:,?\s*\d{4})?\b",
+        # Month + year: "June 2026", "December 2025"
+        r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+\d{4}\b",
+        # Just months
+        r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b",
+        # Years: 2024, 2025, 2026, 2027
+        r"\b20[2-3]\d\b",
+        # Quarters: Q1, Q2, Q3, Q4
+        r"\bq[1-4]\b",
+        # Date phrases that indicate timeframes
+        r"\b(?:end\s+of|before|by|in|during)\b",
+        # Ordinal day numbers: "31st", "30th", "1st"
+        r"\b\d{1,2}(?:st|nd|rd|th)\b",
+        # Standalone day numbers when adjacent to removed content
+        r"\b(?:30|31)\b",
+    ]
+
+    a_clean = title_a.lower()
+    b_clean = title_b.lower()
+
+    for pattern in date_patterns:
+        a_clean = re.sub(pattern, "", a_clean, flags=re.IGNORECASE)
+        b_clean = re.sub(pattern, "", b_clean, flags=re.IGNORECASE)
+
+    # Normalize whitespace
+    a_clean = re.sub(r"\s+", " ", a_clean).strip()
+    b_clean = re.sub(r"\s+", " ", b_clean).strip()
+
+    # Remove trailing punctuation that might differ
+    a_clean = re.sub(r"[?,!]+$", "", a_clean).strip()
+    b_clean = re.sub(r"[?,!]+$", "", b_clean).strip()
+
+    # Check if >75% similar after removing dates (relaxed from 80%)
     from rapidfuzz import fuzz
 
-    return fuzz.ratio(a_clean, b_clean) > 80
+    similarity = fuzz.ratio(a_clean, b_clean)
+    return similarity > 75
 
 
 def _is_threshold_variant(title_a: str, title_b: str) -> bool:
@@ -538,6 +624,106 @@ def _is_mutually_exclusive(title_a: str, title_b: str) -> bool:
     for pos, neg in opposites:
         if (pos in title_a and neg in title_b) or (neg in title_a and pos in title_b):
             return True
+    return False
+
+
+def _is_subset_variant(title_a: str, title_b: str) -> tuple[bool, dict]:
+    """
+    Check if one event is a specific instance that implies a general category.
+
+    Examples:
+    - "U.S. invade Cuba" → "U.S. invade Latin American country" (Cuba is subset of Latin America)
+    - "China invade Taiwan" → "China invade East Asia" (Taiwan is in East Asia)
+
+    Returns:
+        tuple of (is_subset_variant, evidence_dict)
+    """
+    title_a_lower = title_a.lower()
+    title_b_lower = title_b.lower()
+
+    # Check if one title has a specific location and the other has its parent region
+    for specific, parents in GEOGRAPHIC_SUBSETS.items():
+        # Case 1: A has specific, B has parent
+        if specific in title_a_lower:
+            for parent in parents:
+                if parent in title_b_lower:
+                    # Verify they're about the same action (simple word overlap check)
+                    # Remove the geographic terms and check similarity
+                    a_action = title_a_lower.replace(specific, "").strip()
+                    b_action = title_b_lower.replace(parent, "").strip()
+                    from rapidfuzz import fuzz
+
+                    if fuzz.ratio(a_action, b_action) > 70:
+                        return True, {
+                            "specific": specific,
+                            "parent": parent,
+                            "direction": "a_implies_b",
+                        }
+
+        # Case 2: B has specific, A has parent
+        if specific in title_b_lower:
+            for parent in parents:
+                if parent in title_a_lower:
+                    a_action = title_a_lower.replace(parent, "").strip()
+                    b_action = title_b_lower.replace(specific, "").strip()
+                    from rapidfuzz import fuzz
+
+                    if fuzz.ratio(a_action, b_action) > 70:
+                        return True, {
+                            "specific": specific,
+                            "parent": parent,
+                            "direction": "b_implies_a",
+                        }
+
+    return False, {}
+
+
+def _is_semantic_timeframe_variant(
+    sem_a: dict, sem_b: dict, title_a: str, title_b: str
+) -> bool:
+    """
+    Check if two events are timeframe variants using semantic data.
+
+    Uses extracted subject_entity, predicate, and end_date from semantic parsing.
+    If subject+predicate match but end_dates differ, it's a timeframe variant.
+    """
+    if not sem_a or not sem_b:
+        return False
+
+    subj_a = sem_a.get("subject_entity")
+    subj_b = sem_b.get("subject_entity")
+    pred_a = sem_a.get("predicate")
+    pred_b = sem_b.get("predicate")
+
+    # Need matching subject and predicate
+    if not (subj_a and subj_b and pred_a and pred_b):
+        return False
+
+    # Check for matching subject and predicate
+    if subj_a.lower() != subj_b.lower():
+        return False
+
+    # Predicate comparison with fuzzy matching (allow minor variations)
+    from rapidfuzz import fuzz
+
+    if fuzz.ratio(pred_a.lower(), pred_b.lower()) < 80:
+        return False
+
+    # Check for different timeframes
+    tf_a = sem_a.get("timeframe", {})
+    tf_b = sem_b.get("timeframe", {})
+
+    if not tf_a or not tf_b:
+        # Fallback: if subject+predicate match with high confidence,
+        # and titles have different date-like patterns, likely timeframe variant
+        return False
+
+    end_a = tf_a.get("end_date")
+    end_b = tf_b.get("end_date")
+
+    if end_a and end_b and end_a != end_b:
+        return True
+
     return False
 
 

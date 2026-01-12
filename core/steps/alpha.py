@@ -33,14 +33,15 @@ RELATION_TYPE_PRIORS = {
     "CORRELATED": {"min": 0.40, "max": 0.70, "default": 0.55},
 }
 
-# Structural relations (skip for alpha)
+# Structural relations (skip for alpha - these are non-actionable)
 STRUCTURAL_RELATION_TYPES = {
-    "TIMEFRAME_VARIANT",
-    "THRESHOLD_VARIANT",
-    "HIERARCHICAL",
-    "SERIES_MEMBER",
-    "MUTUALLY_EXCLUSIVE",
-    "INDEPENDENT",
+    "TIMEFRAME_VARIANT",  # Same event, different deadline
+    "THRESHOLD_VARIANT",  # Same event, different threshold
+    "SUBSET_VARIANT",  # Specific implies general (Cuba → Latin America)
+    "HIERARCHICAL",  # COUNT market + THRESHOLD market
+    "SERIES_MEMBER",  # Part of same series
+    "MUTUALLY_EXCLUSIVE",  # Opposite outcomes
+    "INDEPENDENT",  # No relationship
 }
 
 

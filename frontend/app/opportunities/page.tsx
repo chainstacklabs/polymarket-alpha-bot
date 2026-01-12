@@ -49,6 +49,8 @@ type Tab = 'arbitrage' | 'dependencies'
 type SortField = 'rank' | 'alpha' | 'confidence' | 'trigger_price' | 'consequence_price'
 type SortDirection = 'asc' | 'desc'
 
+const PAGE_SIZE = 20
+
 // =============================================================================
 // CONSTANTS
 // =============================================================================
@@ -85,6 +87,10 @@ export default function OpportunitiesPage() {
   const [activeTab, setActiveTab] = useState<Tab>('arbitrage')
   const [arbitrageOpportunities, setArbitrageOpportunities] = useState<ArbitrageOpportunity[]>([])
   const [conditionalOpportunities, setConditionalOpportunities] = useState<ConditionalOpportunity[]>([])
+  const [arbitrageTotalCount, setArbitrageTotalCount] = useState(0)
+  const [conditionalTotalCount, setConditionalTotalCount] = useState(0)
+  const [arbitragePage, setArbitragePage] = useState(1)
+  const [conditionalPage, setConditionalPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [sortField, setSortField] = useState<SortField>('rank')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
@@ -93,33 +99,53 @@ export default function OpportunitiesPage() {
   const [filter, setFilter] = useState('')
   const { connected } = usePrices()
 
-  // Fetch opportunities based on active tab
+  // Fetch arbitrage opportunities
   useEffect(() => {
-    async function fetchData() {
-      setLoading(true)
-      try {
-        if (activeTab === 'arbitrage') {
-          const res = await fetch('http://localhost:8000/data/opportunities?limit=100&type=arbitrage')
-          if (res.ok) {
-            const data = await res.json()
-            setArbitrageOpportunities(data.data?.opportunities || [])
-          }
-        } else {
-          const res = await fetch('http://localhost:8000/data/opportunities?limit=100&type=conditional')
-          if (res.ok) {
-            const data = await res.json()
-            setConditionalOpportunities(data.data?.opportunities || [])
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch opportunities:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
+    if (activeTab !== 'arbitrage') return
 
-    fetchData()
-  }, [activeTab])
+    const controller = new AbortController()
+    setLoading(true)
+
+    const offset = (arbitragePage - 1) * PAGE_SIZE
+    fetch(`http://localhost:8000/data/opportunities?limit=${PAGE_SIZE}&offset=${offset}&type=arbitrage`, {
+      signal: controller.signal
+    })
+      .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch'))
+      .then(data => {
+        setArbitrageOpportunities(data.data?.opportunities || [])
+        setArbitrageTotalCount(data.total_count || 0)
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') console.error('Failed to fetch arbitrage:', err)
+      })
+      .finally(() => setLoading(false))
+
+    return () => controller.abort()
+  }, [activeTab, arbitragePage])
+
+  // Fetch conditional opportunities
+  useEffect(() => {
+    if (activeTab !== 'dependencies') return
+
+    const controller = new AbortController()
+    setLoading(true)
+
+    const offset = (conditionalPage - 1) * PAGE_SIZE
+    fetch(`http://localhost:8000/data/opportunities?limit=${PAGE_SIZE}&offset=${offset}&type=conditional`, {
+      signal: controller.signal
+    })
+      .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch'))
+      .then(data => {
+        setConditionalOpportunities(data.data?.opportunities || [])
+        setConditionalTotalCount(data.total_count || 0)
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') console.error('Failed to fetch conditional:', err)
+      })
+      .finally(() => setLoading(false))
+
+    return () => controller.abort()
+  }, [activeTab, conditionalPage])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -185,9 +211,7 @@ export default function OpportunitiesPage() {
     </th>
   )
 
-  const opportunityCount = activeTab === 'arbitrage'
-    ? arbitrageOpportunities.length
-    : conditionalOpportunities.length
+  const totalCount = activeTab === 'arbitrage' ? arbitrageTotalCount : conditionalTotalCount
 
   return (
     <>
@@ -197,7 +221,7 @@ export default function OpportunitiesPage() {
         <div>
           <h1 className="text-xl font-semibold text-text-primary">Opportunities</h1>
           <p className="text-sm text-text-muted mt-0.5">
-            {opportunityCount} {activeTab === 'arbitrage' ? 'arbitrage' : 'conditional'} signals
+            {totalCount} {activeTab === 'arbitrage' ? 'arbitrage' : 'conditional'} signals
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -220,7 +244,7 @@ export default function OpportunitiesPage() {
         >
           Arbitrage
           <span className="ml-1.5 text-xs text-emerald font-mono">
-            {arbitrageOpportunities.length || '-'}
+            {arbitrageTotalCount || '-'}
           </span>
         </button>
         <button
@@ -233,7 +257,7 @@ export default function OpportunitiesPage() {
         >
           Dependencies
           <span className="ml-1.5 text-xs text-text-muted font-mono">
-            {conditionalOpportunities.length || '-'}
+            {conditionalTotalCount || '-'}
           </span>
         </button>
       </div>
@@ -244,6 +268,13 @@ export default function OpportunitiesPage() {
           opportunities={arbitrageOpportunities}
           loading={loading}
           onSelect={setSelectedArbitrage}
+          pagination={{
+            currentPage: arbitragePage,
+            totalPages: Math.ceil(arbitrageTotalCount / PAGE_SIZE),
+            totalCount: arbitrageTotalCount,
+            pageSize: PAGE_SIZE,
+            onPageChange: setArbitragePage,
+          }}
         />
       ) : (
         <>
@@ -362,14 +393,48 @@ export default function OpportunitiesPage() {
                 </table>
               </div>
 
-              {/* Footer */}
+              {/* Footer with Pagination */}
               <div className="px-2.5 py-2 bg-surface-elevated border-t border-border flex items-center justify-between">
                 <span className="text-[10px] text-text-muted">
-                  {sortedConditionalOpportunities.length} of {conditionalOpportunities.length}
+                  Showing {sortedConditionalOpportunities.length} of {conditionalTotalCount}
                 </span>
-                <span className="text-[10px] text-text-muted font-mono">
-                  {new Date().toLocaleTimeString()}
-                </span>
+                {Math.ceil(conditionalTotalCount / PAGE_SIZE) > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setConditionalPage(1)}
+                      disabled={conditionalPage === 1}
+                      className="px-1.5 py-0.5 text-[10px] rounded bg-surface border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      title="First page"
+                    >
+                      ««
+                    </button>
+                    <button
+                      onClick={() => setConditionalPage(p => p - 1)}
+                      disabled={conditionalPage === 1}
+                      className="px-1.5 py-0.5 text-[10px] rounded bg-surface border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Prev
+                    </button>
+                    <span className="px-2 text-[10px] text-text-muted">
+                      {conditionalPage} / {Math.ceil(conditionalTotalCount / PAGE_SIZE)}
+                    </span>
+                    <button
+                      onClick={() => setConditionalPage(p => p + 1)}
+                      disabled={conditionalPage >= Math.ceil(conditionalTotalCount / PAGE_SIZE)}
+                      className="px-1.5 py-0.5 text-[10px] rounded bg-surface border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={() => setConditionalPage(Math.ceil(conditionalTotalCount / PAGE_SIZE))}
+                      disabled={conditionalPage >= Math.ceil(conditionalTotalCount / PAGE_SIZE)}
+                      className="px-1.5 py-0.5 text-[10px] rounded bg-surface border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      title="Last page"
+                    >
+                      »»
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
