@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> Polymarket alpha detection platform: ML/NLP pipeline, REST API, and web dashboard.
+> Polymarket alpha detection platform: cross-market arbitrage and conditional probability mispricings via ML/NLP pipeline, REST API, and web dashboard.
 
 ## Project Structure
 
@@ -11,7 +11,7 @@ alphapoly-v1/
 │   ├── runner.py    # Main pipeline orchestrator
 │   ├── state.py     # SQLite state management, _live/ exports
 │   ├── models.py    # Singleton model loaders (GLiNER, embedder, LLM)
-│   └── steps/       # Pipeline steps (fetch, prepare, entities, etc.)
+│   └── steps/       # Pipeline steps (fetch, entities, relations, alpha, arbitrage, etc.)
 ├── server/          # FastAPI backend - REST API, WebSocket prices
 ├── cli/             # Minimal Typer CLI - automation only (run, reset, serve)
 ├── frontend/        # Next.js dashboard - primary UI
@@ -23,20 +23,22 @@ alphapoly-v1/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     core/runner.py                              │
+│                     core/runner.py (14 steps)                   │
 ├─────────────────────────────────────────────────────────────────┤
-│  1. fetch_events()      → Polymarket API                        │
-│  2. prepare_nlp_data()  → Clean text, extract markets           │
-│  3. extract_entities()  → GLiNER2 NER                           │
-│  4. extract_semantics() → LLM event parsing                     │
-│  5. embed_events()      → Sentence transformers                 │
-│  6. enrich_quality()    → Negation detection, flags             │
-│  7. block_candidates()  → FAISS similarity blocking             │
-│  8. classify_struct()   → Rule-based relation classification    │
-│  9. classify_causal()   → LLM causal inference                  │
-│ 10. build_graph()       → NetworkX knowledge graph              │
-│ 11. detect_alpha()      → Conditional probability arbitrage     │
-│ 12. export_live()       → Write to data/_live/                  │
+│  1. Fetch Events        → Polymarket API                        │
+│  2. Identify New Events → Compare with existing state           │
+│  3. Load ML Models      → GLiNER, embedder, LLM client          │
+│  4. Prepare NLP Data    → Clean text, extract markets           │
+│  5. Extract Entities    → GLiNER2 NER                           │
+│  6. Extract Semantics   → LLM event parsing                     │
+│  7. Generate Embeddings → Sentence transformers                 │
+│  8. Enrich Quality      → Negation detection, flags             │
+│  9. Find Candidate Pairs→ FAISS similarity + entity blocking    │
+│ 10. Classify Structural → Rule-based relation classification    │
+│ 11. Classify Causal     → LLM causal inference                  │
+│ 12. Build Graph         → NetworkX knowledge graph              │
+│ 13. Detect Alpha        → Conditional probability opportunities │
+│ 14. Detect Arbitrage    → Cross-market exhaustive sets          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -122,14 +124,29 @@ TIMEOUT_SECONDS = 30
 
 ## API Endpoints
 
+### Data
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/data/opportunities` | GET | Alpha opportunities |
-| `/data/graph` | GET | Knowledge graph |
-| `/data/events` | GET | All events |
+| `/data/opportunities` | GET | Alpha opportunities (`?type=arbitrage\|conditional`) |
+| `/data/graph` | GET | Knowledge graph (nodes + edges) |
+| `/data/events` | GET | All processed events |
 | `/data/entities` | GET | Extracted entities |
-| `/pipeline/status` | GET | Pipeline state |
-| `/pipeline/run/production` | POST | Trigger pipeline run |
+| `/data/relations` | GET | Event relations |
+| `/data/runs` | GET | Pipeline run history |
+
+### Pipeline
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/pipeline/status` | GET | Pipeline state overview |
+| `/pipeline/steps` | GET | Current step progress |
+| `/pipeline/run` | POST | Trigger pipeline run |
+| `/pipeline/run/production` | POST | Production run with options |
+| `/pipeline/reset` | POST | Clear pipeline state |
+
+### Prices
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/prices/current` | GET | Current cached prices |
 | `/prices/ws` | WS | Live price updates |
 
 ## Environment
