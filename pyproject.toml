@@ -28,6 +28,7 @@ dependencies = [
     "watchfiles>=0.21.0",
     # Export
     "jinja2>=3.1.0",
+    "hdbscan>=0.8.41",
 ]
 
 [project.scripts]
