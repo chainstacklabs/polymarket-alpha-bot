@@ -26,6 +26,7 @@ from core.state import (
     load_state,
 )
 from core.steps.alpha import run_alpha_detection
+from core.steps.arbitrage import run_arbitrage_detection
 from core.steps.embeddings import embed_events
 from core.steps.entities import extract_and_process_entities
 from core.steps.fetch import extract_prices, fetch_events
@@ -167,7 +168,7 @@ async def run_async(
         # =====================================================================
         # Step 3 "Update Prices Only" was skipped (only runs when no new events)
         # So we continue with consecutive numbering: 3-13 (11 steps after 1-2)
-        tracker.total_steps = 13
+        tracker.total_steps = 14
         with tracker.step(3, "Load ML Models"):
             logger.info("Step 3: Loading ML models...")
             preload_models()
@@ -368,17 +369,46 @@ async def run_async(
             logger.info(f"Graph: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
 
         # =====================================================================
-        # STEP 13: Alpha detection
+        # STEP 13: Alpha detection (conditional probability)
         # =====================================================================
         with tracker.step(13, "Detect Alpha"):
-            logger.info("Step 13: Detecting alpha opportunities...")
-            opportunities, summary = run_alpha_detection(graph.to_dict(), all_events)
-            tracker.update_details(f"Found {len(opportunities)} opportunities")
-            logger.info(f"Found {len(opportunities)} alpha opportunities")
+            logger.info("Step 13: Detecting conditional alpha opportunities...")
+            conditional_opps, _ = run_alpha_detection(graph.to_dict(), all_events)
+            # Tag with opportunity type
+            for opp in conditional_opps:
+                opp["opportunity_type"] = "conditional"
+            tracker.update_details(f"Found {len(conditional_opps)} conditional")
+            logger.info(
+                f"Found {len(conditional_opps)} conditional alpha opportunities"
+            )
 
-            # Save state and export (grouped in final step)
+        # =====================================================================
+        # STEP 14: Cross-market arbitrage detection
+        # =====================================================================
+        with tracker.step(14, "Detect Arbitrage"):
+            logger.info("Step 14: Detecting cross-market arbitrage...")
+            all_embeddings, all_event_ids = state.get_embeddings()
+
+            arbitrage_opps: list[dict] = []
+            if all_embeddings is not None and len(all_embeddings) > 0:
+                arbitrage_opps, arb_summary = await run_arbitrage_detection(
+                    all_events, all_embeddings, all_event_ids
+                )
+                tracker.update_details(
+                    f"Found {len(arbitrage_opps)} arbitrage from "
+                    f"{arb_summary.get('candidates_analyzed', 0)} candidates"
+                )
+                logger.info(f"Found {len(arbitrage_opps)} arbitrage opportunities")
+            else:
+                tracker.update_details("No embeddings available")
+                logger.warning("No embeddings available for arbitrage detection")
+
+            # Combine all opportunities
+            all_opportunities = conditional_opps + arbitrage_opps
+
+            # Save state and export
             state.add_events(nlp_events)
-            export_live_data(state, all_events, opportunities)
+            export_live_data(state, all_events, all_opportunities)
 
         # Complete run
         state.complete_run(run_id, len(all_events), len(new_events), "completed")
@@ -395,7 +425,9 @@ async def run_async(
             "causal_relations": len(causal_relations),
             "graph_nodes": len(graph.nodes),
             "graph_edges": len(graph.edges),
-            "opportunities": len(opportunities),
+            "opportunities": len(all_opportunities),
+            "conditional_opportunities": len(conditional_opps),
+            "arbitrage_opportunities": len(arbitrage_opps),
             "elapsed_seconds": elapsed,
         }
 

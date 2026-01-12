@@ -139,8 +139,90 @@ def recalculate_opportunities_with_live_prices(
     return recalculated
 
 
+def recalculate_arbitrage_with_live_prices(
+    opportunities: list[dict],
+    live_prices: dict[str, PriceData],
+) -> list[dict]:
+    """
+    Recalculate arbitrage opportunities with live prices.
+
+    Updates position prices, recalculates total cost and profit,
+    and re-sorts by confidence-adjusted profit.
+
+    Args:
+        opportunities: Arbitrage opportunities from opportunities.json
+        live_prices: Current prices from PriceCacheService
+
+    Returns:
+        Recalculated and re-sorted arbitrage opportunities
+    """
+    recalculated = []
+
+    for opp in opportunities:
+        # Only process arbitrage opportunities
+        if opp.get("opportunity_type") != "arbitrage":
+            recalculated.append(opp)
+            continue
+
+        # Make a deep copy to avoid mutating original
+        updated = json.loads(json.dumps(opp))
+
+        positions = updated.get("positions", [])
+        if not positions:
+            recalculated.append(updated)
+            continue
+
+        # Update each position's price
+        total_cost = 0.0
+        for pos in positions:
+            event_id = pos.get("event_id")
+            position_type = pos.get("position", "YES")
+
+            price_data = live_prices.get(event_id)
+            if price_data and price_data.price is not None:
+                # price_data.price is YES price
+                if position_type == "YES":
+                    new_price = price_data.price
+                else:
+                    new_price = 1 - price_data.price
+
+                pos["price"] = round(new_price, 4)
+                pos["price_display"] = f"{int(new_price * 100)}%"
+
+            total_cost += pos.get("price", 0.5)
+
+        # Recalculate profit
+        profit = 1.0 - total_cost
+        confidence = updated.get("confidence", 0.7)
+
+        updated["total_cost"] = round(total_cost, 4)
+        updated["total_cost_display"] = f"{int(total_cost * 100)}%"
+        updated["profit"] = round(profit, 4)
+        updated["profit_display"] = f"+{round(profit * 100, 1)}%"
+        updated["confidence_adjusted_profit"] = round(profit * confidence, 4)
+
+        # Only keep if still profitable (>= 1%)
+        if profit >= 0.01:
+            recalculated.append(updated)
+
+    # Re-sort arbitrage by confidence-adjusted profit
+    arbitrage_opps = [
+        o for o in recalculated if o.get("opportunity_type") == "arbitrage"
+    ]
+    other_opps = [o for o in recalculated if o.get("opportunity_type") != "arbitrage"]
+
+    arbitrage_opps.sort(
+        key=lambda x: x.get("confidence_adjusted_profit", 0),
+        reverse=True,
+    )
+
+    return other_opps + arbitrage_opps
+
+
 def transform_to_frontend_format(opportunities: list[dict]) -> list[dict]:
     """Transform opportunities from flat format to nested format expected by frontend.
+
+    Handles both conditional (trigger/consequence) and arbitrage (positions) opportunities.
 
     Backend format (flat):
         alpha_signal, alpha_direction, confidence, relation_type, trigger.current_price
@@ -151,54 +233,72 @@ def transform_to_frontend_format(opportunities: list[dict]) -> list[dict]:
     transformed = []
 
     for opp in opportunities:
-        # Extract values from flat format
-        alpha_signal = opp.get("alpha_signal", 0)
-        alpha_direction = opp.get("alpha_direction", "BUY")
-        confidence = opp.get("confidence", 0.7)
-        relation_type = opp.get("relation_type", "UNKNOWN")
+        opportunity_type = opp.get("opportunity_type", "conditional")
 
-        # Build nested structure
-        result = {
-            "id": opp.get("id", opp.get("signal_id", "")),
-            "rank": opp.get("rank", 0),
-            "trigger": {
-                "event_id": opp.get("trigger", {}).get("event_id", ""),
-                "slug": opp.get("trigger", {}).get("slug"),
-                "title": opp.get("trigger", {}).get("title", ""),
-                "price": opp.get("trigger", {}).get("current_price", 0.5),
-                "price_display": opp.get("trigger", {}).get(
-                    "price_display",
-                    f"{int(opp.get('trigger', {}).get('current_price', 0.5) * 100)}%",
-                ),
-                "market_url": opp.get("trigger", {}).get("market_url"),
-            },
-            "consequence": {
-                "event_id": opp.get("consequence", {}).get("event_id", ""),
-                "slug": opp.get("consequence", {}).get("slug"),
-                "title": opp.get("consequence", {}).get("title", ""),
-                "price": opp.get("consequence", {}).get("current_price", 0.5),
-                "price_display": opp.get("consequence", {}).get(
-                    "price_display",
-                    f"{int(opp.get('consequence', {}).get('current_price', 0.5) * 100)}%",
-                ),
-                "market_url": opp.get("consequence", {}).get("market_url"),
-            },
-            "relation": {
-                "type": relation_type.replace("_", " ").title(),
-                "type_display": relation_type.replace("_", " ").title(),
-                "confidence": confidence,
-            },
-            "alpha": {
-                "signal": alpha_signal,
-                "signal_display": (
-                    f"+{int(alpha_signal * 100)}%"
-                    if alpha_signal >= 0
-                    else f"{int(alpha_signal * 100)}%"
-                ),
-                "direction": "BUY" if alpha_signal > 0 else "SELL",
-            },
-            "strategy": opp.get("strategy"),
-        }
+        if opportunity_type == "arbitrage":
+            # Arbitrage opportunities have a different structure
+            result = {
+                "id": opp.get("id", opp.get("signal_id", "")),
+                "rank": opp.get("rank", 0),
+                "opportunity_type": "arbitrage",
+                "positions": opp.get("positions", []),
+                "total_cost": opp.get("total_cost", 0),
+                "total_cost_display": opp.get("total_cost_display", ""),
+                "profit": opp.get("profit", 0),
+                "profit_display": opp.get("profit_display", ""),
+                "num_markets": opp.get("num_markets", len(opp.get("positions", []))),
+                "confidence": opp.get("confidence", 0.7),
+                "reasoning": opp.get("reasoning", ""),
+                "strategy": opp.get("strategy"),
+            }
+        else:
+            # Conditional opportunities (trigger/consequence)
+            alpha_signal = opp.get("alpha_signal", 0)
+            confidence = opp.get("confidence", 0.7)
+            relation_type = opp.get("relation_type", "UNKNOWN")
+
+            result = {
+                "id": opp.get("id", opp.get("signal_id", "")),
+                "rank": opp.get("rank", 0),
+                "opportunity_type": "conditional",
+                "trigger": {
+                    "event_id": opp.get("trigger", {}).get("event_id", ""),
+                    "slug": opp.get("trigger", {}).get("slug"),
+                    "title": opp.get("trigger", {}).get("title", ""),
+                    "price": opp.get("trigger", {}).get("current_price", 0.5),
+                    "price_display": opp.get("trigger", {}).get(
+                        "price_display",
+                        f"{int(opp.get('trigger', {}).get('current_price', 0.5) * 100)}%",
+                    ),
+                    "market_url": opp.get("trigger", {}).get("market_url"),
+                },
+                "consequence": {
+                    "event_id": opp.get("consequence", {}).get("event_id", ""),
+                    "slug": opp.get("consequence", {}).get("slug"),
+                    "title": opp.get("consequence", {}).get("title", ""),
+                    "price": opp.get("consequence", {}).get("current_price", 0.5),
+                    "price_display": opp.get("consequence", {}).get(
+                        "price_display",
+                        f"{int(opp.get('consequence', {}).get('current_price', 0.5) * 100)}%",
+                    ),
+                    "market_url": opp.get("consequence", {}).get("market_url"),
+                },
+                "relation": {
+                    "type": relation_type.replace("_", " ").title(),
+                    "type_display": relation_type.replace("_", " ").title(),
+                    "confidence": confidence,
+                },
+                "alpha": {
+                    "signal": alpha_signal,
+                    "signal_display": (
+                        f"+{int(alpha_signal * 100)}%"
+                        if alpha_signal >= 0
+                        else f"{int(alpha_signal * 100)}%"
+                    ),
+                    "direction": "BUY" if alpha_signal > 0 else "SELL",
+                },
+                "strategy": opp.get("strategy"),
+            }
 
         transformed.append(result)
 
@@ -250,11 +350,17 @@ async def get_opportunities(
     limit: int = Query(100, description="Max number of opportunities to return"),
     live: bool = Query(True, description="Use live data (default) or historical"),
     run_id: str | None = Query(None, description="Specific historical run ID"),
+    type: str | None = Query(
+        None, description="Filter by type: 'arbitrage', 'conditional', or all (default)"
+    ),
 ) -> dict[str, Any]:
     """Get alpha opportunities with live price recalculation.
 
     By default, returns live accumulated data from the production pipeline,
     with alpha signals recalculated using current market prices.
+
+    Use type='arbitrage' to get cross-market arbitrage opportunities.
+    Use type='conditional' to get conditional probability opportunities (dependencies).
     Use live=false or specify run_id to access historical script-based runs.
     """
     from server.price_cache import price_cache
@@ -272,24 +378,45 @@ async def get_opportunities(
         else:
             opportunities = []
 
-        # Get live prices and recalculate alpha
+        # Get live prices
         live_prices = price_cache.get_prices()
         metadata = price_cache.get_metadata()
 
         if live_prices:
+            # Recalculate conditional opportunities
             opportunities = recalculate_opportunities_with_live_prices(
                 opportunities, live_prices
             )
+            # Recalculate arbitrage opportunities
+            opportunities = recalculate_arbitrage_with_live_prices(
+                opportunities, live_prices
+            )
 
-        # Apply limit after re-sorting
+        # Filter by opportunity type if specified
+        if type in ("arbitrage", "conditional"):
+            opportunities = [
+                o for o in opportunities if o.get("opportunity_type") == type
+            ]
+
+        # Apply limit after filtering
         opportunities = opportunities[:limit]
 
         # Transform to frontend format (nested structure)
         opportunities = transform_to_frontend_format(opportunities)
 
+        # Count by type for response metadata
+        arbitrage_count = sum(
+            1 for o in opportunities if o.get("opportunity_type") == "arbitrage"
+        )
+        conditional_count = sum(
+            1 for o in opportunities if o.get("opportunity_type") == "conditional"
+        )
+
         return {
             "source": "live",
             "count": len(opportunities),
+            "arbitrage_count": arbitrage_count,
+            "conditional_count": conditional_count,
             "data": {"opportunities": opportunities},
             "prices": {
                 "last_fetch": (

@@ -5,6 +5,10 @@ import { StatusCard } from '@/components/StatusCard'
 import { OpportunityCard } from '@/components/OpportunityCard'
 import { usePrices } from '@/hooks/usePrices'
 
+// =============================================================================
+// TYPES
+// =============================================================================
+
 interface StepProgressData {
   completed_count: number
   total_steps: number
@@ -34,7 +38,7 @@ interface PipelineStatus {
   production: ProductionState | null
 }
 
-interface Opportunity {
+interface ConditionalOpportunity {
   id: string
   rank: number
   trigger: {
@@ -69,6 +73,38 @@ interface Opportunity {
     action?: string
   }
 }
+
+interface ArbitragePosition {
+  event_id: string
+  title: string
+  slug: string | null
+  position: 'YES' | 'NO'
+  price: number
+  price_display: string
+  outcome_covered: string
+  market_url: string
+}
+
+interface ArbitrageOpportunity {
+  signal_id: string
+  opportunity_type: 'arbitrage'
+  positions: ArbitragePosition[]
+  total_cost: number
+  total_cost_display: string
+  profit: number
+  profit_display: string
+  num_markets: number
+  confidence: number
+  confidence_adjusted_profit: number
+  reasoning: string
+  strategy: {
+    description: string
+  }
+}
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
 
 // Relation type explanations for tooltips
 const RELATION_HINTS: Record<string, string> = {
@@ -123,27 +159,37 @@ const getMarketUrl = (event: { market_url?: string; slug?: string; event_id: str
   return `https://polymarket.com/event/${identifier}`
 }
 
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
+
 export default function Dashboard() {
   const [status, setStatus] = useState<PipelineStatus | null>(null)
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([])
+  const [arbitrageOpportunities, setArbitrageOpportunities] = useState<ArbitrageOpportunity[]>([])
+  const [conditionalOpportunities, setConditionalOpportunities] = useState<ConditionalOpportunity[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null)
+  const [selectedOpportunity, setSelectedOpportunity] = useState<ConditionalOpportunity | null>(null)
   const { prices, connected } = usePrices()
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [statusRes, oppsRes] = await Promise.all([
+        const [statusRes, arbRes, condRes] = await Promise.all([
           fetch('http://localhost:8000/pipeline/status'),
-          fetch('http://localhost:8000/data/opportunities?limit=10'),
+          fetch('http://localhost:8000/data/opportunities?type=arbitrage&limit=10'),
+          fetch('http://localhost:8000/data/opportunities?type=conditional&limit=10'),
         ])
 
         if (statusRes.ok) {
           setStatus(await statusRes.json())
         }
-        if (oppsRes.ok) {
-          const data = await oppsRes.json()
-          setOpportunities(data.data?.opportunities || [])
+        if (arbRes.ok) {
+          const data = await arbRes.json()
+          setArbitrageOpportunities(data.data?.opportunities || [])
+        }
+        if (condRes.ok) {
+          const data = await condRes.json()
+          setConditionalOpportunities(data.data?.opportunities || [])
         }
       } catch (error) {
         console.error('Failed to fetch data:', error)
@@ -159,8 +205,8 @@ export default function Dashboard() {
 
   // Use step_progress if available, otherwise check if last run completed
   const lastRunCompleted = status?.production?.last_run?.status === 'completed'
-  const completedSteps = status?.step_progress?.completed_count ?? (lastRunCompleted ? 13 : 0)
-  const totalSteps = status?.step_progress?.total_steps || 13
+  const completedSteps = status?.step_progress?.completed_count ?? (lastRunCompleted ? 14 : 0)
+  const totalSteps = status?.step_progress?.total_steps || 14
 
   return (
     <>
@@ -198,9 +244,15 @@ export default function Dashboard() {
           status={completedSteps === totalSteps ? 'success' : 'warning'}
         />
         <StatusCard
-          title="Opportunities"
-          value={opportunities.length.toString()}
-          subtitle="alpha signals"
+          title="Arbitrage"
+          value={arbitrageOpportunities.length.toString()}
+          subtitle="cross-market"
+          status={arbitrageOpportunities.length > 0 ? 'success' : 'info'}
+        />
+        <StatusCard
+          title="Conditional"
+          value={conditionalOpportunities.length.toString()}
+          subtitle="dependencies"
           status="info"
         />
         <StatusCard
@@ -209,18 +261,18 @@ export default function Dashboard() {
           subtitle="events tracked"
           status={connected ? 'success' : 'warning'}
         />
-        <StatusCard
-          title="Top Alpha"
-          value={opportunities[0]?.alpha.signal_display || '-'}
-          subtitle={opportunities[0]?.relation.type || 'none'}
-          status="success"
-        />
       </div>
 
-      {/* Top Opportunities */}
+      {/* Arbitrage Section - PRIMARY */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-medium text-text-primary">Top Opportunities</h2>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald" />
+            <h2 className="text-sm font-medium text-text-primary">Cross-Market Arbitrage</h2>
+            <span className="text-[10px] text-text-muted px-1.5 py-0.5 bg-surface-elevated rounded border border-border">
+              PRIMARY
+            </span>
+          </div>
           <a
             href="/opportunities"
             className="text-xs text-text-secondary hover:text-cyan transition-colors"
@@ -233,11 +285,52 @@ export default function Dashboard() {
           <div className="flex items-center justify-center py-8">
             <span className="text-sm text-text-muted">Loading...</span>
           </div>
-        ) : opportunities.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 px-4 rounded-lg border border-border bg-surface">
-            <p className="text-sm text-text-secondary mb-1">No opportunities found</p>
+        ) : arbitrageOpportunities.length === 0 ? (
+          <div className="rounded-lg border border-emerald/20 bg-emerald/5 p-6">
+            <div className="flex flex-col items-center justify-center text-center">
+              <div className="w-10 h-10 rounded-full bg-emerald/10 flex items-center justify-center mb-3">
+                <span className="text-emerald text-lg">⬡</span>
+              </div>
+              <p className="text-sm text-text-secondary mb-1">No arbitrage opportunities detected</p>
+              <p className="text-xs text-text-muted max-w-md">
+                Monitoring for mispriced exhaustive sets across different markets.
+                Arbitrage appears when outcomes from multiple events can be fully hedged at a combined cost below 100%.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {arbitrageOpportunities.slice(0, 4).map((opp) => (
+              <ArbitrageCard key={opp.signal_id} opportunity={opp} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Conditional Section - SECONDARY */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-text-muted" />
+            <h2 className="text-sm font-medium text-text-secondary">Event Dependencies</h2>
+          </div>
+          <a
+            href="/opportunities"
+            className="text-xs text-text-secondary hover:text-cyan transition-colors"
+          >
+            View all →
+          </a>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <span className="text-sm text-text-muted">Loading...</span>
+          </div>
+        ) : conditionalOpportunities.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 px-4 rounded-lg border border-border bg-surface">
+            <p className="text-sm text-text-secondary mb-1">No conditional opportunities found</p>
             <p className="text-xs text-text-muted mb-4">
-              Run the pipeline to detect alpha signals
+              Run the pipeline to detect event dependencies
             </p>
             <a href="/pipeline" className="btn-primary text-xs">
               Go to Pipeline
@@ -245,7 +338,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {opportunities.slice(0, 6).map((opp) => (
+            {conditionalOpportunities.slice(0, 4).map((opp) => (
               <OpportunityCard
                 key={opp.id}
                 opportunity={opp}
@@ -257,7 +350,7 @@ export default function Dashboard() {
       </div>
     </div>
 
-    {/* Opportunity Detail Modal */}
+    {/* Conditional Opportunity Detail Modal */}
     {selectedOpportunity && (() => {
       // Backend already recalculates alpha with live prices
       const isBuy = selectedOpportunity.alpha.signal > 0
@@ -276,7 +369,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-3">
               <span className="text-sm font-mono text-text-muted">#{selectedOpportunity.rank}</span>
               <span className={`text-sm font-semibold ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
-                {isBuy ? 'BUY' : 'SELL'} {selectedOpportunity.alpha.signal_display}
+                {isBuy ? 'BUY YES' : 'BUY NO'} {selectedOpportunity.alpha.signal_display}
               </span>
             </div>
             <button
@@ -362,5 +455,82 @@ export default function Dashboard() {
       )
     })()}
     </>
+  )
+}
+
+// =============================================================================
+// ARBITRAGE CARD COMPONENT
+// =============================================================================
+
+function ArbitrageCard({ opportunity }: { opportunity: ArbitrageOpportunity }) {
+  const profitPercent = Math.round(opportunity.profit * 100)
+  const totalCostPercent = Math.round(opportunity.total_cost * 100)
+
+  return (
+    <a
+      href="/opportunities"
+      className="bg-surface border border-emerald/20 rounded-lg p-4 border-l-2 border-l-emerald transition-colors hover:bg-surface-hover block"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono text-text-muted">
+            {opportunity.signal_id}
+          </span>
+          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border">
+            {opportunity.num_markets} markets
+          </span>
+        </div>
+        <span className="text-sm font-semibold font-mono text-emerald">
+          +{profitPercent}% profit
+        </span>
+      </div>
+
+      {/* Positions Summary */}
+      <div className="space-y-1.5 mb-3">
+        {opportunity.positions.slice(0, 2).map((position, idx) => (
+          <div key={idx} className="flex items-center gap-2">
+            <span
+              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                position.position === 'YES'
+                  ? 'bg-emerald/10 text-emerald'
+                  : 'bg-amber/10 text-amber'
+              }`}
+            >
+              {position.position}
+            </span>
+            <span className="text-sm text-text-primary truncate flex-1" title={position.title}>
+              {position.title}
+            </span>
+            <span className="text-xs font-mono text-text-muted">
+              {position.price_display}
+            </span>
+          </div>
+        ))}
+        {opportunity.positions.length > 2 && (
+          <span className="text-xs text-text-muted">
+            +{opportunity.positions.length - 2} more
+          </span>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-3 border-t border-border">
+        <div className="text-xs text-text-muted">
+          Sum: <span className="font-mono">{totalCostPercent}%</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-10 h-1 bg-surface-elevated rounded-full overflow-hidden">
+            <div
+              className="h-full bg-cyan rounded-full"
+              style={{ width: `${opportunity.confidence * 100}%` }}
+            />
+          </div>
+          <span className="text-[10px] font-mono text-text-muted">
+            {Math.round(opportunity.confidence * 100)}%
+          </span>
+        </div>
+      </div>
+    </a>
   )
 }

@@ -17,6 +17,7 @@ dependencies = [
     "pyvis>=0.3.2",
     "rapidfuzz>=3.14.3",
     "sentence-transformers>=5.2.0",
+    "scikit-learn>=1.6.0",
     # CLI
     "typer>=0.9.0",
     "rich>=13.0.0",

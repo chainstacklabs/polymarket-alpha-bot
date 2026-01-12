@@ -2,8 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { usePrices } from '@/hooks/usePrices'
+import { ArbitrageTable } from '@/components/ArbitrageTable'
 
-interface Opportunity {
+// =============================================================================
+// TYPES
+// =============================================================================
+
+interface ConditionalOpportunity {
   id: string
   rank: number
   trigger: {
@@ -40,8 +45,41 @@ interface Opportunity {
   }
 }
 
+interface ArbitragePosition {
+  event_id: string
+  title: string
+  slug: string | null
+  position: 'YES' | 'NO'
+  price: number
+  price_display: string
+  outcome_covered: string
+  market_url: string
+}
+
+interface ArbitrageOpportunity {
+  signal_id: string
+  opportunity_type: 'arbitrage'
+  positions: ArbitragePosition[]
+  total_cost: number
+  total_cost_display: string
+  profit: number
+  profit_display: string
+  num_markets: number
+  confidence: number
+  confidence_adjusted_profit: number
+  reasoning: string
+  strategy: {
+    description: string
+  }
+}
+
+type Tab = 'arbitrage' | 'dependencies'
 type SortField = 'rank' | 'alpha' | 'confidence' | 'trigger_price' | 'consequence_price'
 type SortDirection = 'asc' | 'desc'
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
 
 // Relation type explanations for tooltips
 const RELATION_HINTS: Record<string, string> = {
@@ -67,22 +105,38 @@ const getMarketUrl = (event: { market_url?: string; slug?: string; event_id: str
   return `https://polymarket.com/event/${identifier}`
 }
 
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
+
 export default function OpportunitiesPage() {
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([])
+  const [activeTab, setActiveTab] = useState<Tab>('arbitrage')
+  const [arbitrageOpportunities, setArbitrageOpportunities] = useState<ArbitrageOpportunity[]>([])
+  const [conditionalOpportunities, setConditionalOpportunities] = useState<ConditionalOpportunity[]>([])
   const [loading, setLoading] = useState(true)
   const [sortField, setSortField] = useState<SortField>('rank')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
-  const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null)
+  const [selectedOpportunity, setSelectedOpportunity] = useState<ConditionalOpportunity | null>(null)
   const [filter, setFilter] = useState('')
   const { connected } = usePrices()
 
+  // Fetch opportunities based on active tab
   useEffect(() => {
     async function fetchData() {
+      setLoading(true)
       try {
-        const res = await fetch('http://localhost:8000/data/opportunities?limit=100')
-        if (res.ok) {
-          const data = await res.json()
-          setOpportunities(data.data?.opportunities || [])
+        if (activeTab === 'arbitrage') {
+          const res = await fetch('http://localhost:8000/data/opportunities?limit=100&type=arbitrage')
+          if (res.ok) {
+            const data = await res.json()
+            setArbitrageOpportunities(data.data?.opportunities || [])
+          }
+        } else {
+          const res = await fetch('http://localhost:8000/data/opportunities?limit=100&type=conditional')
+          if (res.ok) {
+            const data = await res.json()
+            setConditionalOpportunities(data.data?.opportunities || [])
+          }
         }
       } catch (error) {
         console.error('Failed to fetch opportunities:', error)
@@ -92,7 +146,7 @@ export default function OpportunitiesPage() {
     }
 
     fetchData()
-  }, [])
+  }, [activeTab])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -103,7 +157,7 @@ export default function OpportunitiesPage() {
     }
   }
 
-  const sortedOpportunities = [...opportunities]
+  const sortedConditionalOpportunities = [...conditionalOpportunities]
     .filter(opp => {
       if (!filter) return true
       const search = filter.toLowerCase()
@@ -158,6 +212,10 @@ export default function OpportunitiesPage() {
     </th>
   )
 
+  const opportunityCount = activeTab === 'arbitrage'
+    ? arbitrageOpportunities.length
+    : conditionalOpportunities.length
+
   return (
     <>
     <div className="space-y-4 animate-fade-in">
@@ -166,17 +224,10 @@ export default function OpportunitiesPage() {
         <div>
           <h1 className="text-xl font-semibold text-text-primary">Opportunities</h1>
           <p className="text-sm text-text-muted mt-0.5">
-            {opportunities.length} alpha signals
+            {opportunityCount} {activeTab === 'arbitrage' ? 'arbitrage' : 'conditional'} signals
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="Filter..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="px-3 py-1.5 w-40 bg-surface-elevated border border-border rounded text-sm text-text-primary placeholder:text-text-muted focus:border-cyan/50 focus:outline-none transition-colors"
-          />
           <div className="flex items-center gap-1.5 text-xs text-text-muted">
             <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
             <span>{connected ? 'Live' : 'Offline'}</span>
@@ -184,119 +235,170 @@ export default function OpportunitiesPage() {
         </div>
       </div>
 
-      {/* Table */}
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <span className="text-sm text-text-muted">Loading...</span>
-        </div>
+      {/* Tabs */}
+      <div className="flex items-center gap-1 p-1 bg-surface-elevated rounded-lg border border-border w-fit">
+        <button
+          onClick={() => setActiveTab('arbitrage')}
+          className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+            activeTab === 'arbitrage'
+              ? 'bg-surface text-text-primary shadow-sm'
+              : 'text-text-muted hover:text-text-secondary'
+          }`}
+        >
+          Arbitrage
+          <span className="ml-1.5 text-xs text-emerald font-mono">
+            {arbitrageOpportunities.length || '-'}
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveTab('dependencies')}
+          className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+            activeTab === 'dependencies'
+              ? 'bg-surface text-text-primary shadow-sm'
+              : 'text-text-muted hover:text-text-secondary'
+          }`}
+        >
+          Dependencies
+          <span className="ml-1.5 text-xs text-text-muted font-mono">
+            {conditionalOpportunities.length || '-'}
+          </span>
+        </button>
+      </div>
+
+      {/* Content */}
+      {activeTab === 'arbitrage' ? (
+        <ArbitrageTable
+          opportunities={arbitrageOpportunities}
+          loading={loading}
+        />
       ) : (
-        <div className="rounded-lg border border-border overflow-hidden bg-surface">
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed">
-              <thead className="bg-surface-elevated border-b border-border">
-                <tr>
-                  <SortHeader field="rank" label="#" hint="Opportunity rank by alpha strength" className="w-10" />
-                  <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-[24%]" title="IF this event happens...">
-                    Trigger
-                  </th>
-                  <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-28" title="Relationship type between trigger and consequence events">
-                    Type
-                  </th>
-                  <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-[24%]" title="...THEN this event is affected">
-                    Consequence
-                  </th>
-                  <SortHeader field="trigger_price" label="T%" hint="Trigger event market probability" className="w-12" />
-                  <SortHeader field="consequence_price" label="C%" hint="Consequence event market probability (live)" className="w-14" />
-                  <SortHeader field="alpha" label="Alpha" hint="Expected profit if trigger occurs. BUY = underpriced, SELL = overpriced" className="w-16" />
-                  <SortHeader field="confidence" label="Conf" hint="Model confidence in the relationship" className="w-14" />
-                  <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-10"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {sortedOpportunities.map((opp) => {
-                  // Backend already recalculates alpha with live prices
-                  const isBuy = opp.alpha.signal > 0
+        <>
+          {/* Filter for Dependencies */}
+          <div className="flex items-center justify-end">
+            <input
+              type="text"
+              placeholder="Filter..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="px-3 py-1.5 w-40 bg-surface-elevated border border-border rounded text-sm text-text-primary placeholder:text-text-muted focus:border-cyan/50 focus:outline-none transition-colors"
+            />
+          </div>
 
-                  return (
-                    <tr
-                      key={opp.id}
-                      className="hover:bg-surface-hover transition-colors cursor-pointer"
-                      onClick={() => setSelectedOpportunity(opp)}
-                    >
-                      <td className="px-2.5 py-2">
-                        <span className="text-xs font-mono text-text-muted">{opp.rank}</span>
-                      </td>
-                      <td className="px-2.5 py-2">
-                        <p className="text-sm text-text-primary truncate" title={opp.trigger.title}>
-                          {opp.trigger.title}
-                        </p>
-                      </td>
-                      <td className="px-2.5 py-2">
-                        <span
-                          className="text-[10px] uppercase text-text-muted truncate block cursor-help"
-                          title={getRelationHint(opp.relation.type)}
-                        >
-                          {opp.relation.type}
-                        </span>
-                      </td>
-                      <td className="px-2.5 py-2">
-                        <p className="text-sm text-text-primary truncate" title={opp.consequence.title}>
-                          {opp.consequence.title}
-                        </p>
-                      </td>
-                      <td className="px-2.5 py-2">
-                        <span className="text-xs font-mono text-text-muted">
-                          {opp.trigger.price_display}
-                        </span>
-                      </td>
-                      <td className="px-2.5 py-2">
-                        <span className="text-xs font-mono text-text-muted">
-                          {opp.consequence.price_display}
-                        </span>
-                      </td>
-                      <td className="px-2.5 py-2">
-                        <span className={`text-xs font-mono font-medium ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
-                          {opp.alpha.signal_display}
-                        </span>
-                      </td>
-                      <td className="px-2.5 py-2">
-                        <span className="text-xs font-mono text-text-muted">
-                          {(opp.relation.confidence * 100).toFixed(0)}%
-                        </span>
-                      </td>
-                      <td className="px-2.5 py-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setSelectedOpportunity(opp)
-                          }}
-                          className="text-xs text-text-muted hover:text-cyan transition-colors"
-                          title="View opportunity details"
-                        >
-                          ↗
-                        </button>
-                      </td>
+          {/* Dependencies Table */}
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <span className="text-sm text-text-muted">Loading...</span>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border overflow-hidden bg-surface">
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed">
+                  <thead className="bg-surface-elevated border-b border-border">
+                    <tr>
+                      <SortHeader field="rank" label="#" hint="Opportunity rank by alpha strength" className="w-10" />
+                      <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-[24%]" title="IF this event happens...">
+                        Trigger
+                      </th>
+                      <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-28" title="Relationship type between trigger and consequence events">
+                        Type
+                      </th>
+                      <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-[24%]" title="...THEN this event is affected">
+                        Consequence
+                      </th>
+                      <SortHeader field="trigger_price" label="T%" hint="Trigger event market probability" className="w-12" />
+                      <SortHeader field="consequence_price" label="C%" hint="Consequence event market probability (live)" className="w-14" />
+                      <SortHeader field="alpha" label="Alpha" hint="Expected profit if trigger occurs. BUY = underpriced, SELL = overpriced" className="w-16" />
+                      <SortHeader field="confidence" label="Conf" hint="Model confidence in the relationship" className="w-14" />
+                      <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-10"></th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {sortedConditionalOpportunities.map((opp) => {
+                      // Backend already recalculates alpha with live prices
+                      const isBuy = opp.alpha.signal > 0
 
-          {/* Footer */}
-          <div className="px-2.5 py-2 bg-surface-elevated border-t border-border flex items-center justify-between">
-            <span className="text-[10px] text-text-muted">
-              {sortedOpportunities.length} of {opportunities.length}
-            </span>
-            <span className="text-[10px] text-text-muted font-mono">
-              {new Date().toLocaleTimeString()}
-            </span>
-          </div>
-        </div>
+                      return (
+                        <tr
+                          key={opp.id}
+                          className="hover:bg-surface-hover transition-colors cursor-pointer"
+                          onClick={() => setSelectedOpportunity(opp)}
+                        >
+                          <td className="px-2.5 py-2">
+                            <span className="text-xs font-mono text-text-muted">{opp.rank}</span>
+                          </td>
+                          <td className="px-2.5 py-2">
+                            <p className="text-sm text-text-primary truncate" title={opp.trigger.title}>
+                              {opp.trigger.title}
+                            </p>
+                          </td>
+                          <td className="px-2.5 py-2">
+                            <span
+                              className="text-[10px] uppercase text-text-muted truncate block cursor-help"
+                              title={getRelationHint(opp.relation.type)}
+                            >
+                              {opp.relation.type}
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-2">
+                            <p className="text-sm text-text-primary truncate" title={opp.consequence.title}>
+                              {opp.consequence.title}
+                            </p>
+                          </td>
+                          <td className="px-2.5 py-2">
+                            <span className="text-xs font-mono text-text-muted">
+                              {opp.trigger.price_display}
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-2">
+                            <span className="text-xs font-mono text-text-muted">
+                              {opp.consequence.price_display}
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-2">
+                            <span className={`text-xs font-mono font-medium ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
+                              {opp.alpha.signal_display}
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-2">
+                            <span className="text-xs font-mono text-text-muted">
+                              {(opp.relation.confidence * 100).toFixed(0)}%
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedOpportunity(opp)
+                              }}
+                              className="text-xs text-text-muted hover:text-cyan transition-colors"
+                              title="View opportunity details"
+                            >
+                              ↗
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer */}
+              <div className="px-2.5 py-2 bg-surface-elevated border-t border-border flex items-center justify-between">
+                <span className="text-[10px] text-text-muted">
+                  {sortedConditionalOpportunities.length} of {conditionalOpportunities.length}
+                </span>
+                <span className="text-[10px] text-text-muted font-mono">
+                  {new Date().toLocaleTimeString()}
+                </span>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
 
-      {/* Opportunity Detail Modal - outside animated container to fix fixed positioning */}
+      {/* Conditional Opportunity Detail Modal - outside animated container to fix fixed positioning */}
       {selectedOpportunity && (() => {
         // Backend already recalculates alpha with live prices
         const isBuy = selectedOpportunity.alpha.signal > 0
@@ -315,7 +417,7 @@ export default function OpportunitiesPage() {
               <div className="flex items-center gap-3">
                 <span className="text-sm font-mono text-text-muted">#{selectedOpportunity.rank}</span>
                 <span className={`text-sm font-semibold ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
-                  {isBuy ? 'BUY' : 'SELL'} {selectedOpportunity.alpha.signal_display}
+                  {isBuy ? 'BUY YES' : 'BUY NO'} {selectedOpportunity.alpha.signal_display}
                 </span>
               </div>
               <button

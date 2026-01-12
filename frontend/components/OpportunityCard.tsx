@@ -86,7 +86,7 @@ export function OpportunityCard({ opportunity, onClick }: OpportunityCardProps) 
             ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}
           `}
         >
-          {isBuy ? 'BUY' : 'SELL'} {alpha.signal_display}
+          {isBuy ? 'BUY YES' : 'BUY NO'} {alpha.signal_display}
         </span>
       </div>
 
