@@ -61,7 +61,7 @@ export default function PipelinePage() {
   const isRunning = runningPipeline || status?.running
   const stepProgress = status?.step_progress
   const completedSteps = stepProgress?.completed_count || 0
-  const totalSteps = stepProgress?.total_steps || 13
+  const totalSteps = stepProgress?.total_steps || 14
   const progressPercent = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0
 
   return (
