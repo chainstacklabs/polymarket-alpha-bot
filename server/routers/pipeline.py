@@ -270,7 +270,12 @@ def run_production_pipeline_task(full: bool, max_events: int | None = None):
 
         _step_tracker = StepTracker()
 
-        mode = "demo" if max_events else ("full" if full else "incremental")
+        # Demo mode (max_events set) always runs as full reset to ensure fresh state
+        # This allows running demo multiple times without stale data
+        is_demo = max_events is not None
+        effective_full = full or is_demo
+
+        mode = "demo" if is_demo else ("full" if full else "incremental")
         _running_pipeline = {
             "started_at": datetime.now(timezone.utc).isoformat(),
             "pipeline_type": "production",
@@ -281,7 +286,9 @@ def run_production_pipeline_task(full: bool, max_events: int | None = None):
 
         from core.runner import run
 
-        result = run(full=full, step_tracker=_step_tracker, max_events=max_events)
+        result = run(
+            full=effective_full, step_tracker=_step_tracker, max_events=max_events
+        )
 
         _running_pipeline["status"] = "completed"
         _running_pipeline["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -305,16 +312,16 @@ async def run_production(
     background_tasks: BackgroundTasks,
 ) -> dict[str, Any]:
     """
-    Trigger the production pipeline (incremental by default).
+    Trigger the production pipeline.
 
-    The production pipeline:
-    - Fetches all events from Polymarket API
-    - Identifies new events not yet processed
-    - Processes only new events (incremental) or all (if full=True)
-    - Updates the _live/ directory with latest data
+    Modes:
+    - Demo (max_events set): Always resets state first, fetches limited events
+    - Full (full=True): Resets state and reprocesses all events
+    - Incremental (default): Only processes new events not yet in state
 
     Args:
         request.full: If True, reset state and reprocess all events
+        request.max_events: Limit events fetched (enables demo mode, always resets)
     """
     global _running_pipeline
 
