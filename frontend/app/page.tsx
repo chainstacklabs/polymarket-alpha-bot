@@ -86,7 +86,7 @@ interface ArbitragePosition {
 }
 
 interface ArbitrageOpportunity {
-  signal_id: string
+  id: string
   opportunity_type: 'arbitrage'
   positions: ArbitragePosition[]
   total_cost: number
@@ -301,7 +301,7 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {arbitrageOpportunities.slice(0, 4).map((opp) => (
-              <ArbitrageCard key={opp.signal_id} opportunity={opp} />
+              <ArbitrageCard key={opp.id} opportunity={opp} />
             ))}
           </div>
         )}
@@ -484,7 +484,7 @@ function ArbitrageCard({ opportunity }: { opportunity: ArbitrageOpportunity }) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono text-text-muted">
-            {opportunity.signal_id}
+            {opportunity.id}
           </span>
           <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border">
             {opportunity.num_markets} markets
