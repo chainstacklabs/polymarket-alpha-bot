@@ -44,7 +44,7 @@ cp .env.example .env  # Add OPENROUTER_API_KEY
 
 **UI (recommended):**
 ```bash
-poly serve               # API server at http://localhost:8000
+uv run poly serve               # API server at http://localhost:8000
 cd frontend && npm i && npm run dev  # UI at http://localhost:3000
 ```
 
@@ -63,9 +63,9 @@ Navigate to Opportunities tab for detailed views with filtering by type.
 
 **CLI:**
 ```bash
-poly run          # Sync new events only
-poly run --full   # Reprocess all events
-poly reset        # Clear pipeline state
+uv run poly run          # Sync new events only
+uv run poly run --full   # Reprocess all events
+uv run poly reset        # Clear pipeline state
 ```
 
 ## Pipeline Architecture

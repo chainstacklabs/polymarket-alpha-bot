@@ -57,10 +57,10 @@ alphapoly-v1/
 
 ```bash
 # CLI (minimal - for automation/cron)
-poly run              # Incremental pipeline
-poly run --full       # Full reprocess
-poly reset            # Clear state
-poly serve            # API server (localhost:8000)
+uv run poly run              # Incremental pipeline
+uv run poly run --full       # Full reprocess
+uv run poly reset            # Clear state
+uv run poly serve            # API server (localhost:8000)
 
 # Development
 uv run python experiments/NN_name.py   # Run experiment script
