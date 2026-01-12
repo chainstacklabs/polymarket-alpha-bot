@@ -2,6 +2,8 @@
 
 Polymarket alpha detection platform: finds cross-market arbitrage and conditional probability mispricings across prediction markets.
 
+![Dashboard Screenshot](assets/dashboard-screenshot.png)
+
 ## How It Works
 
 The platform detects two types of alpha opportunities:
