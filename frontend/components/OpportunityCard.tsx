@@ -58,6 +58,8 @@ export function OpportunityCard({ opportunity, onClick }: OpportunityCardProps) 
 
   // Backend already recalculates alpha with live prices
   const isBuy = alpha.signal > 0
+  // Always show positive alpha magnitude - direction is indicated by BUY YES/NO
+  const alphaDisplay = `+${Math.abs(alpha.signal * 100).toFixed(0)}%`
 
   return (
     <div
@@ -82,11 +84,12 @@ export function OpportunityCard({ opportunity, onClick }: OpportunityCardProps) 
         </div>
         <span
           className={`
-            text-xs font-semibold font-mono
+            text-xs font-semibold font-mono cursor-help
             ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}
           `}
+          title="Potential profit margin if the trigger event occurs"
         >
-          {isBuy ? 'BUY YES' : 'BUY NO'} {alpha.signal_display}
+          {isBuy ? 'BUY YES' : 'BUY NO'} {alphaDisplay}
         </span>
       </div>
 

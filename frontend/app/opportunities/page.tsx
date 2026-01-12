@@ -307,7 +307,7 @@ export default function OpportunitiesPage() {
                       </th>
                       <SortHeader field="trigger_price" label="T%" hint="Trigger event market probability" className="w-12" />
                       <SortHeader field="consequence_price" label="C%" hint="Consequence event market probability (live)" className="w-14" />
-                      <SortHeader field="alpha" label="Alpha" hint="Expected profit if trigger occurs. BUY = underpriced, SELL = overpriced" className="w-16" />
+                      <SortHeader field="alpha" label="Alpha" hint="Expected profit if trigger occurs. BUY YES = underpriced, BUY NO = overpriced" className="w-16" />
                       <SortHeader field="confidence" label="Conf" hint="Model confidence in the relationship" className="w-14" />
                       <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-10"></th>
                     </tr>
@@ -316,6 +316,8 @@ export default function OpportunitiesPage() {
                     {sortedConditionalOpportunities.map((opp) => {
                       // Backend already recalculates alpha with live prices
                       const isBuy = opp.alpha.signal > 0
+                      // Always show positive alpha magnitude
+                      const alphaDisplay = `${isBuy ? 'YES' : 'NO'} +${Math.abs(opp.alpha.signal * 100).toFixed(0)}%`
 
                       return (
                         <tr
@@ -355,8 +357,11 @@ export default function OpportunitiesPage() {
                             </span>
                           </td>
                           <td className="px-2.5 py-2">
-                            <span className={`text-xs font-mono font-medium ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
-                              {opp.alpha.signal_display}
+                            <span
+                              className={`text-xs font-mono font-medium cursor-help ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}
+                              title="Potential profit margin if the trigger event occurs"
+                            >
+                              {alphaDisplay}
                             </span>
                           </td>
                           <td className="px-2.5 py-2">
@@ -402,6 +407,12 @@ export default function OpportunitiesPage() {
       {selectedOpportunity && (() => {
         // Backend already recalculates alpha with live prices
         const isBuy = selectedOpportunity.alpha.signal > 0
+        // Always show positive alpha magnitude - direction is indicated by BUY YES/NO
+        const alphaDisplay = `+${Math.abs(selectedOpportunity.alpha.signal * 100).toFixed(0)}%`
+        // Calculate correct price based on action (YES price vs NO price) - show as dollar amount
+        const actionPrice = isBuy
+          ? `$${selectedOpportunity.consequence.price.toFixed(2)}`
+          : `$${(1 - selectedOpportunity.consequence.price).toFixed(2)}`
 
         return (
         <div
@@ -416,8 +427,11 @@ export default function OpportunitiesPage() {
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-3">
                 <span className="text-sm font-mono text-text-muted">#{selectedOpportunity.rank}</span>
-                <span className={`text-sm font-semibold ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}>
-                  {isBuy ? 'BUY YES' : 'BUY NO'} {selectedOpportunity.alpha.signal_display}
+                <span
+                  className={`text-sm font-semibold cursor-help ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}
+                  title="Potential profit margin if the trigger event occurs"
+                >
+                  {isBuy ? 'BUY YES' : 'BUY NO'} {alphaDisplay}
                 </span>
               </div>
               <button
@@ -488,7 +502,7 @@ export default function OpportunitiesPage() {
                 <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-2">Strategy</h4>
                 <p className="text-sm text-text-secondary">
                   {selectedOpportunity.strategy?.detailed ||
-                    `If "${selectedOpportunity.trigger.title.slice(0, 60)}..." resolves to YES, ${selectedOpportunity.alpha.direction === 'BUY' ? 'buy' : 'sell'} "${selectedOpportunity.consequence.title.slice(0, 60)}..." at the current price of ${selectedOpportunity.consequence.price_display}.`}
+                    `If "${selectedOpportunity.trigger.title.slice(0, 60)}..." resolves to YES, ${isBuy ? 'buy YES shares of' : 'buy NO shares of'} "${selectedOpportunity.consequence.title.slice(0, 60)}..." at the current price of ${actionPrice}.`}
                 </p>
               </div>
 

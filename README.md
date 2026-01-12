@@ -101,7 +101,6 @@ uv run python experiments/01_fetch_events.py
 
 | Acronym | Full Name | Why We Need It |
 |---------|-----------|----------------|
-| **NLP** | Natural Language Processing | Parse market titles and descriptions to extract meaning |
 | **NER** | Named Entity Recognition | Extract people, organizations, dates from text to find related markets |
 | **GLiNER** | Generalist and Lightweight NER | Fast, accurate entity extraction without heavy GPU requirements |
 | **FAISS** | Facebook AI Similarity Search | Efficiently find similar events among thousands using vector embeddings |
