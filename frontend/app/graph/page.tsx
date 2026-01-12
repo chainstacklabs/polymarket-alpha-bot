@@ -137,7 +137,36 @@ export default function GraphPage() {
         const res = await fetch('http://localhost:8000/data/graph')
         if (res.ok) {
           const data = await res.json()
-          setGraphData(data.data)
+          // API returns { data: { nodes: [...], edges: [...] } }
+          // Transform to expected format: { elements: { nodes: [...], edges: [...] } }
+          const apiData = data.data
+          if (apiData && apiData.nodes) {
+            const transformedData: GraphData = {
+              elements: {
+                nodes: apiData.nodes.map((node: any) => ({
+                  data: {
+                    id: node.id,
+                    label: node.title?.slice(0, 30) + (node.title?.length > 30 ? '...' : '') || node.id,
+                    fullTitle: node.title,
+                    price: node.current_price,
+                    priceDisplay: node.current_price ? `${Math.round(node.current_price * 100)}%` : undefined,
+                    hasAlpha: node.has_alpha,
+                    alphaCount: node.alpha_count,
+                  }
+                })),
+                edges: (apiData.edges || []).map((edge: any) => ({
+                  data: {
+                    id: `${edge.source}-${edge.target}-${edge.relation_type}`,
+                    source: edge.source,
+                    target: edge.target,
+                    relation: edge.relation_type,
+                    confidence: edge.confidence,
+                  }
+                })),
+              }
+            }
+            setGraphData(transformedData)
+          }
         }
       } catch (error) {
         console.error('Failed to fetch graph:', error)

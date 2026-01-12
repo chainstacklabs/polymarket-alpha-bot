@@ -107,7 +107,7 @@ export function ArbitrageTable({ opportunities, loading, onSelect }: ArbitrageTa
         <div className="grid gap-4 md:grid-cols-2">
           {filteredOpportunities.map((opp) => (
             <ArbitrageCard
-              key={opp.signal_id}
+              key={opp.id}
               opportunity={opp}
               onClick={() => handleSelect(opp)}
             />
@@ -162,7 +162,7 @@ function ArbitrageCard({
 
       {/* Positions Summary */}
       <div className="space-y-1.5 mb-3">
-        {opportunity.positions.slice(0, 3).map((position, idx) => (
+        {(opportunity.positions ?? []).slice(0, 3).map((position, idx) => (
           <div key={idx} className="flex items-center gap-2">
             <span
               className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
@@ -181,9 +181,9 @@ function ArbitrageCard({
             </span>
           </div>
         ))}
-        {opportunity.positions.length > 3 && (
+        {(opportunity.positions?.length ?? 0) > 3 && (
           <span className="text-xs text-text-muted">
-            +{opportunity.positions.length - 3} more markets
+            +{opportunity.positions!.length - 3} more markets
           </span>
         )}
       </div>
@@ -284,7 +284,7 @@ export function ArbitrageDetailModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {opportunity.positions.map((position, idx) => (
+                {(opportunity.positions ?? []).map((position, idx) => (
                   <tr key={idx} className="hover:bg-surface-hover transition-colors">
                     <td className="px-3 py-2">
                       <span
@@ -382,7 +382,7 @@ export function ArbitrageDetailModal({
 
           {/* Action Buttons */}
           <div className="flex gap-2 pt-2">
-            {opportunity.positions.map((position, idx) => (
+            {(opportunity.positions ?? []).map((position, idx) => (
               <a
                 key={idx}
                 href={position.market_url}

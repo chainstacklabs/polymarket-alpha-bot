@@ -497,7 +497,7 @@ function ArbitrageCard({ opportunity }: { opportunity: ArbitrageOpportunity }) {
 
       {/* Positions Summary */}
       <div className="space-y-1.5 mb-3">
-        {opportunity.positions.slice(0, 2).map((position, idx) => (
+        {(opportunity.positions ?? []).slice(0, 2).map((position, idx) => (
           <div key={idx} className="flex items-center gap-2">
             <span
               className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
@@ -516,9 +516,9 @@ function ArbitrageCard({ opportunity }: { opportunity: ArbitrageOpportunity }) {
             </span>
           </div>
         ))}
-        {opportunity.positions.length > 2 && (
+        {(opportunity.positions?.length ?? 0) > 2 && (
           <span className="text-xs text-text-muted">
-            +{opportunity.positions.length - 2} more
+            +{opportunity.positions!.length - 2} more
           </span>
         )}
       </div>
