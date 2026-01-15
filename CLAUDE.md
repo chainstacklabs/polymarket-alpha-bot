@@ -53,6 +53,12 @@ alphapoly-v1/
 - **Experiments are independent** — no shared modules between experiment scripts
 - **Core uses singletons** — models loaded once via `core/models.py`
 
+## Alpha Detection Scope
+
+**Goal**: Find combinations of positions across DIFFERENT questions where total cost < $1.00 guarantees $1.00 payout in all outcomes.
+
+**Ignore**: Intra-event sibling arbitrage (sum of YES ≠ 1.0) — Polymarket handles this.
+
 ## Commands
 
 ```bash

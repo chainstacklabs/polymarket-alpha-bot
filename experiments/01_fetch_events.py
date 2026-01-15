@@ -1,28 +1,44 @@
 """
-Fetch active Politics events from Polymarket Gamma API.
+01: Fetch Events from Polymarket API.
 
-Retrieves all events tagged "politics" via the Gamma API, including nested
-markets with current prices. Filters inactive/closed events and markets
-client-side. This is the data ingestion entry point for the pipeline.
+WHAT IT DOES
+    Pulls all active prediction markets from Polymarket's Gamma API.
+    Filters to "politics" tag and removes inactive/closed markets.
+    This is the data ingestion entry point - everything starts here.
 
-Pipeline Position: [Polymarket API] → 01_fetch_events → 02_prepare_nlp_data
+WHY WE NEED THIS
+    Polymarket has ~1000 active events with ~4000 markets. We need fresh
+    price data to find mispriced hedges. Markets close and prices change
+    constantly, so we re-fetch before each pipeline run.
 
-Input:
-    External: Polymarket Gamma API (https://gamma-api.polymarket.com)
+HOW IT WORKS
+    1. Query /tags/slug/politics to get the politics tag ID
+    2. Paginate through /events?tag_id=X (100 per page)
+    3. Filter out inactive events and closed markets client-side
+    4. Parse JSON string fields (outcomes, prices) into proper types
+    5. Save with timestamp for reproducibility
 
-Output:
-    To: data/01_fetch_events/<timestamp>/
-    Files:
-        - events.json: All active events with nested markets (prices, outcomes)
-        - tag_info.json: Politics tag metadata from API
-        - summary.json: Fetch statistics (event/market counts, filtered counts)
+PIPELINE
+    [Polymarket API] → [01_fetch_events] → 02_build_groups
 
-Runtime: ~1-2 minutes (API-bound, typically ~800 events)
+INPUT
+    External: https://gamma-api.polymarket.com
+        - /tags/slug/{slug} - Get tag metadata
+        - /events?tag_id=X  - Get events with nested markets
 
-Configuration:
-    - TARGET_TAG_SLUG: Tag to fetch ("politics")
+OUTPUT
+    data/01_fetch_events/<timestamp>/
+        - events.json   : All active events with nested markets array
+        - tag_info.json : Politics tag metadata (id, slug, label)
+        - summary.json  : Run stats (counts, config snapshot)
+
+RUNTIME
+    ~1-2 minutes (API-bound, 10 paginated requests)
+
+CONFIGURATION
+    - TARGET_TAG_SLUG: Tag to filter ("politics")
     - CLOSED: Include closed events (False)
-    - PAGE_SIZE: API pagination size (100)
+    - PAGE_SIZE: Items per API page (100)
 """
 
 import asyncio
@@ -120,14 +136,6 @@ def parse_json_field(value: Any) -> Any:
     return value
 
 
-def parse_outcome_prices(value: Any) -> list[float]:
-    """Parse outcomePrices field to list of floats."""
-    parsed = parse_json_field(value)
-    if isinstance(parsed, list):
-        return [float(p) for p in parsed]
-    return []
-
-
 def process_events(
     events: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], int, int]:
@@ -142,11 +150,13 @@ def process_events(
 
         active_markets = []
         for m in filter(is_active, markets):
-            # Parse JSON string fields
             m = {**m, **{f: parse_json_field(m.get(f)) for f in json_fields if f in m}}
-            # Parse outcomePrices as list of floats
+            # Parse outcomePrices: JSON string → list of floats
             if "outcomePrices" in m:
-                m["outcomePrices"] = parse_outcome_prices(m["outcomePrices"])
+                prices = parse_json_field(m["outcomePrices"])
+                m["outcomePrices"] = (
+                    [float(p) for p in prices] if isinstance(prices, list) else []
+                )
             active_markets.append(m)
         markets_after += len(active_markets)
 
@@ -176,7 +186,6 @@ async def main() -> None:
     async with httpx.AsyncClient(
         base_url=GAMMA_API_BASE_URL, timeout=REQUEST_TIMEOUT
     ) as client:
-        # Get tag ID
         tag = await fetch_json(client, f"/tags/slug/{TARGET_TAG_SLUG}")
         if not tag:
             raise ValueError(f"Tag '{TARGET_TAG_SLUG}' not found")
@@ -185,17 +194,16 @@ async def main() -> None:
         log.info(f"Found tag: {tag.get('label')} (id={tag_id})")
         save_json(tag, output_dir / "tag_info.json")
 
-        # Fetch events
         events_raw = await fetch_all_pages(
             client,
             "/events",
             {"tag_id": tag_id, "active": "true", "closed": str(CLOSED).lower()},
         )
 
-        # Process events and markets
         events, markets_before, markets_after = process_events(events_raw)
         log.info(
-            f"Processed: {len(events)} events, {markets_after} markets (filtered {markets_before - markets_after})"
+            f"Processed: {len(events)} events, {markets_after} markets "
+            f"(filtered {markets_before - markets_after})"
         )
 
         if not events:
@@ -204,7 +212,6 @@ async def main() -> None:
 
         save_json(events, output_dir / "events.json")
 
-        # Summary
         save_json(
             {
                 "timestamp": timestamp,

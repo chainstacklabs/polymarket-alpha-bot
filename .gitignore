@@ -1,4 +1,5 @@
 .playwright-mcp
+.vscode/
 
 # Python-generated files
 __pycache__/
@@ -14,6 +15,7 @@ wheels/
 
 # Local data
 data
+data_2
 *.local.*
 lib
 .DS_store
