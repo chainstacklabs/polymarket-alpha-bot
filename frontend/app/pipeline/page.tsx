@@ -61,7 +61,7 @@ export default function PipelinePage() {
   const isRunning = runningPipeline || status?.running
   const stepProgress = status?.step_progress
   const completedSteps = stepProgress?.completed_count || 0
-  const totalSteps = stepProgress?.total_steps || 14
+  const totalSteps = stepProgress?.total_steps || 8
   const progressPercent = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0
 
   return (
@@ -71,7 +71,7 @@ export default function PipelinePage() {
         <div>
           <h1 className="text-xl font-semibold text-text-primary">Pipeline</h1>
           <p className="text-sm text-text-muted mt-0.5">
-            Data processing and alpha detection
+            Data processing: {completedSteps} of {totalSteps} steps done
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -79,22 +79,25 @@ export default function PipelinePage() {
             onClick={() => runPipeline(false, 20)}
             disabled={isRunning}
             className="btn-secondary text-xs disabled:opacity-50"
+            title="Quick test with 20 events"
           >
-            Run Demo
+            Quick Demo
           </button>
           <button
             onClick={() => runPipeline(false)}
             disabled={isRunning}
             className="btn-secondary text-xs disabled:opacity-50"
+            title="Add recently created events"
           >
-            Sync New Events
+            Add New Events
           </button>
           <button
             onClick={() => runPipeline(true)}
             disabled={isRunning}
             className="btn-primary text-xs disabled:opacity-50"
+            title="Rebuild everything from scratch"
           >
-            {isRunning ? 'Running...' : 'Reprocess All Events'}
+            {isRunning ? 'Processing...' : 'Full Rebuild'}
           </button>
         </div>
       </div>
@@ -113,22 +116,22 @@ export default function PipelinePage() {
             </div>
           ) : status?.production?.last_run ? (
             <div className="text-center py-4">
-              <p className="text-sm text-text-primary mb-2">Last run completed</p>
+              <p className="text-sm text-text-primary mb-2">Previous run finished</p>
               <div className="text-xs text-text-muted space-y-1">
-                <p>Status: <span className="text-emerald">{status.production.last_run.status}</span></p>
-                <p>Events processed: {status.production.last_run.events_processed}</p>
-                <p>New events: {status.production.last_run.new_events}</p>
+                <p>Result: <span className="text-emerald capitalize">{status.production.last_run.status}</span></p>
+                <p>Total events analyzed: {status.production.last_run.events_processed}</p>
+                <p>New events found: {status.production.last_run.new_events}</p>
                 <p className="text-text-muted/70">
                   {new Date(status.production.last_run.completed_at).toLocaleString()}
                 </p>
               </div>
               <p className="text-xs text-text-muted mt-3">
-                (Step details cleared after server restart)
+                (Progress details reset on server restart)
               </p>
             </div>
           ) : (
             <div className="text-center py-2">
-              <p className="text-sm text-text-muted">No recent pipeline run</p>
+              <p className="text-sm text-text-muted">No data yet - click a button above to start</p>
             </div>
           )}
         </div>

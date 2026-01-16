@@ -216,16 +216,37 @@ class LLMClient:
         await self.close()
 
 
-# Singleton instance
-_llm_client: LLMClient | None = None
+# Singleton instances (keyed by model)
+_llm_clients: dict[str, LLMClient] = {}
 
 
-def get_llm_client() -> LLMClient:
-    """Get singleton LLM client."""
-    global _llm_client
-    if _llm_client is None:
-        _llm_client = LLMClient()
-    return _llm_client
+def get_llm_client(model: str | None = None) -> LLMClient:
+    """
+    Get LLM client for the specified model.
+
+    Args:
+        model: Optional model name. If not provided, uses default LLM_MODEL.
+               Examples: "xiaomi/mimo-v2-flash:free", "anthropic/claude-sonnet-4"
+
+    Returns:
+        LLMClient instance for the specified model
+    """
+    global _llm_clients
+    model_key = model or LLM_MODEL
+
+    if model_key not in _llm_clients:
+        _llm_clients[model_key] = LLMClient(model=model_key)
+        logger.debug(f"Created LLM client for model: {model_key}")
+
+    return _llm_clients[model_key]
+
+
+async def close_all_llm_clients() -> None:
+    """Close all LLM client connections."""
+    global _llm_clients
+    for client in _llm_clients.values():
+        await client.close()
+    _llm_clients = {}
 
 
 # =============================================================================
@@ -251,5 +272,5 @@ def clear_model_cache() -> None:
     """Clear model caches (for testing)."""
     get_gliner.cache_clear()
     get_embedder.cache_clear()
-    global _llm_client
-    _llm_client = None
+    global _llm_clients
+    _llm_clients = {}

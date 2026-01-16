@@ -46,11 +46,13 @@ function StepCard({
   isExpanded,
   onToggle,
   isLast,
+  totalSteps,
 }: {
   step: StepProgress
   isExpanded: boolean
   onToggle: () => void
   isLast: boolean
+  totalSteps: number
 }) {
   return (
     <div className="flex gap-3">
@@ -70,8 +72,11 @@ function StepCard({
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
+              {step.emoji && (
+                <span className="text-sm">{step.emoji}</span>
+              )}
               <span className="text-xs font-mono text-text-muted">
-                {step.step_number.toString().padStart(2, '0')}
+                [{step.step_number}/{totalSteps}]
               </span>
               <span className="text-sm font-medium text-text-primary group-hover:text-cyan transition-colors">
                 {step.step_name}
@@ -107,8 +112,14 @@ function StepCard({
             </div>
           </div>
 
+          {/* Step description - always shown */}
+          {step.description && (
+            <p className="text-xs text-text-muted mt-1 ml-8">{step.description}</p>
+          )}
+
+          {/* Runtime details - shown below description */}
           {step.details && (
-            <p className="text-xs text-text-secondary mt-1 ml-7">{step.details}</p>
+            <p className="text-xs text-emerald mt-0.5 ml-8">{step.details}</p>
           )}
         </button>
 
@@ -183,7 +194,7 @@ export default function PipelineTimeline({
       <div className="px-4 py-3 border-b border-border bg-surface-elevated">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-medium text-text-primary">
-            {isRunning ? 'Pipeline Progress' : 'Last Run'}
+            {isRunning ? 'Processing...' : 'Previous Run'}
           </h3>
           {stepProgress && (
             <span className="text-xs text-text-muted font-mono">
@@ -226,11 +237,12 @@ export default function PipelineTimeline({
               isExpanded={expandedSteps.has(step.step_number)}
               onToggle={() => toggleStep(step.step_number)}
               isLast={idx === allSteps.length - 1}
+              totalSteps={stepProgress?.total_steps || 8}
             />
           ))
         ) : (
           <div className="text-center py-4 text-sm text-text-muted">
-            {isRunning ? 'Starting pipeline...' : 'Run the pipeline to see step details'}
+            {isRunning ? 'Starting...' : 'Click a button above to start processing'}
           </div>
         )}
       </div>

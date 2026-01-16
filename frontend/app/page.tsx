@@ -1,202 +1,173 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { StatusCard } from '@/components/StatusCard'
-import { OpportunityCard } from '@/components/OpportunityCard'
+import Link from 'next/link'
 import { usePrices } from '@/hooks/usePrices'
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-interface StepProgressData {
-  completed_count: number
-  total_steps: number
-}
-
-interface LastRun {
-  id: number
-  run_type: string
-  started_at: string
-  completed_at: string | null
-  events_processed: number
-  new_events: number
-  status: string
-}
-
-interface ProductionState {
-  total_events: number
-  total_entities: number
-  total_edges: number
-  last_full_run: string | null
-  last_refresh: string | null
-  last_run: LastRun | null
+interface Portfolio {
+  pair_id: string
+  target_group_title: string
+  target_group_slug?: string
+  target_market_slug?: string
+  target_question: string
+  target_position: 'YES' | 'NO'
+  target_price: number
+  target_bracket?: string
+  cover_group_title: string
+  cover_group_slug?: string
+  cover_market_slug?: string
+  cover_question: string
+  cover_position: 'YES' | 'NO'
+  cover_price: number
+  cover_bracket?: string
+  cover_probability: number
+  total_cost: number
+  coverage: number
+  loss_probability: number
+  expected_profit: number
+  tier: number
+  tier_label: string
+  relationship?: string
+  validation_analysis?: string
+  viability_score?: number
 }
 
 interface PipelineStatus {
-  step_progress: StepProgressData | null
-  production: ProductionState | null
+  step_progress: {
+    completed_count: number
+    total_steps: number
+  } | null
+  production: {
+    total_events: number
+    last_run: {
+      status: string
+      completed_at: string | null
+    } | null
+  } | null
 }
 
-interface ConditionalOpportunity {
-  id: string
-  rank: number
-  trigger: {
-    event_id: string
-    slug?: string
-    title: string
-    price: number
-    price_display: string
-    market_url?: string
-  }
-  consequence: {
-    event_id: string
-    slug?: string
-    title: string
-    price: number
-    price_display: string
-    market_url?: string
-  }
-  relation: {
-    type: string
-    type_display: string
-    confidence: number
-  }
-  alpha: {
-    signal: number
-    signal_display: string
-    direction: string
-  }
-  strategy?: {
-    summary?: string
-    detailed?: string
-    action?: string
-  }
-}
-
-interface ArbitragePosition {
-  event_id: string
-  title: string
-  slug: string | null
-  position: 'YES' | 'NO'
-  price: number
-  price_display: string
-  outcome_covered: string
-  market_url: string
-}
-
-interface ArbitrageOpportunity {
-  id: string
-  opportunity_type: 'arbitrage'
-  positions: ArbitragePosition[]
-  total_cost: number
-  total_cost_display: string
-  profit: number
-  profit_display: string
-  num_markets: number
-  confidence: number
-  confidence_adjusted_profit: number
-  reasoning: string
-  strategy: {
-    description: string
-  }
+interface PortfolioStats {
+  total: number
+  profitable: number
+  byTier: Record<string, number>
+  avgCoverage: number
 }
 
 // =============================================================================
-// CONSTANTS
+// TIER CONFIGURATION
 // =============================================================================
 
-// Relation type explanations for tooltips
-const RELATION_HINTS: Record<string, string> = {
-  'DIRECT_CAUSE': 'A directly causes B to happen (high probability)',
-  'ENABLING_CONDITION': 'A makes B more likely, but doesn\'t guarantee it',
-  'INHIBITING_CONDITION': 'A reduces the likelihood of B happening',
-  'REQUIRES': 'B cannot happen unless A happens first',
-  'CORRELATED': 'A and B tend to move together, but unclear which causes which',
-  'TIMEFRAME_VARIANT': 'Same event with different time deadlines',
-  'THRESHOLD_VARIANT': 'Same event with different numeric thresholds',
-  'MUTUALLY_EXCLUSIVE': 'If A happens, B cannot happen (and vice versa)',
+const TIER_CONFIG: Record<number, { label: string; shortLabel: string; color: string; bg: string; border: string; desc: string }> = {
+  1: {
+    label: 'Excellent',
+    shortLabel: 'Tier 1',
+    color: 'text-emerald',
+    bg: 'bg-emerald/10',
+    border: 'border-emerald/30',
+    desc: '95%+ protection'
+  },
+  2: {
+    label: 'Good',
+    shortLabel: 'Tier 2',
+    color: 'text-cyan',
+    bg: 'bg-cyan/10',
+    border: 'border-cyan/30',
+    desc: '90-95% protection'
+  },
+  3: {
+    label: 'Fair',
+    shortLabel: 'Tier 3',
+    color: 'text-amber',
+    bg: 'bg-amber/10',
+    border: 'border-amber/30',
+    desc: '85-90% protection'
+  },
+  4: {
+    label: 'Low',
+    shortLabel: 'Tier 4',
+    color: 'text-text-muted',
+    bg: 'bg-text-muted/5',
+    border: 'border-border',
+    desc: 'Under 85%'
+  },
 }
 
-const getRelationHint = (type: string): string => {
-  const normalized = type.toUpperCase().replace(/\s+/g, '_')
-  return RELATION_HINTS[normalized] || type
-}
+// =============================================================================
+// HELPERS
+// =============================================================================
 
-// Format timestamp to human-readable relative time
-const formatRelativeTime = (isoString: string): string => {
+const formatTime = (isoString: string | null): string => {
+  if (!isoString) return '—'
   const date = new Date(isoString)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / 60000)
   const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
 
   if (diffMins < 1) return 'just now'
   if (diffMins < 60) return `${diffMins}m ago`
   if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
-
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-// Format timestamp to full date/time
-const formatDateTime = (isoString: string): string => {
-  const date = new Date(isoString)
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  })
-}
-
-// Generate Polymarket URL
-const getMarketUrl = (event: { market_url?: string; slug?: string; event_id: string }) => {
-  if (event.market_url) return event.market_url
-  const identifier = event.slug || event.event_id
-  return `https://polymarket.com/event/${identifier}`
 }
 
 // =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
-export default function Dashboard() {
-  const [status, setStatus] = useState<PipelineStatus | null>(null)
-  const [arbitrageOpportunities, setArbitrageOpportunities] = useState<ArbitrageOpportunity[]>([])
-  const [conditionalOpportunities, setConditionalOpportunities] = useState<ConditionalOpportunity[]>([])
-  const [arbitrageTotalCount, setArbitrageTotalCount] = useState(0)
-  const [conditionalTotalCount, setConditionalTotalCount] = useState(0)
+export default function OverviewPage() {
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([])
+  const [stats, setStats] = useState<PortfolioStats>({ total: 0, profitable: 0, byTier: {}, avgCoverage: 0 })
+  const [pipeline, setPipeline] = useState<PipelineStatus | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedOpportunity, setSelectedOpportunity] = useState<ConditionalOpportunity | null>(null)
-  const { prices, connected } = usePrices()
+  const [selectedPortfolio, setSelectedPortfolio] = useState<Portfolio | null>(null)
+  const { connected } = usePrices()
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [statusRes, arbRes, condRes] = await Promise.all([
-          fetch('http://localhost:8000/pipeline/status'),
-          fetch('http://localhost:8000/data/opportunities?type=arbitrage&limit=10'),
-          fetch('http://localhost:8000/data/opportunities?type=conditional&limit=10'),
+        // Fetch pipeline status first (always available)
+        const pipelineRes = await fetch('http://localhost:8000/pipeline/status')
+        if (pipelineRes.ok) {
+          setPipeline(await pipelineRes.json())
+        }
+
+        // Fetch portfolios - may return 404 during pipeline reset
+        const [excellentRes, statsRes] = await Promise.all([
+          fetch('http://localhost:8000/data/portfolios?limit=4&max_tier=1'),
+          fetch('http://localhost:8000/data/portfolios?limit=100&max_tier=4'),
         ])
 
-        if (statusRes.ok) {
-          setStatus(await statusRes.json())
+        if (excellentRes.ok) {
+          const data = await excellentRes.json()
+          setPortfolios(data.data?.portfolios || [])
+        } else if (excellentRes.status === 404) {
+          // Data not ready yet (pipeline running after reset)
+          setPortfolios([])
         }
-        if (arbRes.ok) {
-          const data = await arbRes.json()
-          setArbitrageOpportunities(data.data?.opportunities || [])
-          setArbitrageTotalCount(data.total_count || 0)
-        }
-        if (condRes.ok) {
-          const data = await condRes.json()
-          setConditionalOpportunities(data.data?.opportunities || [])
-          setConditionalTotalCount(data.total_count || 0)
+
+        if (statsRes.ok) {
+          const data = await statsRes.json()
+          const allPortfolios = data.data?.portfolios || []
+          // Use meta for true totals (root level values may be filtered)
+          setStats({
+            total: data.meta?.count || data.total_count || 0,
+            profitable: data.meta?.profitable_count || data.profitable_count || 0,
+            byTier: data.meta?.by_tier || {},
+            avgCoverage: allPortfolios.length > 0
+              ? allPortfolios.reduce((acc: number, p: Portfolio) => acc + p.coverage, 0) / allPortfolios.length
+              : 0,
+          })
+        } else if (statsRes.status === 404) {
+          // Data not ready yet (pipeline running after reset)
+          setStats({ total: 0, profitable: 0, byTier: {}, avgCoverage: 0 })
         }
       } catch (error) {
-        console.error('Failed to fetch data:', error)
+        // Network error - silently handle, data will refresh on next interval
+        console.debug('Fetch interrupted:', error)
       } finally {
         setLoading(false)
       }
@@ -207,343 +178,409 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [])
 
-  // Use step_progress if available, otherwise check if last run completed
-  const lastRunCompleted = status?.production?.last_run?.status === 'completed'
-  const completedSteps = status?.step_progress?.completed_count ?? (lastRunCompleted ? 14 : 0)
-  const totalSteps = status?.step_progress?.total_steps || 14
+  const pipelineComplete = pipeline?.production?.last_run?.status === 'completed'
+  const lastRunTime = pipeline?.production?.last_run?.completed_at
 
   return (
-    <>
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-8 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text-primary">Dashboard</h1>
+          <h1 className="text-xl font-semibold text-text-primary">Overview</h1>
           <p className="text-sm text-text-muted mt-0.5">
-            Alpha opportunities from Polymarket
+            Top hedging pairs with ≥95% win rate — near-guaranteed payouts
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <div className="flex items-center gap-1.5 text-xs text-text-muted">
-            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
-            <span>{connected ? 'Live' : 'Offline'}</span>
-          </div>
-          {status?.production?.last_run?.completed_at && (
-            <div
-              className="text-[10px] text-text-muted cursor-help"
-              title={`Last snapshot: ${formatDateTime(status.production.last_run.completed_at)}\nEvents processed: ${status.production.last_run.events_processed || 0}`}
-            >
-              Events snapshot: {formatRelativeTime(status.production.last_run.completed_at)}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatusCard
-          title="Pipeline"
-          value={`${completedSteps}/${totalSteps}`}
-          subtitle="steps complete"
-          status={completedSteps === totalSteps ? 'success' : 'warning'}
-        />
-        <StatusCard
-          title="Arbitrage"
-          value={arbitrageTotalCount.toString()}
-          subtitle="cross-market"
-          status={arbitrageTotalCount > 0 ? 'success' : 'info'}
-        />
-        <StatusCard
-          title="Conditional"
-          value={conditionalTotalCount.toString()}
-          subtitle="dependencies"
-          status="info"
-        />
-        <StatusCard
-          title="Live Prices"
-          value={Object.keys(prices).length.toString()}
-          subtitle="events tracked"
-          status={connected ? 'success' : 'warning'}
-        />
-      </div>
-
-      {/* Arbitrage Section - PRIMARY */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald" />
-            <h2 className="text-sm font-medium text-text-primary">Cross-Market Arbitrage</h2>
-            <span className="text-[10px] text-text-muted px-1.5 py-0.5 bg-surface-elevated rounded border border-border">
-              PRIMARY
+        <div className="flex items-center gap-3">
+          {lastRunTime && (
+            <span className="text-xs text-text-muted">
+              Updated {formatTime(lastRunTime)}
             </span>
+          )}
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
+            <span className="text-xs text-text-muted">{connected ? 'Live' : 'Offline'}</span>
           </div>
-          <a
-            href="/opportunities"
-            className="text-xs text-text-secondary hover:text-cyan transition-colors"
-          >
-            View all →
-          </a>
         </div>
+      </header>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <span className="text-sm text-text-muted">Loading...</span>
-          </div>
-        ) : arbitrageOpportunities.length === 0 ? (
-          <div className="rounded-lg border border-emerald/20 bg-emerald/5 p-6">
-            <div className="flex flex-col items-center justify-center text-center">
-              <div className="w-10 h-10 rounded-full bg-emerald/10 flex items-center justify-center mb-3">
-                <span className="text-emerald text-lg">⬡</span>
+      {/* Compact Stats Bar */}
+      <section className="bg-surface border border-border rounded-lg p-3">
+        <div className="flex items-center justify-between gap-6">
+          {/* Key metrics */}
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-semibold font-mono text-cyan">{stats.total}</span>
+              <div className="text-xs text-text-muted leading-tight">
+                <p>strategies</p>
+                <p className="text-text-muted/70">{stats.profitable} profitable</p>
               </div>
-              <p className="text-sm text-text-secondary mb-1">No arbitrage opportunities detected</p>
-              <p className="text-xs text-text-muted max-w-md">
-                Monitoring for mispriced exhaustive sets across different markets.
-                Arbitrage appears when outcomes from multiple events can be fully hedged at a combined cost below $1.00.
-              </p>
+            </div>
+            <div className="w-px h-8 bg-border" />
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-semibold font-mono text-amber">
+                {stats.avgCoverage > 0 ? `${(stats.avgCoverage * 100).toFixed(0)}%` : '—'}
+              </span>
+              <span className="text-xs text-text-muted">avg win rate</span>
+              {/* Info tooltip */}
+              <div className="relative group/winrate">
+                <button className="w-4 h-4 rounded-full bg-surface-elevated border border-border text-[10px] text-text-muted hover:text-text-secondary hover:border-text-muted transition-colors flex items-center justify-center">
+                  ?
+                </button>
+                <div className="absolute left-0 top-6 w-56 p-2.5 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/winrate:opacity-100 group-hover/winrate:visible transition-all z-50">
+                  <p className="text-[11px] text-text-secondary">
+                    Average probability of getting $1 back across all strategies.
+                  </p>
+                  <p className="text-[10px] text-text-muted mt-1.5">
+                    Higher is better — 100% would mean guaranteed payout on every strategy.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="w-px h-8 bg-border" />
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${pipelineComplete ? 'bg-emerald' : 'bg-rose'}`} />
+              <span className="text-xs text-text-muted">{pipelineComplete ? 'Data ready' : 'Needs refresh'}</span>
             </div>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {arbitrageOpportunities.slice(0, 4).map((opp) => (
-              <ArbitrageCard key={opp.id} opportunity={opp} />
-            ))}
-          </div>
-        )}
-      </div>
 
-      {/* Conditional Section - SECONDARY */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-text-muted" />
-            <h2 className="text-sm font-medium text-text-secondary">Event Dependencies</h2>
+          {/* Tier distribution inline */}
+          <div className="flex items-center gap-3">
+            {[1, 2, 3, 4].map(tier => {
+              const config = TIER_CONFIG[tier]
+              const count = stats.byTier[`tier_${tier}`] || 0
+              return (
+                <div key={tier} className="flex items-center gap-1.5" title={config.desc}>
+                  <span className={`text-lg font-semibold font-mono ${config.color}`}>{count}</span>
+                  <span className={`text-[10px] ${config.color}`}>{config.label}</span>
+                </div>
+              )
+            })}
+            {/* Info tooltip */}
+            <div className="relative group ml-1">
+              <button className="w-4 h-4 rounded-full bg-surface-elevated border border-border text-[10px] text-text-muted hover:text-text-secondary hover:border-text-muted transition-colors flex items-center justify-center">
+                ?
+              </button>
+              <div className="absolute right-0 top-6 w-80 p-3 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                <p className="text-xs font-medium text-text-primary mb-2">How quality tiers work</p>
+
+                <div className="space-y-1 text-[10px] mb-3">
+                  <p><span className="text-emerald font-medium">Excellent:</span> ≥95% win rate</p>
+                  <p><span className="text-cyan font-medium">Good:</span> 90-95% win rate</p>
+                  <p><span className="text-amber font-medium">Fair:</span> 85-90% win rate</p>
+                  <p><span className="text-text-muted font-medium">Low:</span> under 85%</p>
+                </div>
+
+                {/* LLM section */}
+                <div className="text-[10px] pt-2 border-t border-border space-y-1.5">
+                  <p className="font-medium text-violet-400">LLM reasoning:</p>
+                  <p className="text-text-muted"><span className="text-violet-400">•</span> Finds logical implications between markets (A→B)</p>
+                  <p className="text-text-muted"><span className="text-violet-400">•</span> Classifies relationship strength: <span className="text-text-secondary">necessary</span>, <span className="text-text-secondary">strong</span>, or <span className="text-text-secondary">inverse</span></p>
+                  <p className="text-text-muted"><span className="text-violet-400">•</span> Validates temporal & logical coherence of each pair</p>
+                </div>
+
+                {/* Deterministic section */}
+                <div className="text-[10px] pt-2 mt-2 border-t border-border space-y-1.5">
+                  <p className="font-medium text-cyan">Calculated (deterministic):</p>
+                  <p className="text-text-muted"><span className="text-cyan">•</span> Maps strength → probability: necessary=98%, strong=85%, inverse=70%</p>
+                  <p className="text-text-muted"><span className="text-cyan">•</span> Derives cover positions via contrapositive logic</p>
+                  <p className="text-text-muted"><span className="text-cyan">•</span> Win rate = P(target) + P(¬target) × P(cover)</p>
+                  <p className="text-text-muted"><span className="text-cyan">•</span> Tier assigned by win rate thresholds above</p>
+                </div>
+              </div>
+            </div>
           </div>
-          <a
-            href="/opportunities"
-            className="text-xs text-text-secondary hover:text-cyan transition-colors"
+        </div>
+      </section>
+
+      {/* Best Strategies */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wide">
+            Best Strategies
+          </h2>
+          <Link
+            href="/portfolios"
+            className="text-xs text-text-muted hover:text-cyan transition-colors"
           >
             View all →
-          </a>
+          </Link>
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <span className="text-sm text-text-muted">Loading...</span>
+          <div className="flex items-center justify-center py-12 border border-border rounded-lg bg-surface">
+            <span className="text-sm text-text-muted">Loading strategies...</span>
           </div>
-        ) : conditionalOpportunities.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 px-4 rounded-lg border border-border bg-surface">
-            <p className="text-sm text-text-secondary mb-1">No conditional opportunities found</p>
-            <p className="text-xs text-text-muted mb-4">
-              Run the pipeline to detect event dependencies
-            </p>
-            <a href="/pipeline" className="btn-primary text-xs">
+        ) : portfolios.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 border border-border rounded-lg bg-surface">
+            <p className="text-sm text-text-secondary mb-1">No excellent strategies found yet</p>
+            <p className="text-xs text-text-muted mb-4">Run the pipeline to discover hedging opportunities</p>
+            <Link href="/pipeline" className="btn-primary text-sm">
               Go to Pipeline
-            </a>
+            </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {conditionalOpportunities.slice(0, 4).map((opp) => (
-              <OpportunityCard
-                key={opp.id}
-                opportunity={opp}
-                onClick={() => setSelectedOpportunity(opp)}
+          <div className="grid grid-cols-2 gap-3">
+            {portfolios.map((p, idx) => (
+              <PortfolioCard
+                key={p.pair_id}
+                portfolio={p}
+                rank={idx + 1}
+                onClick={() => setSelectedPortfolio(p)}
               />
             ))}
           </div>
         )}
-      </div>
+      </section>
+
+      {/* Portfolio Detail Modal */}
+      {selectedPortfolio && (
+        <PortfolioModal
+          portfolio={selectedPortfolio}
+          onClose={() => setSelectedPortfolio(null)}
+        />
+      )}
     </div>
-
-    {/* Conditional Opportunity Detail Modal */}
-    {selectedOpportunity && (() => {
-      // Backend already recalculates alpha with live prices
-      const isBuy = selectedOpportunity.alpha.signal > 0
-      // Always show positive alpha magnitude - direction is indicated by BUY YES/NO
-      const alphaDisplay = `+${Math.abs(selectedOpportunity.alpha.signal * 100).toFixed(0)}%`
-      // Calculate correct price based on action (YES price vs NO price) - show as dollar amount
-      const actionPrice = isBuy
-        ? `$${selectedOpportunity.consequence.price.toFixed(2)}`
-        : `$${(1 - selectedOpportunity.consequence.price).toFixed(2)}`
-
-      return (
-      <div
-        className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-        onClick={() => setSelectedOpportunity(null)}
-      >
-        <div
-          className="bg-surface border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-fade-in"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Modal Header */}
-          <div className="flex items-center justify-between p-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-mono text-text-muted">#{selectedOpportunity.rank}</span>
-              <span
-                className={`text-sm font-semibold cursor-help ${isBuy ? 'text-alpha-buy' : 'text-alpha-sell'}`}
-                title="Potential profit margin if the trigger event occurs"
-              >
-                {isBuy ? 'BUY YES' : 'BUY NO'} {alphaDisplay}
-              </span>
-            </div>
-            <button
-              onClick={() => setSelectedOpportunity(null)}
-              className="text-text-muted hover:text-text-primary transition-colors text-xl"
-            >
-              ×
-            </button>
-          </div>
-
-          {/* Modal Content */}
-          <div className="p-4 space-y-4">
-            {/* Trigger Event */}
-            <div className="bg-surface-elevated rounded-lg p-4 border border-border">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">IF (Trigger)</span>
-                <span className="text-xs font-mono text-text-muted">{selectedOpportunity.trigger.price_display}</span>
-              </div>
-              <p className="text-sm text-text-primary mb-3">{selectedOpportunity.trigger.title}</p>
-              <a
-                href={getMarketUrl(selectedOpportunity.trigger)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-cyan hover:text-cyan/80 transition-colors"
-              >
-                View on Polymarket →
-              </a>
-            </div>
-
-            {/* Relation Type */}
-            <div className="flex items-center justify-center py-2">
-              <div className="flex items-center gap-2 text-text-muted">
-                <div className="h-px w-8 bg-border" />
-                <span
-                  className="text-[10px] uppercase tracking-wide px-2 py-1 rounded bg-surface-elevated border border-border cursor-help"
-                  title={getRelationHint(selectedOpportunity.relation.type)}
-                >
-                  {selectedOpportunity.relation.type}
-                </span>
-                <span className="text-[10px] font-mono">
-                  ({(selectedOpportunity.relation.confidence * 100).toFixed(0)}% conf)
-                </span>
-                <div className="h-px w-8 bg-border" />
-              </div>
-            </div>
-
-            {/* Consequence Event */}
-            <div className={`rounded-lg p-4 border-2 ${isBuy ? 'border-alpha-buy/30 bg-alpha-buy/5' : 'border-alpha-sell/30 bg-alpha-sell/5'}`}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">THEN (Consequence)</span>
-                <span className="text-xs font-mono text-text-muted">
-                  {selectedOpportunity.consequence.price_display}
-                </span>
-              </div>
-              <p className="text-sm text-text-primary mb-3">{selectedOpportunity.consequence.title}</p>
-              <a
-                href={getMarketUrl(selectedOpportunity.consequence)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-cyan hover:text-cyan/80 transition-colors"
-              >
-                View on Polymarket →
-              </a>
-            </div>
-
-            {/* Strategy */}
-            <div className="bg-surface-elevated rounded-lg p-4 border border-border">
-              <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-2">Strategy</h4>
-              <p className="text-sm text-text-secondary">
-                {selectedOpportunity.strategy?.detailed ||
-                  `If "${selectedOpportunity.trigger.title.slice(0, 60)}..." resolves to YES, ${isBuy ? 'buy YES shares of' : 'buy NO shares of'} "${selectedOpportunity.consequence.title.slice(0, 60)}..." at the current price of ${actionPrice}.`}
-              </p>
-            </div>
-
-            {/* Relation Type Explanation */}
-            <div className="text-xs text-text-muted bg-surface-elevated rounded p-3 border border-border">
-              <span className="font-medium">{selectedOpportunity.relation.type}:</span>{' '}
-              {getRelationHint(selectedOpportunity.relation.type)}
-            </div>
-          </div>
-        </div>
-      </div>
-      )
-    })()}
-    </>
   )
 }
 
 // =============================================================================
-// ARBITRAGE CARD COMPONENT
+// PORTFOLIO CARD COMPONENT
 // =============================================================================
 
-function ArbitrageCard({ opportunity }: { opportunity: ArbitrageOpportunity }) {
-  const profitPercent = Math.round(opportunity.profit * 100)
-  const totalCostPercent = Math.round(opportunity.total_cost * 100)
+function PortfolioCard({ portfolio: p, rank, onClick }: { portfolio: Portfolio; rank: number; onClick: () => void }) {
+  const config = TIER_CONFIG[p.tier]
+  const isProfitable = p.expected_profit > 0.001
 
   return (
-    <a
-      href="/opportunities"
-      className="bg-surface border border-emerald/20 rounded-lg p-4 border-l-2 border-l-emerald transition-colors hover:bg-surface-hover block"
+    <button
+      onClick={onClick}
+      className={`block w-full text-left rounded-lg border ${config.border} bg-surface p-4 hover:bg-surface-hover transition-all group cursor-pointer`}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-text-muted">
-            {opportunity.id}
-          </span>
-          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border">
-            {opportunity.num_markets} markets
+          <span className="text-xs font-mono text-text-muted">#{rank}</span>
+          <span className={`text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded ${config.bg} ${config.color} border ${config.border}`}>
+            {config.label}
           </span>
         </div>
-        <span className="text-sm font-semibold font-mono text-emerald">
-          +{profitPercent}% profit
-        </span>
-      </div>
-
-      {/* Positions Summary */}
-      <div className="space-y-1.5 mb-3">
-        {(opportunity.positions ?? []).slice(0, 2).map((position, idx) => (
-          <div key={idx} className="flex items-center gap-2">
-            <span
-              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                position.position === 'YES'
-                  ? 'bg-emerald/10 text-emerald'
-                  : 'bg-amber/10 text-amber'
-              }`}
-            >
-              {position.position}
-            </span>
-            <span className="text-sm text-text-primary truncate flex-1" title={position.title}>
-              {position.title}
-            </span>
-            <span className="text-xs font-mono text-text-muted">
-              {position.price_display}
-            </span>
-          </div>
-        ))}
-        {(opportunity.positions?.length ?? 0) > 2 && (
-          <span className="text-xs text-text-muted">
-            +{opportunity.positions!.length - 2} more
+        <div className="text-right">
+          <span className={`text-sm font-mono font-semibold ${isProfitable ? 'text-emerald' : 'text-rose'}`}>
+            {isProfitable ? '+' : ''}{(p.expected_profit * 100).toFixed(1)}%
           </span>
-        )}
+          <p className="text-[10px] text-text-muted">est. return</p>
+        </div>
       </div>
 
-      {/* Footer */}
+      {/* Target */}
+      <div className="mb-2">
+        <p className="text-[10px] text-text-muted uppercase tracking-wide mb-0.5">Target Bet</p>
+        <p className="text-sm text-text-primary truncate group-hover:text-cyan transition-colors" title={p.target_question}>
+          {p.target_question}
+        </p>
+        <p className="text-[10px] text-text-muted">
+          {p.target_position} @ ${p.target_price.toFixed(2)}
+        </p>
+      </div>
+
+      {/* Cover */}
+      <div className="mb-3">
+        <p className="text-[10px] text-text-muted uppercase tracking-wide mb-0.5">Backup Bet</p>
+        <p className="text-sm text-text-secondary truncate" title={p.cover_question}>
+          {p.cover_question}
+        </p>
+        <p className="text-[10px] text-text-muted">
+          {p.cover_position} @ ${p.cover_price.toFixed(2)}
+        </p>
+      </div>
+
+      {/* Metrics */}
       <div className="flex items-center justify-between pt-3 border-t border-border">
-        <div className="text-xs text-text-muted">
-          Sum: <span className="font-mono">{totalCostPercent}%</span>
+        <div className="flex items-center gap-4">
+          <div>
+            <span className="text-[10px] text-text-muted">Win Rate</span>
+            <p className={`text-sm font-mono ${p.coverage >= 0.95 ? 'text-emerald' : p.coverage >= 0.90 ? 'text-cyan' : 'text-amber'}`}>
+              {(p.coverage * 100).toFixed(1)}%
+            </p>
+          </div>
+          <div>
+            <span className="text-[10px] text-text-muted">Investment</span>
+            <p className="text-sm font-mono text-text-secondary">
+              ${p.total_cost.toFixed(2)}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="w-10 h-1 bg-surface-elevated rounded-full overflow-hidden">
+
+        {/* Mini coverage bar */}
+        <div className="w-16">
+          <div className="h-1.5 bg-surface-elevated rounded-full overflow-hidden">
             <div
-              className="h-full bg-cyan rounded-full"
-              style={{ width: `${opportunity.confidence * 100}%` }}
+              className={`h-full ${p.coverage >= 0.95 ? 'bg-emerald' : p.coverage >= 0.90 ? 'bg-cyan' : 'bg-amber'}`}
+              style={{ width: `${Math.min(100, p.coverage * 100)}%` }}
             />
           </div>
-          <span className="text-[10px] font-mono text-text-muted">
-            {Math.round(opportunity.confidence * 100)}%
-          </span>
         </div>
       </div>
-    </a>
+    </button>
+  )
+}
+
+// =============================================================================
+// PORTFOLIO MODAL COMPONENT
+// =============================================================================
+
+function PortfolioModal({ portfolio: p, onClose }: { portfolio: Portfolio; onClose: () => void }) {
+  const config = TIER_CONFIG[p.tier]
+  const isProfitable = p.expected_profit > 0.001
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-fade-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal Header */}
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <div className="flex items-center gap-3">
+            <span className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-medium ${config.bg} ${config.color} border ${config.border}`}>
+              {config.label} Quality
+            </span>
+            <div>
+              <span className={`text-sm font-mono font-semibold ${isProfitable ? 'text-emerald' : 'text-rose'}`}>
+                {isProfitable ? '+' : ''}{(p.expected_profit * 100).toFixed(2)}%
+              </span>
+              <span className="text-xs text-text-muted ml-1">est. return</span>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-text-muted hover:text-text-primary transition-colors text-xl"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Modal Content */}
+        <div className="p-4 space-y-4">
+          {/* Target Bet */}
+          <div className="bg-surface-elevated rounded-lg p-4 border border-border">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Your Main Bet</span>
+              <span className={`text-xs font-mono px-2 py-0.5 rounded ${p.target_position === 'YES' ? 'bg-emerald/10 text-emerald' : 'bg-rose/10 text-rose'}`}>
+                Betting {p.target_position} @ ${p.target_price.toFixed(2)}
+              </span>
+            </div>
+            <p className="text-sm text-text-primary mb-1">{p.target_question}</p>
+            <p className="text-xs text-text-muted">{p.target_group_title}</p>
+            {p.target_bracket && (
+              <p className="text-xs text-text-muted mt-1">Range: {p.target_bracket}</p>
+            )}
+          </div>
+
+          {/* Connection */}
+          <div className="flex items-center justify-center py-1">
+            <div className="flex items-center gap-2 text-text-muted">
+              <div className="h-px w-8 bg-border" />
+              <span className="text-[10px] uppercase tracking-wide px-2 py-1 rounded bg-surface-elevated border border-border">
+                Protected By
+              </span>
+              <span className="text-[10px] font-mono">
+                ({(p.cover_probability * 100).toFixed(0)}% chance to trigger)
+              </span>
+              <div className="h-px w-8 bg-border" />
+            </div>
+          </div>
+
+          {/* Backup Bet */}
+          <div className="bg-surface-elevated rounded-lg p-4 border-2 border-cyan/30">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Your Backup Bet</span>
+              <span className={`text-xs font-mono px-2 py-0.5 rounded ${p.cover_position === 'YES' ? 'bg-emerald/10 text-emerald' : 'bg-rose/10 text-rose'}`}>
+                Betting {p.cover_position} @ ${p.cover_price.toFixed(2)}
+              </span>
+            </div>
+            <p className="text-sm text-text-primary mb-1">{p.cover_question}</p>
+            <p className="text-xs text-text-muted">{p.cover_group_title}</p>
+            {p.cover_bracket && (
+              <p className="text-xs text-text-muted mt-1">Range: {p.cover_bracket}</p>
+            )}
+          </div>
+
+          {/* Why These Work Together */}
+          {p.relationship && (
+            <div className="bg-surface-elevated rounded-lg p-3 border border-border">
+              <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Why These Work Together</h4>
+              <p className="text-xs text-text-secondary">{p.relationship}</p>
+            </div>
+          )}
+
+          {/* Key Numbers */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-surface-elevated rounded-lg p-3 border border-border">
+              <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Win Rate</h4>
+              <p className={`text-lg font-mono font-semibold ${p.coverage >= 0.95 ? 'text-emerald' : p.coverage >= 0.90 ? 'text-cyan' : 'text-amber'}`}>
+                {(p.coverage * 100).toFixed(2)}%
+              </p>
+              <p className="text-[10px] text-text-muted mt-0.5">Chance of getting $1 back</p>
+            </div>
+            <div className="bg-surface-elevated rounded-lg p-3 border border-border">
+              <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Total Investment</h4>
+              <p className="text-lg font-mono font-semibold text-text-primary">
+                ${p.total_cost.toFixed(2)}
+              </p>
+              <p className="text-[10px] text-text-muted mt-0.5">Cost of main + backup bets</p>
+            </div>
+            <div className="bg-surface-elevated rounded-lg p-3 border border-border">
+              <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Estimated Return</h4>
+              <p className={`text-lg font-mono font-semibold ${isProfitable ? 'text-emerald' : 'text-rose'}`}>
+                {isProfitable ? '+' : ''}{(p.expected_profit * 100).toFixed(2)}%
+              </p>
+              <p className="text-[10px] text-text-muted mt-0.5">Average profit per dollar invested</p>
+            </div>
+            <div className="bg-surface-elevated rounded-lg p-3 border border-border">
+              <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Risk</h4>
+              <p className="text-lg font-mono font-semibold text-text-muted">
+                {(p.loss_probability * 100).toFixed(2)}%
+              </p>
+              <p className="text-[10px] text-text-muted mt-0.5">Chance of losing your ${p.total_cost.toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* AI Analysis */}
+          {p.validation_analysis && (
+            <div className="bg-surface-elevated rounded-lg p-3 border border-border">
+              <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">AI Analysis</h4>
+              <p className="text-xs text-text-secondary">{p.validation_analysis}</p>
+              {p.viability_score !== undefined && (
+                <p className="text-[10px] text-text-muted mt-1">Confidence: {(p.viability_score * 100).toFixed(0)}%</p>
+              )}
+            </div>
+          )}
+
+          {/* Open Markets Button */}
+          {(p.target_group_slug || p.cover_group_slug) && (
+            <div className="pt-2">
+              <button
+                onClick={() => {
+                  if (p.target_group_slug) {
+                    window.open(`https://polymarket.com/event/${p.target_group_slug}`, '_blank')
+                  }
+                  if (p.cover_group_slug) {
+                    window.open(`https://polymarket.com/event/${p.cover_group_slug}`, '_blank')
+                  }
+                }}
+                className="w-full py-2.5 px-4 bg-cyan/10 hover:bg-cyan/20 border border-cyan/30 rounded-lg text-cyan text-sm font-medium transition-colors"
+              >
+                Open Both Markets on Polymarket ↗
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

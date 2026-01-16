@@ -2,10 +2,15 @@
 SQLite-backed pipeline state for O(1) lookups and persistence.
 
 Manages:
-- Processed event IDs
-- Entity index and mappings
-- Knowledge graph
-- Embeddings metadata
+- Market groups and their metadata
+- LLM-extracted implications (cached)
+- Validated market pairs (cached)
+- Covering portfolios with metrics
+- Current market prices
+
+Note: This is the NEW covering portfolios system.
+Legacy tables (events, entities, entity_mappings, graph_edges) are kept for backward
+compatibility but are not used by the new pipeline.
 """
 
 import json
@@ -24,11 +29,17 @@ from loguru import logger
 DATA_DIR = Path(__file__).parent.parent / "data"
 LIVE_DIR = DATA_DIR / "_live"
 STATE_DB_PATH = LIVE_DIR / "state.db"
+
+# Legacy paths (kept for backward compatibility)
 EMBEDDINGS_PATH = LIVE_DIR / "embeddings.npy"
 EMBEDDINGS_META_PATH = LIVE_DIR / "embeddings_meta.json"
 GRAPH_PATH = LIVE_DIR / "graph.json"
 EVENTS_PATH = LIVE_DIR / "events.json"
 OPPORTUNITIES_PATH = LIVE_DIR / "opportunities.json"
+
+# New covering portfolios paths
+GROUPS_PATH = LIVE_DIR / "groups.json"
+PORTFOLIOS_PATH = LIVE_DIR / "portfolios.json"
 
 
 # =============================================================================
@@ -69,6 +80,25 @@ class StateStats:
     total_edges: int
     last_full_run: str | None
     last_refresh: str | None
+    # New covering portfolios stats
+    total_groups: int = 0
+    total_implications: int = 0
+    total_validated_pairs: int = 0
+    total_portfolios: int = 0
+
+
+@dataclass
+class PortfolioData:
+    """In-memory representation of covering portfolios."""
+
+    portfolios: list[dict] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {"portfolios": self.portfolios}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PortfolioData":
+        return cls(portfolios=data.get("portfolios", []))
 
 
 # =============================================================================
@@ -96,6 +126,8 @@ class PipelineState:
         # In-memory caches for fast access during pipeline run
         self._processed_ids_cache: set[str] | None = None
         self._entity_mappings_cache: dict[str, str] | None = None
+        # New covering portfolios caches
+        self._processed_group_ids_cache: set[str] | None = None
 
     def _init_tables(self) -> None:
         """Initialize database schema."""
@@ -158,6 +190,88 @@ class PipelineState:
             CREATE INDEX IF NOT EXISTS idx_entity_mappings_canonical ON entity_mappings(canonical);
             CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id);
             CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id);
+
+            -- =====================================================================
+            -- NEW: Covering Portfolios System Tables
+            -- =====================================================================
+
+            -- Market groups (replaces events for the new system)
+            CREATE TABLE IF NOT EXISTS groups (
+                group_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                slug TEXT,
+                partition_type TEXT,  -- 'candidate', 'threshold', 'timeframe'
+                embedding_text TEXT,  -- Normalized for comparison
+                data JSON,            -- Full group object with markets
+                processed_at TEXT
+            );
+
+            -- Group-level implications (LLM results - CACHED FOREVER)
+            CREATE TABLE IF NOT EXISTS implications (
+                group_id TEXT PRIMARY KEY,
+                title TEXT,
+                yes_covered_by JSON,  -- Array of {group_id, probability, relationship}
+                no_covered_by JSON,   -- Array of {group_id, probability, relationship}
+                extracted_at TEXT,
+                llm_model TEXT,       -- Track which model generated this
+                FOREIGN KEY (group_id) REFERENCES groups(group_id)
+            );
+
+            -- Validated market pairs (LLM validated - CACHED)
+            CREATE TABLE IF NOT EXISTS validated_pairs (
+                pair_id TEXT PRIMARY KEY,  -- hash(target_market_id + cover_market_id + position)
+                target_group_id TEXT,
+                target_market_id TEXT,
+                target_position TEXT,      -- 'YES' or 'NO'
+                cover_group_id TEXT,
+                cover_market_id TEXT,
+                cover_position TEXT,       -- 'YES' or 'NO'
+                cover_probability REAL,
+                viability_score REAL,      -- 0.0-1.0 from LLM
+                validation_reason TEXT,
+                validated_at TEXT,
+                llm_model TEXT
+            );
+
+            -- Final portfolios with current prices
+            CREATE TABLE IF NOT EXISTS portfolios (
+                portfolio_id TEXT PRIMARY KEY,
+                target_market_id TEXT,
+                target_position TEXT,
+                target_price REAL,
+                cover_market_id TEXT,
+                cover_position TEXT,
+                cover_price REAL,
+                total_cost REAL,
+                coverage REAL,
+                expected_profit REAL,
+                tier INTEGER,              -- 1=HIGH, 2=GOOD, 3=MODERATE, 4=LOW
+                tier_label TEXT,
+                last_updated TEXT,
+                data JSON                  -- Full portfolio details
+            );
+
+            -- Markets with current prices
+            CREATE TABLE IF NOT EXISTS markets (
+                market_id TEXT PRIMARY KEY,
+                group_id TEXT,
+                question TEXT,
+                price_yes REAL,
+                price_no REAL,
+                resolution_date TEXT,
+                bracket_label TEXT,
+                last_updated TEXT,
+                FOREIGN KEY (group_id) REFERENCES groups(group_id)
+            );
+
+            -- Indexes for new tables
+            CREATE INDEX IF NOT EXISTS idx_groups_partition ON groups(partition_type);
+            CREATE INDEX IF NOT EXISTS idx_validated_pairs_target ON validated_pairs(target_market_id);
+            CREATE INDEX IF NOT EXISTS idx_validated_pairs_cover ON validated_pairs(cover_market_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolios_tier ON portfolios(tier);
+            CREATE INDEX IF NOT EXISTS idx_portfolios_coverage ON portfolios(coverage DESC);
+            CREATE INDEX IF NOT EXISTS idx_portfolios_profit ON portfolios(expected_profit DESC);
+            CREATE INDEX IF NOT EXISTS idx_markets_group ON markets(group_id);
         """)
         self.conn.commit()
 
@@ -468,6 +582,417 @@ class PipelineState:
         return len(orphaned)
 
     # =========================================================================
+    # GROUP MANAGEMENT (NEW - Covering Portfolios)
+    # =========================================================================
+
+    def get_processed_group_ids(self) -> set[str]:
+        """Get all processed group IDs."""
+        if self._processed_group_ids_cache is None:
+            cursor = self.conn.execute("SELECT group_id FROM groups")
+            self._processed_group_ids_cache = {row[0] for row in cursor.fetchall()}
+        return self._processed_group_ids_cache
+
+    def get_new_group_ids(self, all_ids: list[str]) -> set[str]:
+        """Get group IDs that haven't been processed yet."""
+        processed = self.get_processed_group_ids()
+        return set(all_ids) - processed
+
+    def get_all_groups(self) -> list[dict]:
+        """Get all processed groups."""
+        cursor = self.conn.execute("SELECT data FROM groups")
+        return [json.loads(row[0]) for row in cursor.fetchall()]
+
+    def get_group(self, group_id: str) -> dict | None:
+        """Get a single group by ID."""
+        cursor = self.conn.execute(
+            "SELECT data FROM groups WHERE group_id = ?", (group_id,)
+        )
+        row = cursor.fetchone()
+        return json.loads(row[0]) if row else None
+
+    def add_groups(self, groups: list[dict]) -> None:
+        """Add new processed groups."""
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.executemany(
+            """
+            INSERT OR REPLACE INTO groups
+            (group_id, title, slug, partition_type, embedding_text, data, processed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    g["group_id"],
+                    g.get("title", ""),
+                    g.get("slug", ""),
+                    g.get("partition_type", ""),
+                    g.get("embedding_text", ""),
+                    json.dumps(g),
+                    now,
+                )
+                for g in groups
+            ],
+        )
+        self.conn.commit()
+        self._processed_group_ids_cache = None
+
+    # =========================================================================
+    # MARKET MANAGEMENT (NEW - Covering Portfolios)
+    # =========================================================================
+
+    def add_markets(self, markets: list[dict]) -> None:
+        """Add or update markets with current prices."""
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.executemany(
+            """
+            INSERT OR REPLACE INTO markets
+            (market_id, group_id, question, price_yes, price_no,
+             resolution_date, bracket_label, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    m["id"],
+                    m.get("group_id", ""),
+                    m.get("question", ""),
+                    m.get("price_yes", 0.5),
+                    m.get("price_no", 0.5),
+                    m.get("resolution_date"),
+                    m.get("bracket_label"),
+                    now,
+                )
+                for m in markets
+            ],
+        )
+        self.conn.commit()
+
+    def update_market_prices(self, prices: dict[str, dict]) -> None:
+        """
+        Update market prices.
+
+        Args:
+            prices: Dict of market_id -> {price_yes, price_no}
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        for market_id, price_data in prices.items():
+            self.conn.execute(
+                """
+                UPDATE markets
+                SET price_yes = ?, price_no = ?, last_updated = ?
+                WHERE market_id = ?
+                """,
+                (
+                    price_data.get("price_yes", 0.5),
+                    price_data.get("price_no", 0.5),
+                    now,
+                    market_id,
+                ),
+            )
+        self.conn.commit()
+
+    def get_market_prices(self) -> dict[str, dict]:
+        """Get all market prices."""
+        cursor = self.conn.execute("SELECT market_id, price_yes, price_no FROM markets")
+        return {
+            row[0]: {"price_yes": row[1], "price_no": row[2]}
+            for row in cursor.fetchall()
+        }
+
+    def get_market(self, market_id: str) -> dict | None:
+        """Get a single market by ID."""
+        cursor = self.conn.execute(
+            """
+            SELECT market_id, group_id, question, price_yes, price_no,
+                   resolution_date, bracket_label
+            FROM markets WHERE market_id = ?
+            """,
+            (market_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "group_id": row[1],
+                "question": row[2],
+                "price_yes": row[3],
+                "price_no": row[4],
+                "resolution_date": row[5],
+                "bracket_label": row[6],
+            }
+        return None
+
+    # =========================================================================
+    # IMPLICATION MANAGEMENT (NEW - Covering Portfolios, CACHED)
+    # =========================================================================
+
+    def get_implication(self, group_id: str) -> dict | None:
+        """Get cached implication for a group."""
+        cursor = self.conn.execute(
+            """
+            SELECT group_id, title, yes_covered_by, no_covered_by,
+                   extracted_at, llm_model
+            FROM implications WHERE group_id = ?
+            """,
+            (group_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "group_id": row[0],
+                "title": row[1],
+                "yes_covered_by": json.loads(row[2]) if row[2] else [],
+                "no_covered_by": json.loads(row[3]) if row[3] else [],
+                "extracted_at": row[4],
+                "llm_model": row[5],
+            }
+        return None
+
+    def get_all_implications(self) -> list[dict]:
+        """Get all cached implications."""
+        cursor = self.conn.execute(
+            """
+            SELECT group_id, title, yes_covered_by, no_covered_by,
+                   extracted_at, llm_model
+            FROM implications
+            """
+        )
+        return [
+            {
+                "group_id": row[0],
+                "title": row[1],
+                "yes_covered_by": json.loads(row[2]) if row[2] else [],
+                "no_covered_by": json.loads(row[3]) if row[3] else [],
+                "extracted_at": row[4],
+                "llm_model": row[5],
+            }
+            for row in cursor.fetchall()
+        ]
+
+    def add_implications(self, implications: list[dict], llm_model: str) -> None:
+        """
+        Add LLM-extracted implications (CACHED FOREVER).
+
+        These are immutable - once extracted, they never change.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.executemany(
+            """
+            INSERT OR REPLACE INTO implications
+            (group_id, title, yes_covered_by, no_covered_by, extracted_at, llm_model)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    impl["group_id"],
+                    impl.get("title", ""),
+                    json.dumps(impl.get("yes_covered_by", [])),
+                    json.dumps(impl.get("no_covered_by", [])),
+                    now,
+                    llm_model,
+                )
+                for impl in implications
+            ],
+        )
+        self.conn.commit()
+
+    def get_groups_without_implications(self) -> list[str]:
+        """Get group IDs that don't have cached implications."""
+        cursor = self.conn.execute(
+            """
+            SELECT g.group_id FROM groups g
+            LEFT JOIN implications i ON g.group_id = i.group_id
+            WHERE i.group_id IS NULL
+            """
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+    # =========================================================================
+    # VALIDATED PAIRS MANAGEMENT (NEW - Covering Portfolios, CACHED)
+    # =========================================================================
+
+    def get_validated_pair(self, pair_id: str) -> dict | None:
+        """Get cached validated pair."""
+        cursor = self.conn.execute(
+            """
+            SELECT pair_id, target_group_id, target_market_id, target_position,
+                   cover_group_id, cover_market_id, cover_position,
+                   cover_probability, viability_score, validation_reason,
+                   validated_at, llm_model
+            FROM validated_pairs WHERE pair_id = ?
+            """,
+            (pair_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "pair_id": row[0],
+                "target_group_id": row[1],
+                "target_market_id": row[2],
+                "target_position": row[3],
+                "cover_group_id": row[4],
+                "cover_market_id": row[5],
+                "cover_position": row[6],
+                "cover_probability": row[7],
+                "viability_score": row[8],
+                "validation_reason": row[9],
+                "validated_at": row[10],
+                "llm_model": row[11],
+            }
+        return None
+
+    def get_all_validated_pairs(self) -> list[dict]:
+        """Get all cached validated pairs."""
+        cursor = self.conn.execute(
+            """
+            SELECT pair_id, target_group_id, target_market_id, target_position,
+                   cover_group_id, cover_market_id, cover_position,
+                   cover_probability, viability_score, validation_reason,
+                   validated_at, llm_model
+            FROM validated_pairs
+            WHERE viability_score >= 0.7
+            """
+        )
+        return [
+            {
+                "pair_id": row[0],
+                "target_group_id": row[1],
+                "target_market_id": row[2],
+                "target_position": row[3],
+                "cover_group_id": row[4],
+                "cover_market_id": row[5],
+                "cover_position": row[6],
+                "cover_probability": row[7],
+                "viability_score": row[8],
+                "validation_reason": row[9],
+                "validated_at": row[10],
+                "llm_model": row[11],
+            }
+            for row in cursor.fetchall()
+        ]
+
+    def add_validated_pairs(self, pairs: list[dict], llm_model: str) -> None:
+        """
+        Add LLM-validated pairs (CACHED).
+
+        These are immutable - once validated, they never change.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.executemany(
+            """
+            INSERT OR REPLACE INTO validated_pairs
+            (pair_id, target_group_id, target_market_id, target_position,
+             cover_group_id, cover_market_id, cover_position,
+             cover_probability, viability_score, validation_reason,
+             validated_at, llm_model)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    p["pair_id"],
+                    p.get("target_group_id", ""),
+                    p["target_market_id"],
+                    p["target_position"],
+                    p.get("cover_group_id", ""),
+                    p["cover_market_id"],
+                    p["cover_position"],
+                    p.get("cover_probability", 0.0),
+                    p.get("viability_score", 0.0),
+                    p.get("validation_reason", ""),
+                    now,
+                    llm_model,
+                )
+                for p in pairs
+            ],
+        )
+        self.conn.commit()
+
+    def is_pair_validated(self, pair_id: str) -> bool:
+        """Check if a pair is already validated (cached)."""
+        cursor = self.conn.execute(
+            "SELECT 1 FROM validated_pairs WHERE pair_id = ?", (pair_id,)
+        )
+        return cursor.fetchone() is not None
+
+    # =========================================================================
+    # PORTFOLIO MANAGEMENT (NEW - Covering Portfolios)
+    # =========================================================================
+
+    def get_portfolios(self) -> list[dict]:
+        """Get all portfolios (alias for get_all_portfolios)."""
+        return self.get_all_portfolios()
+
+    def get_all_portfolios(self) -> list[dict]:
+        """Get all portfolios."""
+        cursor = self.conn.execute("SELECT data FROM portfolios")
+        return [json.loads(row[0]) for row in cursor.fetchall()]
+
+    def save_portfolios(self, portfolios: list[dict]) -> None:
+        """Save portfolios (replaces all existing)."""
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Clear existing
+        self.conn.execute("DELETE FROM portfolios")
+
+        # Insert new
+        self.conn.executemany(
+            """
+            INSERT INTO portfolios
+            (portfolio_id, target_market_id, target_position, target_price,
+             cover_market_id, cover_position, cover_price,
+             total_cost, coverage, expected_profit, tier, tier_label,
+             last_updated, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    p.get("pair_id", f"p_{i}"),
+                    p["target_market_id"],
+                    p["target_position"],
+                    p.get("target_price", 0),
+                    p["cover_market_id"],
+                    p["cover_position"],
+                    p.get("cover_price", 0),
+                    p["total_cost"],
+                    p["coverage"],
+                    p["expected_profit"],
+                    p["tier"],
+                    p.get("tier_label", ""),
+                    now,
+                    json.dumps(p),
+                )
+                for i, p in enumerate(portfolios)
+            ],
+        )
+        self.conn.commit()
+
+    def get_portfolios_by_tier(self, tier: int) -> list[dict]:
+        """Get portfolios filtered by tier."""
+        cursor = self.conn.execute(
+            "SELECT data FROM portfolios WHERE tier = ? ORDER BY coverage DESC",
+            (tier,),
+        )
+        return [json.loads(row[0]) for row in cursor.fetchall()]
+
+    def export_portfolios(self, portfolios: list[dict]) -> None:
+        """Export portfolios to JSON file for API consumption."""
+        export_timestamp = datetime.now(timezone.utc).isoformat()
+        portfolios_data = {
+            "_meta": {
+                "exported_at": export_timestamp,
+                "count": len(portfolios),
+                "tier_thresholds": {
+                    "tier_1": ">=95%",
+                    "tier_2": ">=90%",
+                    "tier_3": ">=85%",
+                    "tier_4": ">=0%",
+                },
+                "source": "pipeline",
+            },
+            "portfolios": portfolios,
+        }
+        PORTFOLIOS_PATH.write_text(json.dumps(portfolios_data, indent=2))
+        logger.info(f"Exported {len(portfolios)} portfolios to {PORTFOLIOS_PATH.name}")
+
+    # =========================================================================
     # METADATA
     # =========================================================================
 
@@ -491,6 +1016,7 @@ class PipelineState:
 
     def get_stats(self) -> StateStats:
         """Get current state statistics."""
+        # Legacy stats
         events_count = self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         entities_count = self.conn.execute("SELECT COUNT(*) FROM entities").fetchone()[
             0
@@ -499,39 +1025,69 @@ class PipelineState:
             0
         ]
 
+        # New covering portfolios stats
+        groups_count = self.conn.execute("SELECT COUNT(*) FROM groups").fetchone()[0]
+        implications_count = self.conn.execute(
+            "SELECT COUNT(*) FROM implications"
+        ).fetchone()[0]
+        validated_pairs_count = self.conn.execute(
+            "SELECT COUNT(*) FROM validated_pairs"
+        ).fetchone()[0]
+        portfolios_count = self.conn.execute(
+            "SELECT COUNT(*) FROM portfolios"
+        ).fetchone()[0]
+
         return StateStats(
             total_events=events_count,
             total_entities=entities_count,
             total_edges=edges_count,
             last_full_run=self.get_metadata("last_full_run"),
             last_refresh=self.get_metadata("last_refresh_run"),
+            total_groups=groups_count,
+            total_implications=implications_count,
+            total_validated_pairs=validated_pairs_count,
+            total_portfolios=portfolios_count,
         )
 
     def reset(self) -> None:
         """Reset all state (for full reprocessing)."""
         logger.warning("Resetting pipeline state...")
 
-        # Clear all tables
+        # Clear all tables (legacy + new covering portfolios)
         self.conn.executescript("""
+            -- Legacy tables
             DELETE FROM events;
             DELETE FROM entities;
             DELETE FROM entity_mappings;
             DELETE FROM graph_edges;
             DELETE FROM metadata;
+            -- New covering portfolios tables
+            DELETE FROM groups;
+            DELETE FROM implications;
+            DELETE FROM validated_pairs;
+            DELETE FROM portfolios;
+            DELETE FROM markets;
+            -- Run history
+            DELETE FROM runs;
         """)
         self.conn.commit()
 
         # Clear caches
         self._processed_ids_cache = None
         self._entity_mappings_cache = None
+        self._processed_group_ids_cache = None
 
-        # Remove ALL _live files (including events.json and opportunities.json)
+        # Remove ALL _live files (legacy + new)
         live_files = [
+            # Legacy files
             EMBEDDINGS_PATH,
             EMBEDDINGS_META_PATH,
             GRAPH_PATH,
             EVENTS_PATH,
             OPPORTUNITIES_PATH,
+            # New covering portfolios files
+            GROUPS_PATH,
+            PORTFOLIOS_PATH,
         ]
         for path in live_files:
             if path.exists():
@@ -563,37 +1119,59 @@ def load_state() -> PipelineState:
 
 def export_live_data(
     state: PipelineState,
-    events: list[dict],
-    opportunities: list[dict],
+    groups: list[dict],
+    portfolios: list[dict],
 ) -> None:
-    """Export data to _live/ directory for API consumption."""
+    """
+    Export data to _live/ directory for API consumption.
+
+    Args:
+        state: Pipeline state (for portfolios export method)
+        groups: List of market groups
+        portfolios: List of covering portfolios
+    """
     export_timestamp = datetime.now(timezone.utc).isoformat()
 
-    # Events with metadata
-    events_data = {
+    # Groups with metadata
+    groups_data = {
         "_meta": {
             "exported_at": export_timestamp,
-            "count": len(events),
+            "count": len(groups),
+            "total_markets": sum(len(g.get("markets", [])) for g in groups),
             "source": "pipeline",
         },
-        "events": events,
+        "groups": groups,
     }
-    EVENTS_PATH.write_text(json.dumps(events_data, indent=2))
+    GROUPS_PATH.write_text(json.dumps(groups_data, indent=2))
 
-    # Opportunities with metadata
-    opportunities_data = {
+    # Portfolios with metadata
+    tier_counts = {}
+    profitable_count = 0
+    for p in portfolios:
+        tier = p.get("tier", 4)
+        tier_counts[f"tier_{tier}"] = tier_counts.get(f"tier_{tier}", 0) + 1
+        if p.get("expected_profit", 0) > 0:
+            profitable_count += 1
+
+    portfolios_data = {
         "_meta": {
             "exported_at": export_timestamp,
-            "count": len(opportunities),
+            "count": len(portfolios),
+            "by_tier": tier_counts,
+            "profitable_count": profitable_count,
+            "tier_thresholds": {
+                "tier_1": ">=95% coverage",
+                "tier_2": ">=90% coverage",
+                "tier_3": ">=85% coverage",
+                "tier_4": "<85% coverage",
+            },
             "source": "pipeline",
         },
-        "opportunities": opportunities,
+        "portfolios": portfolios,
     }
-    OPPORTUNITIES_PATH.write_text(json.dumps(opportunities_data, indent=2))
-
-    # Graph is saved separately via state.save_graph()
+    PORTFOLIOS_PATH.write_text(json.dumps(portfolios_data, indent=2))
 
     logger.info(
-        f"Exported to _live/: {len(events)} events, {len(opportunities)} opportunities "
+        f"Exported to _live/: {len(groups)} groups, {len(portfolios)} portfolios "
         f"(timestamp: {export_timestamp})"
     )

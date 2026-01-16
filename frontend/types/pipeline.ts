@@ -5,6 +5,8 @@ export interface StepProgress {
   started_at: string
   elapsed_seconds: number
   details: string | null
+  description: string | null
+  emoji: string | null
 }
 
 export interface StepProgressData {

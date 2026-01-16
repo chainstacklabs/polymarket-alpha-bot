@@ -36,6 +36,12 @@ def run(
         "-l",
         help="Limit number of events to process (for demo/testing)",
     ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress step-by-step output (only show errors)",
+    ),
 ):
     """Run the production pipeline.
 
@@ -43,29 +49,14 @@ def run(
         poly run            # Incremental - process new events only
         poly run --full     # Full - reprocess everything from scratch
         poly run --limit 20 # Demo mode - only process 20 events
+        poly run --quiet    # Silent mode for automation
     """
     from core.runner import run as run_pipeline
-    from core.state import load_state
-
-    state = load_state()
-    stats = state.get_stats()
-    state.close()
-
-    mode = "full" if full else "incremental"
-    limit_info = f", limit={limit}" if limit else ""
-    console.print(
-        f"[bold]Pipeline[/] ({mode}{limit_info}) - {stats.total_events} events in state"
-    )
 
     try:
-        result = run_pipeline(full=full, max_events=limit)
-        console.print(
-            f"[green]Done[/] - {result.get('new_events', 0)} new events, "
-            f"{result.get('opportunities', 0)} opportunities, "
-            f"{result.get('elapsed_seconds', 0):.1f}s"
-        )
+        run_pipeline(full=full, max_events=limit, quiet=quiet)
     except Exception as e:
-        console.print(f"[red]Failed:[/] {e}")
+        console.print(f"[red]Pipeline failed:[/] {e}")
         raise typer.Exit(1)
 
 
