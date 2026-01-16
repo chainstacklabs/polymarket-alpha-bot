@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from server.price_cache import price_cache
+from server.price_aggregation import price_aggregation
 
 router = APIRouter()
 
@@ -55,7 +55,7 @@ async def price_websocket(websocket: WebSocket):
         )
 
         # Send tracking info
-        metadata = price_cache.get_metadata()
+        metadata = price_aggregation.get_metadata()
         await websocket.send_json(
             {
                 "type": "tracking",
@@ -66,8 +66,8 @@ async def price_websocket(websocket: WebSocket):
 
         # Broadcast cached prices every 10 seconds
         while True:
-            prices = price_cache.get_prices_dict()
-            metadata = price_cache.get_metadata()
+            prices = price_aggregation.get_prices_dict()
+            metadata = price_aggregation.get_metadata()
 
             await websocket.send_json(
                 {
@@ -96,8 +96,8 @@ async def get_current_prices(
     limit: int = 20,
 ) -> dict[str, Any]:
     """Get current prices for tracked events (REST endpoint)."""
-    prices = price_cache.get_prices_dict()
-    metadata = price_cache.get_metadata()
+    prices = price_aggregation.get_prices_dict()
+    metadata = price_aggregation.get_metadata()
 
     # Apply limit
     if limit and limit < len(prices):

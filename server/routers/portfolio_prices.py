@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from server.portfolio_service import portfolio_service
-from server.price_cache import price_cache
+from server.price_aggregation import price_aggregation
 
 router = APIRouter()
 
@@ -51,8 +51,11 @@ class PortfolioConnectionManager:
             logger.info(f"Portfolio WS client disconnected. Total: {len(self.clients)}")
 
             # Unregister callback when last client disconnects to prevent memory leak
-            if len(self.clients) == 0 and on_price_update in price_cache._callbacks:
-                price_cache.unregister_callback(on_price_update)
+            if (
+                len(self.clients) == 0
+                and on_price_update in price_aggregation._callbacks
+            ):
+                price_aggregation.unregister_callback(on_price_update)
                 logger.info("Unregistered price callback - no clients connected")
 
     def update_filters(
@@ -216,8 +219,8 @@ async def portfolio_websocket(websocket: WebSocket):
 
     # Register for price updates (if not already registered)
     # Note: We register once globally, the callback checks if clients exist
-    if on_price_update not in price_cache._callbacks:
-        price_cache.register_callback(on_price_update)
+    if on_price_update not in price_aggregation._callbacks:
+        price_aggregation.register_callback(on_price_update)
 
     try:
         # Send connection confirmation
