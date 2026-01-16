@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from server.price_cache import PriceData
+from server.price_aggregation import PriceData, price_aggregation
 
 router = APIRouter()
 
@@ -366,7 +366,6 @@ async def get_opportunities(
     Use type='conditional' to get conditional probability opportunities (dependencies).
     Use live=false or specify run_id to access historical script-based runs.
     """
-    from server.price_cache import price_cache
 
     # Try live data first
     live_path = LIVE_DIR / "opportunities.json"
@@ -382,8 +381,8 @@ async def get_opportunities(
             opportunities = []
 
         # Get live prices
-        live_prices = price_cache.get_prices()
-        metadata = price_cache.get_metadata()
+        live_prices = price_aggregation.get_prices()
+        metadata = price_aggregation.get_metadata()
 
         if live_prices:
             # Recalculate conditional opportunities
@@ -471,216 +470,6 @@ async def get_opportunities(
         "count": len(opportunities),
         "total_count": total_count,
         "data": {"opportunities": opportunities},
-    }
-
-
-@router.get("/graph")
-async def get_graph(
-    live: bool = Query(True, description="Use live data (default) or historical"),
-    run_id: str | None = Query(None, description="Specific historical run ID"),
-) -> dict[str, Any]:
-    """Get knowledge graph.
-
-    By default, returns live accumulated graph from the production pipeline.
-    """
-    # Try live data first
-    live_path = LIVE_DIR / "graph.json"
-    if live and run_id is None and live_path.exists():
-        graph = load_json_file(live_path)
-        return {
-            "source": "live",
-            "data": graph,
-        }
-
-    # Fall back to historical runs
-    run_path = get_run_path("05_4_build_relation_graph", run_id)
-    graph = load_json_file(run_path / "relation_graph.json")
-
-    return {
-        "source": "historical",
-        "run_id": run_path.name,
-        "data": graph,
-    }
-
-
-@router.get("/events")
-async def get_events(
-    live: bool = Query(True, description="Use live data (default) or historical"),
-    run_id: str | None = Query(None, description="Specific historical run ID"),
-) -> dict[str, Any]:
-    """Get events data.
-
-    By default, returns live accumulated events from the production pipeline.
-    """
-    # Try live data first
-    live_path = LIVE_DIR / "events.json"
-    if live and run_id is None and live_path.exists():
-        data = load_json_file(live_path)
-
-        # Handle nested format: {"_meta": {...}, "events": [...]}
-        if isinstance(data, dict) and "events" in data:
-            events = data["events"]
-            meta = data.get("_meta", {})
-        elif isinstance(data, list):
-            events = data
-            meta = {}
-        else:
-            events = []
-            meta = {}
-
-        return {
-            "source": "live",
-            "count": len(events),
-            "data": {"events": events},
-            "meta": meta,
-        }
-
-    # Fall back to historical runs
-    run_path = get_run_path("01_fetch_events", run_id)
-    events = load_json_file(run_path / "events.json")
-
-    return {
-        "source": "historical",
-        "run_id": run_path.name,
-        "count": len(events) if isinstance(events, list) else 1,
-        "data": events,
-    }
-
-
-@router.get("/entities")
-async def get_entities(
-    live: bool = Query(True, description="Use live data (default) or historical"),
-    run_id: str | None = Query(
-        None, description="Specific run ID, or latest if not specified"
-    ),
-) -> dict[str, Any]:
-    """Get entities.
-
-    By default, returns live accumulated entities from the production pipeline.
-    Use live=false or specify run_id to access historical script-based runs.
-    """
-    # Try live data first (from SQLite state)
-    if live and run_id is None:
-        try:
-            from core.state import load_state
-
-            state = load_state()
-            entities = state.get_all_entities()
-            state.close()
-
-            if entities:
-                return {
-                    "source": "live",
-                    "count": len(entities),
-                    "data": entities,
-                }
-        except Exception:
-            pass  # Fall through to historical
-
-    # Fall back to historical runs
-    run_path = get_run_path("03_3_normalize_entities", run_id)
-    entities = load_json_file(run_path / "entities_normalized.json")
-
-    return {
-        "source": "historical",
-        "run_id": run_path.name,
-        "count": len(entities) if isinstance(entities, list) else 1,
-        "data": entities,
-    }
-
-
-@router.get("/relations")
-async def get_relations(
-    live: bool = Query(True, description="Use live data (default) or historical"),
-    run_id: str | None = Query(
-        None, description="Specific run ID, or latest if not specified"
-    ),
-) -> dict[str, Any]:
-    """Get relation graph data.
-
-    By default, returns live accumulated graph from the production pipeline.
-    Use live=false or specify run_id to access historical script-based runs.
-    """
-    # Try live data first
-    live_path = LIVE_DIR / "graph.json"
-    if live and run_id is None and live_path.exists():
-        graph = load_json_file(live_path)
-        return {
-            "source": "live",
-            "data": graph,
-        }
-
-    # Fall back to historical runs
-    run_path = get_run_path("05_4_build_relation_graph", run_id)
-    graph = load_json_file(run_path / "relation_graph.json")
-
-    return {
-        "source": "historical",
-        "run_id": run_path.name,
-        "data": graph,
-    }
-
-
-@router.get("/runs")
-async def list_runs() -> dict[str, Any]:
-    """List all pipeline runs organized by output type."""
-    runs: dict[str, list[dict]] = {}
-
-    output_dirs = [
-        "01_fetch_events",
-        "02_prepare_nlp_data",
-        "03_3_normalize_entities",
-        "05_4_build_relation_graph",
-        "06_3_export_opportunities",
-    ]
-
-    for output_name in output_dirs:
-        output_dir = DATA_DIR / output_name
-        if not output_dir.exists():
-            continue
-
-        output_runs = []
-        for run_dir in sorted(output_dir.iterdir(), reverse=True)[:10]:
-            if not run_dir.is_dir() or not run_dir.name[0].isdigit():
-                continue
-
-            summary_path = run_dir / "summary.json"
-            summary = None
-            if summary_path.exists():
-                try:
-                    summary = json.loads(summary_path.read_text())
-                except json.JSONDecodeError:
-                    pass
-
-            output_runs.append(
-                {
-                    "run_id": run_dir.name,
-                    "path": str(run_dir),
-                    "summary": summary,
-                }
-            )
-
-        if output_runs:
-            runs[output_name] = output_runs
-
-    return {"runs": runs}
-
-
-@router.get("/summary/{output_name}")
-async def get_summary(
-    output_name: str,
-    run_id: str | None = Query(
-        None, description="Specific run ID, or latest if not specified"
-    ),
-) -> dict[str, Any]:
-    """Get summary.json for a specific output."""
-    run_path = get_run_path(output_name, run_id)
-    summary = load_json_file(run_path / "summary.json")
-
-    return {
-        "run_id": run_path.name,
-        "output": output_name,
-        "data": summary,
     }
 
 
@@ -815,7 +604,6 @@ async def get_portfolios(
     Use max_tier to filter quality (e.g., max_tier=2 for only Tier 1 and 2).
     Use profitable_only=true to get only portfolios with positive expected profit.
     """
-    from server.price_cache import price_cache
 
     live_path = LIVE_DIR / "portfolios.json"
 
@@ -847,8 +635,8 @@ async def get_portfolios(
     # Recalculate with live prices if requested
     price_metadata = None
     if live:
-        live_prices = price_cache.get_prices()
-        price_metadata = price_cache.get_metadata()
+        live_prices = price_aggregation.get_prices()
+        price_metadata = price_aggregation.get_metadata()
 
         if live_prices:
             portfolios = recalculate_portfolios_with_live_prices(
@@ -900,119 +688,3 @@ async def get_portfolios(
         }
 
     return response
-
-
-@router.get("/groups")
-async def get_groups(
-    limit: int = Query(100, description="Max number of groups to return"),
-    offset: int = Query(0, description="Number of groups to skip"),
-    partition_type: str | None = Query(
-        None,
-        description="Filter by partition type: 'candidate', 'threshold', 'timeframe'",
-    ),
-) -> dict[str, Any]:
-    """
-    Get market groups.
-
-    Market groups organize related markets from a single event.
-    Each group contains multiple markets that differ by timeframe,
-    threshold, or candidate (e.g., "Election by March" vs "Election by June").
-
-    Partition types:
-    - candidate: Markets differ by entity (e.g., different people)
-    - threshold: Markets differ by numeric threshold
-    - timeframe: Markets differ by date
-    """
-    live_path = LIVE_DIR / "groups.json"
-
-    # Return empty data if file doesn't exist (pipeline running after reset)
-    if not live_path.exists():
-        return {
-            "source": "live",
-            "count": 0,
-            "total_count": 0,
-            "by_partition": {},
-            "data": {"groups": []},
-            "meta": {},
-        }
-
-    data = load_json_file(live_path)
-
-    # Handle nested format
-    if isinstance(data, dict) and "groups" in data:
-        groups = data["groups"]
-        meta = data.get("_meta", {})
-    elif isinstance(data, list):
-        groups = data
-        meta = {}
-    else:
-        groups = []
-        meta = {}
-
-    # Apply partition type filter
-    if partition_type:
-        groups = [g for g in groups if g.get("partition_type") == partition_type]
-
-    # Get total before pagination
-    total_count = len(groups)
-
-    # Apply pagination
-    groups = groups[offset : offset + limit]
-
-    # Count by partition type
-    partition_counts = {}
-    for g in groups:
-        ptype = g.get("partition_type", "unknown")
-        partition_counts[ptype] = partition_counts.get(ptype, 0) + 1
-
-    return {
-        "source": "live",
-        "count": len(groups),
-        "total_count": total_count,
-        "by_partition": partition_counts,
-        "data": {"groups": groups},
-        "meta": meta,
-    }
-
-
-@router.get("/implications")
-async def get_implications(
-    limit: int = Query(100, description="Max number of implications to return"),
-    offset: int = Query(0, description="Number of implications to skip"),
-) -> dict[str, Any]:
-    """
-    Get group-level implications (LLM-extracted logical relationships).
-
-    Implications define which groups cover which other groups:
-    - yes_covered_by: What covers this group's YES position
-    - no_covered_by: What covers this group's NO position
-
-    These are cached forever once extracted.
-    """
-    try:
-        from core.state import load_state
-
-        state = load_state()
-        implications = state.get_all_implications()
-        state.close()
-
-        # Get total before pagination
-        total_count = len(implications)
-
-        # Apply pagination
-        implications = implications[offset : offset + limit]
-
-        # Count covers
-        total_yes_covers = sum(len(i.get("yes_covered_by", [])) for i in implications)
-        total_no_covers = sum(len(i.get("no_covered_by", [])) for i in implications)
-
-        return {
-            "source": "live",
-            "count": len(implications),
-            "total_count": total_count,
-            "total_yes_covers": total_yes_covers,
-            "total_no_covers": total_no_covers,
-            "data": {"implications": implications},
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load implications: {e}")
