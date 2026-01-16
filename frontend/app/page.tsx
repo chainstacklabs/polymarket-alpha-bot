@@ -70,7 +70,7 @@ export default function OverviewPage() {
         // Fetch portfolios - may return 404 during pipeline reset
         const [excellentRes, statsRes] = await Promise.all([
           fetch('http://localhost:8000/data/portfolios?limit=4&max_tier=1'),
-          fetch('http://localhost:8000/data/portfolios?limit=100&max_tier=4'),
+          fetch('http://localhost:8000/data/portfolios?limit=100&max_tier=3'),
         ])
 
         if (excellentRes.ok) {
@@ -179,7 +179,7 @@ export default function OverviewPage() {
 
           {/* Tier distribution inline */}
           <div className="flex items-center gap-3">
-            {[1, 2, 3, 4].map(tier => {
+            {[1, 2, 3].map(tier => {
               const config = TIER_CONFIG[tier]
               const count = stats.byTier[`tier_${tier}`] || 0
               return (
@@ -201,7 +201,7 @@ export default function OverviewPage() {
                   <p><span className="text-emerald font-medium">Excellent:</span> ≥95% win rate</p>
                   <p><span className="text-cyan font-medium">Good:</span> 90-95% win rate</p>
                   <p><span className="text-amber font-medium">Fair:</span> 85-90% win rate</p>
-                  <p><span className="text-text-muted font-medium">Low:</span> under 85%</p>
+                  <p className="text-text-muted/70 italic">Strategies under 85% are filtered out</p>
                 </div>
 
                 {/* LLM section */}
@@ -244,12 +244,20 @@ export default function OverviewPage() {
           <div className="flex items-center justify-center py-12 border border-border rounded-lg bg-surface">
             <span className="text-sm text-text-muted">Loading strategies...</span>
           </div>
-        ) : portfolios.length === 0 ? (
+        ) : portfolios.length === 0 && stats.total === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 border border-border rounded-lg bg-surface">
-            <p className="text-sm text-text-secondary mb-1">No excellent strategies found yet</p>
+            <p className="text-sm text-text-secondary mb-1">No strategies found yet</p>
             <p className="text-xs text-text-muted mb-4">Run the pipeline to discover hedging opportunities</p>
             <Link href="/pipeline" className="btn-primary text-sm">
               Go to Pipeline
+            </Link>
+          </div>
+        ) : portfolios.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 border border-border rounded-lg bg-surface">
+            <p className="text-sm text-text-secondary mb-1">{stats.total} strategies found, but none at excellent tier</p>
+            <p className="text-xs text-text-muted mb-4">Check lower tiers for available opportunities</p>
+            <Link href="/portfolios" className="btn-primary text-sm">
+              Explore All Strategies
             </Link>
           </div>
         ) : (

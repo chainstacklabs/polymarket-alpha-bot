@@ -315,7 +315,7 @@ class PortfolioService:
 
     def get_portfolios(
         self,
-        max_tier: int = 4,
+        max_tier: int = 3,
         profitable_only: bool = False,
         limit: int | None = None,
         offset: int = 0,

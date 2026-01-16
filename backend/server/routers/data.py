@@ -46,8 +46,9 @@ def recalculate_portfolios_with_live_prices(
         (0.95, 1, "HIGH_COVERAGE"),
         (0.90, 2, "GOOD_COVERAGE"),
         (0.85, 3, "MODERATE_COVERAGE"),
-        (0.00, 4, "LOW_COVERAGE"),
     ]
+    # Minimum coverage threshold (filters out Tier 4)
+    min_coverage = 0.85
 
     recalculated = []
 
@@ -94,9 +95,13 @@ def recalculate_portfolios_with_live_prices(
         coverage = p_target + p_not_target * cover_probability
         expected_profit = coverage - total_cost
 
+        # Skip if coverage dropped below minimum threshold
+        if coverage < min_coverage:
+            continue
+
         # Reclassify tier
-        tier = 4
-        tier_label = "LOW_COVERAGE"
+        tier = 3
+        tier_label = "MODERATE_COVERAGE"
         for threshold, t, label in tier_thresholds:
             if coverage >= threshold:
                 tier = t
@@ -129,7 +134,7 @@ def recalculate_portfolios_with_live_prices(
 async def get_portfolios(
     limit: int = Query(100, description="Max number of portfolios to return"),
     offset: int = Query(0, description="Number of portfolios to skip"),
-    max_tier: int = Query(4, description="Maximum tier to include (1-4, 1=best)"),
+    max_tier: int = Query(3, description="Maximum tier to include (1-3, 1=best)"),
     profitable_only: bool = Query(
         False, description="Only return profitable portfolios"
     ),
@@ -145,8 +150,8 @@ async def get_portfolios(
     - Tier 1: >=95% coverage (near-arbitrage)
     - Tier 2: >=90% coverage (strong hedge)
     - Tier 3: >=85% coverage (decent hedge)
-    - Tier 4: <85% coverage (speculative)
 
+    Portfolios with <85% coverage are filtered out.
     Use max_tier to filter quality (e.g., max_tier=2 for only Tier 1 and 2).
     Use profitable_only=true to get only portfolios with positive expected profit.
     """

@@ -40,6 +40,9 @@ from core.state import PipelineState
 # Maximum portfolio cost to include (filter outliers)
 MAX_COST = 10.00
 
+# Minimum coverage to include (filters out Tier 4 / Low quality)
+MIN_COVERAGE = 0.85
+
 # Coverage tier thresholds (coverage_threshold, tier_number, label, description)
 TIER_THRESHOLDS = [
     (0.95, 1, "HIGH_COVERAGE", "near-arbitrage"),
@@ -144,6 +147,10 @@ def build_portfolios(
         metrics = calculate_coverage_metrics(
             target_price, cover_probability, total_cost
         )
+
+        # Skip low coverage portfolios (Tier 4)
+        if metrics["coverage"] < MIN_COVERAGE:
+            continue
 
         # Classify tier
         tier, tier_label = classify_tier(metrics["coverage"])
@@ -353,6 +360,11 @@ def update_portfolio_prices(
             metrics = calculate_coverage_metrics(
                 new_target_price, cover_prob, total_cost
             )
+
+            # Skip if coverage dropped below minimum (Tier 4)
+            if metrics["coverage"] < MIN_COVERAGE:
+                continue
+
             tier, tier_label = classify_tier(metrics["coverage"])
 
             portfolio = {

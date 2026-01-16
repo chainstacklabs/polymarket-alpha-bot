@@ -45,13 +45,13 @@ export default function PortfoliosPage() {
     tierChanges,
     updateFilters,
   } = usePortfolioPrices({
-    maxTier: tierFilter === 'all' ? 4 : tierFilter,
+    maxTier: tierFilter === 'all' ? 3 : tierFilter,
     profitableOnly,
   })
 
   // Fetch global stats on mount (for accurate tier totals)
   useEffect(() => {
-    fetch('http://localhost:8000/data/portfolios?limit=1&max_tier=4')
+    fetch('http://localhost:8000/data/portfolios?limit=1&max_tier=3')
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data) {
@@ -68,7 +68,7 @@ export default function PortfoliosPage() {
   // Update WebSocket filters when UI filters change
   useEffect(() => {
     updateFilters({
-      maxTier: tierFilter === 'all' ? 4 : tierFilter,
+      maxTier: tierFilter === 'all' ? 3 : tierFilter,
       profitableOnly,
     })
   }, [tierFilter, profitableOnly, updateFilters])
@@ -206,7 +206,7 @@ export default function PortfoliosPage() {
               All
               <span className="ml-1.5 text-xs font-mono text-text-muted">{totalCount}</span>
             </button>
-            {[1, 2, 3, 4].map(tier => {
+            {[1, 2, 3].map(tier => {
               const count = tierCounts[`tier_${tier}`] || 0
               const config = TIER_CONFIG[tier]
               return (

@@ -23,7 +23,7 @@ class ClientState:
     """Per-client filter state."""
 
     websocket: WebSocket
-    max_tier: int = 4
+    max_tier: int = 3
     profitable_only: bool = False
     connected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
