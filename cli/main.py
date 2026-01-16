@@ -122,9 +122,6 @@ def status():
     from datetime import datetime
 
     from core.state import (
-        EVENTS_PATH,
-        GRAPH_PATH,
-        OPPORTUNITIES_PATH,
         load_state,
     )
 
@@ -169,11 +166,12 @@ def status():
         console.print("\n[green]No orphaned runs detected[/]")
 
     # Live files
+    from core.state import GROUPS_PATH, PORTFOLIOS_PATH
+
     console.print("\n[bold]Live Data Files[/]")
     for name, path in [
-        ("events.json", EVENTS_PATH),
-        ("opportunities.json", OPPORTUNITIES_PATH),
-        ("graph.json", GRAPH_PATH),
+        ("groups.json", GROUPS_PATH),
+        ("portfolios.json", PORTFOLIOS_PATH),
     ]:
         if path.exists():
             mtime = datetime.fromtimestamp(path.stat().st_mtime)
