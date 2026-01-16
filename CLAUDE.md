@@ -77,21 +77,30 @@ make clean          # Remove build artifacts
 ### Data
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/data/portfolios` | GET | Covering portfolios with live prices |
-| `/data/opportunities` | GET | Alpha opportunities |
+| `/data/portfolios` | GET | Covering portfolios (alpha) with live prices |
 
 ### Pipeline
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/pipeline/status` | GET | Pipeline state |
-| `/pipeline/run` | POST | Trigger run |
-| `/pipeline/reset` | POST | Clear state |
+| `/pipeline/status` | GET | Pipeline state & run history |
+| `/pipeline/run/production` | POST | Trigger pipeline (full/incremental/demo) |
+| `/pipeline/reset` | POST | Clear pipeline state |
 
 ### Prices
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/prices/current` | GET | Cached prices |
-| `/prices/ws` | WS | Live updates |
+| `/prices/current` | GET | Cached prices (REST fallback) |
+| `/prices/ws` | WS | Live price updates |
+
+### Portfolios
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/portfolios/ws` | WS | Real-time portfolio updates with filtering |
+
+### System
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
 
 ## Code Style
 

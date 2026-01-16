@@ -1,14 +1,13 @@
 """Pipeline status and control endpoints."""
 
 import json
-import subprocess
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
-from core.paths import BACKEND_ROOT, DATA_DIR
+from core.paths import DATA_DIR
 
 router = APIRouter()
 
@@ -18,13 +17,6 @@ MANIFEST_PATH = DATA_DIR / "manifest.json"
 # Pipeline state
 _running_pipeline: dict[str, Any] | None = None
 _step_tracker: Any = None  # StepTracker instance during pipeline run
-
-
-class PipelineRunRequest(BaseModel):
-    """Request to run pipeline (legacy script-based)."""
-
-    from_step: str = "01"
-    to_step: str = "06_3"
 
 
 class ProductionRunRequest(BaseModel):
@@ -96,161 +88,6 @@ async def get_status() -> dict[str, Any]:
         "steps": steps,
         "manifest": manifest,
         "step_progress": step_progress,
-    }
-
-
-@router.get("/state")
-async def get_production_state() -> dict[str, Any]:
-    """Get production pipeline state (from _live/)."""
-    try:
-        from core.state import load_state
-
-        state = load_state()
-        stats = state.get_stats()
-        last_run = state.get_last_run()
-        state.close()
-
-        return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "state": {
-                "total_events": stats.total_events,
-                "total_entities": stats.total_entities,
-                "total_edges": stats.total_edges,
-                "last_full_run": stats.last_full_run,
-                "last_refresh": stats.last_refresh,
-            },
-            "last_run": last_run,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/steps")
-async def list_steps() -> dict[str, Any]:
-    """List all pipeline steps with metadata."""
-    from cli.script_registry import PIPELINE_ORDER, SCRIPTS
-
-    steps = []
-    for step_id in PIPELINE_ORDER:
-        script = SCRIPTS[step_id]
-        steps.append(
-            {
-                "step": step_id,
-                "name": script.name,
-                "description": script.description,
-                "inputs": script.inputs,
-                "outputs": script.outputs,
-                "config_vars": script.config_vars,
-            }
-        )
-
-    return {"steps": steps}
-
-
-def run_pipeline_task(from_step: str, to_step: str):
-    """Background task to run the pipeline."""
-    global _running_pipeline
-
-    try:
-        _running_pipeline = {
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "from_step": from_step,
-            "to_step": to_step,
-            "step": from_step,
-            "status": "running",
-        }
-
-        # Run the pipeline using the CLI
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "poly",
-                "run",
-                "pipeline",
-                "--from-step",
-                from_step,
-                "--to-step",
-                to_step,
-            ],
-            cwd=BACKEND_ROOT,
-            capture_output=True,
-            text=True,
-        )
-
-        _running_pipeline["status"] = (
-            "completed" if result.returncode == 0 else "failed"
-        )
-        _running_pipeline["exit_code"] = result.returncode
-        _running_pipeline["completed_at"] = datetime.now(timezone.utc).isoformat()
-
-    except Exception as e:
-        if _running_pipeline:
-            _running_pipeline["status"] = "error"
-            _running_pipeline["error"] = str(e)
-    finally:
-        # Clear after a delay to allow status check
-        pass
-
-
-@router.post("/run")
-async def run_pipeline(
-    request: PipelineRunRequest,
-    background_tasks: BackgroundTasks,
-) -> dict[str, Any]:
-    """Trigger a pipeline run in the background."""
-    global _running_pipeline
-
-    if _running_pipeline and _running_pipeline.get("status") == "running":
-        raise HTTPException(
-            status_code=409,
-            detail="Pipeline is already running",
-        )
-
-    # Validate steps
-    from cli.script_registry import PIPELINE_ORDER
-
-    if request.from_step not in PIPELINE_ORDER:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid from_step: {request.from_step}",
-        )
-    if request.to_step not in PIPELINE_ORDER:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid to_step: {request.to_step}",
-        )
-
-    # Start pipeline in background
-    background_tasks.add_task(run_pipeline_task, request.from_step, request.to_step)
-
-    return {
-        "status": "started",
-        "from_step": request.from_step,
-        "to_step": request.to_step,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-@router.get("/running")
-async def get_running() -> dict[str, Any]:
-    """Get info about currently running pipeline."""
-    if not _running_pipeline:
-        return {"running": False}
-
-    is_running = _running_pipeline.get("status") == "running"
-
-    # Get step progress from tracker (or final state if completed)
-    step_progress = None
-    if is_running and _step_tracker is not None:
-        step_progress = _step_tracker.get_state()
-    elif "final_step_progress" in _running_pipeline:
-        step_progress = _running_pipeline["final_step_progress"]
-
-    return {
-        "running": is_running,
-        "step_progress": step_progress,
-        **_running_pipeline,
     }
 
 

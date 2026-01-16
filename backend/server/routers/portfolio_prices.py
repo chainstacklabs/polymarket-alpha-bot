@@ -3,7 +3,6 @@
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
@@ -307,14 +306,3 @@ async def portfolio_websocket(websocket: WebSocket):
         logger.error(f"Portfolio WebSocket error: {e}")
     finally:
         manager.disconnect(websocket)
-
-
-# =============================================================================
-# REST FALLBACK
-# =============================================================================
-
-
-@router.get("/summary")
-async def get_portfolio_summary() -> dict[str, Any]:
-    """Get portfolio summary statistics (REST fallback)."""
-    return portfolio_service.get_summary()
