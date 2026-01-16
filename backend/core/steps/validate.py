@@ -20,7 +20,6 @@ Caching:
     pair_id is deterministic (hash of target+cover+positions).
 """
 
-import asyncio
 from typing import Callable
 
 from loguru import logger
@@ -309,10 +308,6 @@ async def validate_pairs(
             state.add_validated_pairs(pairs_to_cache, model)
             new_validated_pairs.extend(pairs_to_cache)
 
-        # Rate limiting between batches
-        if i + batch_size < len(pairs_to_validate):
-            await asyncio.sleep(1)
-
     # Filter all pairs by viability score
     validated = []
     rejection_reasons = {
@@ -394,9 +389,6 @@ async def validate_pairs_simple(
 
         validations = await validate_batch(batch, model, batch_num)
         all_validations.update(validations)
-
-        if i + batch_size < len(candidate_pairs):
-            await asyncio.sleep(1)
 
     # Filter by viability
     validated = []
