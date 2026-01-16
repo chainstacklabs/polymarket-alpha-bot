@@ -230,6 +230,37 @@ body {
 .stagger-5 { animation-delay: 0.15s; }
 .stagger-6 { animation-delay: 0.18s; }
 
+/* Price flash animations for real-time updates */
+@keyframes flash-up {
+  0% { background-color: transparent; }
+  20% { background-color: rgb(var(--color-emerald) / 0.25); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flash-down {
+  0% { background-color: transparent; }
+  20% { background-color: rgb(var(--color-rose) / 0.25); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flash {
+  0% { background-color: transparent; }
+  20% { background-color: rgb(var(--color-cyan) / 0.2); }
+  100% { background-color: transparent; }
+}
+
+.animate-flash-up {
+  animation: flash-up 2s ease-out;
+}
+
+.animate-flash-down {
+  animation: flash-down 2s ease-out;
+}
+
+.animate-flash {
+  animation: flash 2s ease-out;
+}
+
 /* --------------------------------------------------------------------------
    Selection
    -------------------------------------------------------------------------- */

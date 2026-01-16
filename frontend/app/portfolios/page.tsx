@@ -1,54 +1,16 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { usePrices } from '@/hooks/usePrices'
+import { useEffect, useState, useCallback } from 'react'
+import { usePortfolioPrices, Portfolio } from '@/hooks/usePortfolioPrices'
+import { PriceChangeIndicator, TierChangeBadge } from '@/components/PriceFlash'
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-interface Portfolio {
-  pair_id: string
-  // Target
-  target_group_id: string
-  target_group_title: string
-  target_market_id: string
-  target_question: string
-  target_position: 'YES' | 'NO'
-  target_price: number
-  target_bracket?: string
-  // Cover
-  cover_group_id: string
-  cover_group_title: string
-  cover_market_id: string
-  cover_question: string
-  cover_position: 'YES' | 'NO'
-  cover_price: number
-  cover_bracket?: string
-  cover_probability: number
-  // Relationship
-  relationship: string
-  relationship_type: string
-  // Metrics
-  total_cost: number
-  profit: number
-  profit_pct: number
-  coverage: number
-  loss_probability: number
-  expected_profit: number
-  // Tier
-  tier: number
-  tier_label: string
-  // Validation
-  viability_score?: number
-  validation_analysis?: string
-}
-
 type TierFilter = 'all' | 1 | 2 | 3 | 4
 type SortField = 'coverage' | 'expected_profit' | 'total_cost' | 'tier'
 type SortDirection = 'asc' | 'desc'
-
-const PAGE_SIZE = 20
 
 // =============================================================================
 // CONSTANTS
@@ -80,89 +42,71 @@ const TIER_DESCRIPTIONS: Record<number, string> = {
 // =============================================================================
 
 export default function PortfoliosPage() {
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([])
-  const [totalCount, setTotalCount] = useState(0)
-  const [filteredCount, setFilteredCount] = useState(0)
-  const [globalTierCounts, setGlobalTierCounts] = useState<Record<string, number>>({})
-  const [profitableCount, setProfitableCount] = useState(0)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [tierFilter, setTierFilter] = useState<TierFilter>(2)  // Default to Good (shows Excellent + Good)
+  // Global stats from REST (for accurate totals)
+  const [globalStats, setGlobalStats] = useState<{
+    total: number
+    byTier: Record<string, number>
+    profitableCount: number
+  } | null>(null)
+
+  // Local UI state
+  const [tierFilter, setTierFilter] = useState<TierFilter>(2)
   const [profitableOnly, setProfitableOnly] = useState(false)
   const [sortField, setSortField] = useState<SortField>('coverage')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [selectedPortfolio, setSelectedPortfolio] = useState<Portfolio | null>(null)
   const [filter, setFilter] = useState('')
-  const { connected } = usePrices()
 
-  // Fetch global stats (only once on mount)
+  // Real-time portfolios from WebSocket
+  const {
+    portfolios,
+    summary,
+    connected,
+    status,
+    changedIds,
+    priceChanges,
+    tierChanges,
+    updateFilters,
+  } = usePortfolioPrices({
+    maxTier: tierFilter === 'all' ? 4 : tierFilter,
+    profitableOnly,
+  })
+
+  // Fetch global stats on mount (for accurate tier totals)
   useEffect(() => {
     fetch('http://localhost:8000/data/portfolios?limit=1&max_tier=4')
-      .then(res => {
-        if (res.ok) return res.json()
-        if (res.status === 404) {
-          // Data not ready yet (pipeline running after reset)
-          return { meta: { count: 0, by_tier: {}, profitable_count: 0 } }
-        }
-        throw new Error('Failed to fetch')
-      })
+      .then(res => res.ok ? res.json() : null)
       .then(data => {
-        // Use meta.by_tier for true totals (root by_tier is filtered)
-        setTotalCount(data.meta?.count || data.total_count || 0)
-        setGlobalTierCounts(data.meta?.by_tier || {})
-        setProfitableCount(data.meta?.profitable_count || data.profitable_count || 0)
+        if (data) {
+          setGlobalStats({
+            total: data.meta?.count || data.total_count || 0,
+            byTier: data.meta?.by_tier || {},
+            profitableCount: data.meta?.profitable_count || 0,
+          })
+        }
       })
-      .catch(() => {
-        // Network error - silently handle
-      })
+      .catch(() => {})
   }, [])
 
-  // Fetch filtered portfolios
+  // Update WebSocket filters when UI filters change
   useEffect(() => {
-    const controller = new AbortController()
-    setLoading(true)
+    updateFilters({
+      maxTier: tierFilter === 'all' ? 4 : tierFilter,
+      profitableOnly,
+    })
+  }, [tierFilter, profitableOnly, updateFilters])
 
-    const offset = (currentPage - 1) * PAGE_SIZE
-    const maxTier = tierFilter === 'all' ? 4 : tierFilter
-    const url = `http://localhost:8000/data/portfolios?limit=${PAGE_SIZE}&offset=${offset}&max_tier=${maxTier}&profitable_only=${profitableOnly}`
-
-    fetch(url, { signal: controller.signal })
-      .then(res => {
-        if (res.ok) return res.json()
-        if (res.status === 404) {
-          // Data not ready yet (pipeline running after reset)
-          return { data: { portfolios: [] }, total_count: 0 }
-        }
-        throw new Error('Failed to fetch')
-      })
-      .then(data => {
-        setPortfolios(data.data?.portfolios || [])
-        setFilteredCount(data.total_count || 0)
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError') {
-          // Network error - silently handle, will retry on next filter change
-        }
-      })
-      .finally(() => setLoading(false))
-
-    return () => controller.abort()
-  }, [currentPage, tierFilter, profitableOnly])
-
-  // Reset page when filter changes
-  useEffect(() => {
-    setCurrentPage(1)
-  }, [tierFilter, profitableOnly])
-
-  const handleSort = (field: SortField) => {
+  // Handle sort
+  const handleSort = useCallback((field: SortField) => {
     if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc')
     } else {
       setSortField(field)
       setSortDirection(field === 'tier' ? 'asc' : 'desc')
     }
-  }
+  }, [sortField])
 
+  // Filter and sort portfolios
   const sortedPortfolios = [...portfolios]
     .filter(p => {
       if (!filter) return true
@@ -200,7 +144,22 @@ export default function PortfoliosPage() {
       return sortDirection === 'asc' ? aVal - bVal : bVal - aVal
     })
 
-  const SortHeader = ({ field, label, hint, className = '' }: { field: SortField, label: string, hint: string, className?: string }) => (
+  // Find tier change for a portfolio
+  const getTierChange = (pairId: string) => {
+    return tierChanges.find(tc => tc.pair_id === pairId)
+  }
+
+  // Use global stats if available, fallback to summary
+  const totalCount = globalStats?.total || summary?.total || 0
+  const profitableCount = globalStats?.profitableCount || summary?.profitable_count || 0
+  const tierCounts = globalStats?.byTier || summary?.by_tier || {}
+
+  const SortHeader = ({ field, label, hint, className = '' }: {
+    field: SortField
+    label: string
+    hint: string
+    className?: string
+  }) => (
     <th
       className={`px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted cursor-pointer hover:text-text-secondary transition-colors ${className}`}
       onClick={() => handleSort(field)}
@@ -215,8 +174,6 @@ export default function PortfoliosPage() {
     </th>
   )
 
-  const totalPages = Math.ceil(filteredCount / PAGE_SIZE)
-
   return (
     <>
       <div className="space-y-4 animate-fade-in">
@@ -228,9 +185,33 @@ export default function PortfoliosPage() {
               {totalCount} hedging strategies found, {profitableCount} with positive returns
             </p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
-            <span className="text-xs text-text-muted">{connected ? 'Live' : 'Offline'}</span>
+          <div className="flex items-center gap-3">
+            {/* Tier change notifications */}
+            {tierChanges.length > 0 && (
+              <div className="flex items-center gap-1">
+                {tierChanges.slice(0, 2).map(tc => (
+                  <TierChangeBadge
+                    key={tc.pair_id}
+                    oldTier={tc.old_tier}
+                    newTier={tc.new_tier}
+                  />
+                ))}
+                {tierChanges.length > 2 && (
+                  <span className="text-xs text-text-muted">+{tierChanges.length - 2} more</span>
+                )}
+              </div>
+            )}
+            {/* Connection status */}
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  connected ? 'bg-emerald animate-pulse' : 'bg-text-muted'
+                }`}
+              />
+              <span className="text-xs text-text-muted">
+                {status === 'connecting' ? 'Connecting...' : connected ? 'Live' : 'Offline'}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -249,7 +230,7 @@ export default function PortfoliosPage() {
               <span className="ml-1.5 text-xs font-mono text-text-muted">{totalCount}</span>
             </button>
             {[1, 2, 3, 4].map(tier => {
-              const count = globalTierCounts[`tier_${tier}`] || 0
+              const count = tierCounts[`tier_${tier}`] || 0
               const colors = TIER_COLORS[tier]
               return (
                 <button
@@ -293,9 +274,9 @@ export default function PortfoliosPage() {
         </div>
 
         {/* Table */}
-        {loading ? (
+        {status === 'connecting' && portfolios.length === 0 ? (
           <div className="flex items-center justify-center py-12">
-            <span className="text-sm text-text-muted">Loading...</span>
+            <span className="text-sm text-text-muted">Connecting to live prices...</span>
           </div>
         ) : (
           <div className="rounded-lg border border-border overflow-hidden bg-surface">
@@ -320,29 +301,53 @@ export default function PortfoliosPage() {
                     const colors = TIER_COLORS[p.tier]
                     const isProfitable = p.expected_profit > 0.001
                     const coveragePercent = (p.coverage * 100).toFixed(1)
+                    const isChanged = changedIds.has(p.pair_id)
+                    const priceChange = priceChanges.get(p.pair_id)
+                    const tierChange = getTierChange(p.pair_id)
+
+                    // Determine flash class
+                    const flashClass = isChanged
+                      ? priceChange?.direction === 'up'
+                        ? 'animate-flash-up'
+                        : priceChange?.direction === 'down'
+                          ? 'animate-flash-down'
+                          : 'animate-flash'
+                      : ''
 
                     return (
                       <tr
                         key={p.pair_id}
-                        className="hover:bg-surface-hover transition-colors cursor-pointer"
+                        className={`hover:bg-surface-hover transition-colors cursor-pointer ${flashClass}`}
                         onClick={() => setSelectedPortfolio(p)}
                       >
                         <td className="px-2.5 py-2">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors.bg} ${colors.text} border ${colors.border}`}
-                            title={TIER_DESCRIPTIONS[p.tier]}
-                          >
-                            {TIER_LABELS[p.tier]}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors.bg} ${colors.text} border ${colors.border}`}
+                              title={TIER_DESCRIPTIONS[p.tier]}
+                            >
+                              {TIER_LABELS[p.tier]}
+                            </span>
+                            {tierChange && (
+                              <span className={`text-xs ${tierChange.new_tier < tierChange.old_tier ? 'text-emerald' : 'text-rose'}`}>
+                                {tierChange.new_tier < tierChange.old_tier ? '↑' : '↓'}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-2.5 py-2">
                           <div className="space-y-0.5">
                             <p className="text-sm text-text-primary truncate" title={p.target_question}>
                               {p.target_question}
                             </p>
-                            <p className="text-[10px] text-text-muted">
-                              {p.target_position} @ ${p.target_price.toFixed(2)}
-                            </p>
+                            <div className="flex items-center gap-1">
+                              <p className="text-[10px] text-text-muted">
+                                {p.target_position} @ ${p.target_price.toFixed(2)}
+                              </p>
+                              {isChanged && priceChange && (
+                                <PriceChangeIndicator direction={priceChange.direction} />
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="px-2.5 py-2">
@@ -350,9 +355,14 @@ export default function PortfoliosPage() {
                             <p className="text-sm text-text-primary truncate" title={p.cover_question}>
                               {p.cover_question}
                             </p>
-                            <p className="text-[10px] text-text-muted">
-                              {p.cover_position} @ ${p.cover_price.toFixed(2)}
-                            </p>
+                            <div className="flex items-center gap-1">
+                              <p className="text-[10px] text-text-muted">
+                                {p.cover_position} @ ${p.cover_price.toFixed(2)}
+                              </p>
+                              {isChanged && priceChange && (
+                                <PriceChangeIndicator direction={priceChange.direction} />
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="px-2.5 py-2">
@@ -363,7 +373,7 @@ export default function PortfoliosPage() {
                             {/* Mini coverage bar */}
                             <div className="w-16 h-1 bg-surface-elevated rounded-full overflow-hidden">
                               <div
-                                className={`h-full ${p.coverage >= 0.95 ? 'bg-emerald' : p.coverage >= 0.90 ? 'bg-cyan' : 'bg-amber'}`}
+                                className={`h-full transition-all duration-500 ${p.coverage >= 0.95 ? 'bg-emerald' : p.coverage >= 0.90 ? 'bg-cyan' : 'bg-amber'}`}
                                 style={{ width: `${Math.min(100, p.coverage * 100)}%` }}
                               />
                             </div>
@@ -386,46 +396,12 @@ export default function PortfoliosPage() {
               </table>
             </div>
 
-            {/* Footer with Pagination */}
+            {/* Footer */}
             <div className="px-2.5 py-2 bg-surface-elevated border-t border-border flex items-center justify-between">
               <span className="text-[10px] text-text-muted">
-                Showing {sortedPortfolios.length} of {filteredCount}
+                Showing {sortedPortfolios.length} strategies
+                {connected && <span className="ml-2 text-emerald">● Live updates</span>}
               </span>
-              {totalPages > 1 && (
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setCurrentPage(1)}
-                    disabled={currentPage === 1}
-                    className="px-1.5 py-0.5 text-[10px] rounded bg-surface border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    First
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(p => p - 1)}
-                    disabled={currentPage === 1}
-                    className="px-1.5 py-0.5 text-[10px] rounded bg-surface border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Prev
-                  </button>
-                  <span className="px-2 text-[10px] text-text-muted">
-                    {currentPage} / {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(p => p + 1)}
-                    disabled={currentPage >= totalPages}
-                    className="px-1.5 py-0.5 text-[10px] rounded bg-surface border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Next
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(totalPages)}
-                    disabled={currentPage >= totalPages}
-                    className="px-1.5 py-0.5 text-[10px] rounded bg-surface border border-border text-text-muted hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Last
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         )}
@@ -436,6 +412,7 @@ export default function PortfoliosPage() {
         const p = selectedPortfolio
         const colors = TIER_COLORS[p.tier]
         const isProfitable = p.expected_profit > 0.001
+        const priceChange = priceChanges.get(p.pair_id)
 
         return (
           <div
@@ -452,11 +429,12 @@ export default function PortfoliosPage() {
                   <span className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-medium ${colors.bg} ${colors.text} border ${colors.border}`}>
                     {TIER_LABELS[p.tier]} Quality
                   </span>
-                  <div>
+                  <div className="flex items-center gap-1">
                     <span className={`text-sm font-mono font-semibold ${isProfitable ? 'text-emerald' : 'text-rose'}`}>
                       {isProfitable ? '+' : ''}{(p.expected_profit * 100).toFixed(2)}%
                     </span>
-                    <span className="text-xs text-text-muted ml-1">est. return</span>
+                    <span className="text-xs text-text-muted">est. return</span>
+                    {priceChange && <PriceChangeIndicator direction={priceChange.direction} />}
                   </div>
                 </div>
                 <button
@@ -561,6 +539,25 @@ export default function PortfoliosPage() {
                     {p.viability_score !== undefined && (
                       <p className="text-[10px] text-text-muted mt-1">Confidence: {(p.viability_score * 100).toFixed(0)}%</p>
                     )}
+                  </div>
+                )}
+
+                {/* Open Markets Button */}
+                {(p.target_group_slug || p.cover_group_slug) && (
+                  <div className="pt-2">
+                    <button
+                      onClick={() => {
+                        if (p.target_group_slug) {
+                          window.open(`https://polymarket.com/event/${p.target_group_slug}`, '_blank')
+                        }
+                        if (p.cover_group_slug) {
+                          window.open(`https://polymarket.com/event/${p.cover_group_slug}`, '_blank')
+                        }
+                      }}
+                      className="w-full py-2.5 px-4 bg-cyan/10 hover:bg-cyan/20 border border-cyan/30 rounded-lg text-cyan text-sm font-medium transition-colors"
+                    >
+                      Open Both Markets on Polymarket ↗
+                    </button>
                   </div>
                 )}
               </div>

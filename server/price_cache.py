@@ -67,9 +67,11 @@ class PriceCacheService:
     def __init__(self, fetch_interval: int = FETCH_INTERVAL_SECONDS):
         self.fetch_interval = fetch_interval
         self._cache: dict[str, PriceData] = {}
+        self._market_cache: dict[str, dict] = {}  # market_id → {yes, no, event_id}
         self._last_fetch: datetime | None = None
         self._task: asyncio.Task | None = None
         self._running = False
+        self._callbacks: list = []  # Price update callbacks
 
     def get_prices(self) -> dict[str, PriceData]:
         """Get cached prices (thread-safe read)."""
@@ -100,6 +102,22 @@ class PriceCacheService:
             event_count=len(self._cache),
             is_stale=is_stale,
         )
+
+    def get_market_prices(self) -> dict[str, dict]:
+        """Get cached prices indexed by market_id."""
+        return self._market_cache.copy()
+
+    def register_callback(self, callback) -> None:
+        """Register a callback to be called when prices update.
+
+        Callback signature: async def callback(market_prices: dict[str, dict]) -> None
+        """
+        self._callbacks.append(callback)
+
+    def unregister_callback(self, callback) -> None:
+        """Unregister a price update callback."""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
 
     async def start(self) -> None:
         """Start the background price fetch task."""
@@ -132,10 +150,23 @@ class PriceCacheService:
 
                 if event_ids:
                     logger.debug(f"Fetching prices for {len(event_ids)} events")
-                    prices = await self._fetch_prices(event_ids)
+                    prices, market_prices = await self._fetch_prices_with_markets(
+                        event_ids
+                    )
                     self._cache = prices
+                    self._market_cache = market_prices
                     self._last_fetch = datetime.now(timezone.utc)
-                    logger.info(f"Price cache updated: {len(prices)} events")
+                    logger.info(
+                        f"Price cache updated: {len(prices)} events, "
+                        f"{len(market_prices)} markets"
+                    )
+
+                    # Trigger callbacks with market prices
+                    for callback in self._callbacks:
+                        try:
+                            await callback(market_prices)
+                        except Exception as e:
+                            logger.error(f"Price callback error: {e}")
                 else:
                     logger.warning("No active event IDs found for price tracking")
 
@@ -147,15 +178,24 @@ class PriceCacheService:
 
     def _get_active_event_ids(self) -> list[str]:
         """
-        Get event IDs from opportunities.
+        Get event IDs from portfolios and opportunities.
 
-        Reads from data/_live/opportunities.json or falls back to
-        historical experiment runs.
+        Reads from data/_live/portfolios.json and opportunities.json.
         """
-        # Try live data first
+        event_ids = set()
+
+        # Try portfolios.json first (for portfolio price monitoring)
+        portfolios_path = LIVE_DIR / "portfolios.json"
+        if portfolios_path.exists():
+            event_ids.update(self._extract_event_ids_from_portfolios(portfolios_path))
+
+        # Also try opportunities.json
         live_path = LIVE_DIR / "opportunities.json"
         if live_path.exists():
-            return self._extract_event_ids_from_file(live_path)
+            event_ids.update(self._extract_event_ids_from_file(live_path))
+
+        if event_ids:
+            return list(event_ids)
 
         # Fall back to historical runs
         opportunities_dir = DATA_DIR / "06_3_export_opportunities"
@@ -209,15 +249,51 @@ class PriceCacheService:
             logger.error(f"Error reading opportunities from {path}: {e}")
             return []
 
-    async def _fetch_prices(self, event_ids: list[str]) -> dict[str, PriceData]:
-        """Fetch current prices from Polymarket API."""
-        prices: dict[str, PriceData] = {}
+    def _extract_event_ids_from_portfolios(self, path: Path) -> list[str]:
+        """Extract event IDs from a portfolios JSON file."""
+        try:
+            data = json.loads(path.read_text())
+
+            # Handle nested format
+            if isinstance(data, dict) and "portfolios" in data:
+                portfolios = data["portfolios"]
+            elif isinstance(data, list):
+                portfolios = data
+            else:
+                return []
+
+            # Extract unique group IDs (which are event IDs in Polymarket)
+            event_ids = set()
+            for p in portfolios[:200]:  # Limit to top 200 portfolios
+                if isinstance(p, dict):
+                    if group_id := p.get("target_group_id"):
+                        event_ids.add(str(group_id))
+                    if group_id := p.get("cover_group_id"):
+                        event_ids.add(str(group_id))
+
+            return list(event_ids)
+
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Error reading portfolios from {path}: {e}")
+            return []
+
+    async def _fetch_prices_with_markets(
+        self, event_ids: list[str]
+    ) -> tuple[dict[str, PriceData], dict[str, dict]]:
+        """Fetch prices from Polymarket API, returning both event and market prices.
+
+        Returns:
+            Tuple of (event_prices, market_prices) where:
+            - event_prices: {event_id: PriceData}
+            - market_prices: {market_id: {yes: float, no: float, event_id: str}}
+        """
+        event_prices: dict[str, PriceData] = {}
+        market_prices: dict[str, dict] = {}
 
         if not event_ids:
-            return prices
+            return event_prices, market_prices
 
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            # Fetch in batches of 50
             for i in range(0, len(event_ids), 50):
                 batch = event_ids[i : i + 50]
 
@@ -232,39 +308,48 @@ class PriceCacheService:
                             markets = event.get("markets", [])
 
                             if markets:
-                                # Find active markets (acceptingOrders=True, closed=False)
+                                # Process ALL markets for market_prices
+                                for market in markets:
+                                    market_id = market.get("id")
+                                    if not market_id:
+                                        continue
+
+                                    outcome_prices = market.get("outcomePrices", [])
+                                    if isinstance(outcome_prices, str):
+                                        outcome_prices = json.loads(outcome_prices)
+
+                                    if outcome_prices:
+                                        yes_price = float(outcome_prices[0])
+                                        no_price = (
+                                            float(outcome_prices[1])
+                                            if len(outcome_prices) > 1
+                                            else 1 - yes_price
+                                        )
+                                        market_prices[market_id] = {
+                                            "yes": yes_price,
+                                            "no": no_price,
+                                            "event_id": event_id,
+                                            "question": market.get("question", ""),
+                                        }
+
+                                # For event_prices, use highest YES price market
                                 active_markets = [
                                     m
                                     for m in markets
                                     if m.get("acceptingOrders") and not m.get("closed")
-                                ]
+                                ] or markets
 
-                                if not active_markets:
-                                    active_markets = markets
-
-                                # For multi-outcome events, select market with highest YES price
-                                # For binary events, there's typically just one active market
                                 def get_yes_price(m: dict) -> float:
                                     prices = m.get("outcomePrices", [])
                                     if isinstance(prices, str):
                                         prices = json.loads(prices)
                                     return float(prices[0]) if prices else 0.0
 
-                                market = max(active_markets, key=get_yes_price)
-                                outcome_prices = market.get("outcomePrices", [])
-
-                                # Handle string-encoded JSON
-                                if isinstance(outcome_prices, str):
-                                    outcome_prices = json.loads(outcome_prices)
-
-                                yes_price = (
-                                    float(outcome_prices[0]) if outcome_prices else None
-                                )
-
-                                prices[event_id] = PriceData(
-                                    price=yes_price,
+                                best_market = max(active_markets, key=get_yes_price)
+                                event_prices[event_id] = PriceData(
+                                    price=get_yes_price(best_market),
                                     title=event.get("title", ""),
-                                    market_id=market.get("id"),
+                                    market_id=best_market.get("id"),
                                 )
 
                     except (
@@ -277,7 +362,7 @@ class PriceCacheService:
                         logger.debug(f"Error fetching price for {event_id}: {e}")
                         continue
 
-        return prices
+        return event_prices, market_prices
 
 
 # =============================================================================

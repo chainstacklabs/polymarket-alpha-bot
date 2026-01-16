@@ -182,8 +182,9 @@ export default function OverviewPage() {
   const lastRunTime = pipeline?.production?.last_run?.completed_at
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      {/* Header */}
+    <>
+      <div className="space-y-8 animate-fade-in">
+        {/* Header */}
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-text-primary">Overview</h1>
@@ -332,6 +333,7 @@ export default function OverviewPage() {
           </div>
         )}
       </section>
+      </div>
 
       {/* Portfolio Detail Modal */}
       {selectedPortfolio && (
@@ -340,7 +342,7 @@ export default function OverviewPage() {
           onClose={() => setSelectedPortfolio(null)}
         />
       )}
-    </div>
+    </>
   )
 }
 

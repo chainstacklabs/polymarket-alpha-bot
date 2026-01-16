@@ -52,6 +52,11 @@ app.include_router(data.router, prefix="/data", tags=["data"])
 app.include_router(prices.router, prefix="/prices", tags=["prices"])
 app.include_router(pipeline.router, prefix="/pipeline", tags=["pipeline"])
 
+# Portfolio real-time updates
+from server.routers import portfolio_prices
+
+app.include_router(portfolio_prices.router, prefix="/portfolios", tags=["portfolios"])
+
 
 @app.get("/")
 async def root():
@@ -64,6 +69,7 @@ async def root():
             "data": "/data",
             "prices": "/prices",
             "pipeline": "/pipeline",
+            "portfolios": "/portfolios",
         },
     }
 
