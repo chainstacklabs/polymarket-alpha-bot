@@ -37,6 +37,9 @@ import os
 # Pairs per LLM call (balances efficiency with context limits)
 BATCH_SIZE = 32
 
+# Maximum concurrent API calls (respects OpenRouter rate limits)
+MAX_CONCURRENT_BATCHES = 10
+
 # Minimum viability score to keep a pair
 MIN_VIABILITY_SCORE = 0.70
 
@@ -326,49 +329,70 @@ async def validate_pairs(
             "new_validated": 0,
         }
 
-    # Validate new pairs in batches
+    # Validate new pairs in batches (parallel with semaphore-based rate limiting)
+    import asyncio
+
     all_validations = dict(cached_validations)
     new_validated_pairs = []
+    lock = asyncio.Lock()
 
-    total_batches = (len(pairs_to_validate) + batch_size - 1) // batch_size
-
+    # Create all batches upfront
+    batches = []
     for i in range(0, len(pairs_to_validate), batch_size):
         batch = pairs_to_validate[i : i + batch_size]
         batch_num = i // batch_size + 1
+        batches.append((batch, batch_num))
 
-        if progress_callback:
-            progress_callback(f"Validating batch {batch_num}/{total_batches}")
+    total_batches = len(batches)
+    completed_batches = 0
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_BATCHES)
 
-        logger.info(f"  Batch {batch_num}/{total_batches} ({len(batch)} pairs)")
+    async def process_batch(batch: list[dict], batch_num: int) -> None:
+        """Process a single batch with rate limiting."""
+        nonlocal completed_batches
 
-        validations = await validate_batch(batch, model, batch_num)
-        all_validations.update(validations)
+        async with semaphore:
+            validations = await validate_batch(batch, model, batch_num)
 
-        # Store valid pairs to cache
-        pairs_to_cache = []
-        for pair in batch:
-            pair_id = pair["pair_id"]
-            validation = validations.get(pair_id, {})
+            # Prepare valid pairs for caching
+            pairs_to_cache = []
+            for pair in batch:
+                pair_id = pair["pair_id"]
+                validation = validations.get(pair_id, {})
 
-            if validation.get("is_valid", False):
-                pairs_to_cache.append(
-                    {
-                        "pair_id": pair_id,
-                        "target_group_id": pair["target_group_id"],
-                        "target_market_id": pair["target_market_id"],
-                        "target_position": pair["target_position"],
-                        "cover_group_id": pair["cover_group_id"],
-                        "cover_market_id": pair["cover_market_id"],
-                        "cover_position": pair["cover_position"],
-                        "cover_probability": pair.get("cover_probability", 0),
-                        "viability_score": validation.get("viability_score", 0),
-                        "validation_reason": validation.get("brief_analysis", ""),
-                    }
-                )
+                if validation.get("is_valid", False):
+                    pairs_to_cache.append(
+                        {
+                            "pair_id": pair_id,
+                            "target_group_id": pair["target_group_id"],
+                            "target_market_id": pair["target_market_id"],
+                            "target_position": pair["target_position"],
+                            "cover_group_id": pair["cover_group_id"],
+                            "cover_market_id": pair["cover_market_id"],
+                            "cover_position": pair["cover_position"],
+                            "cover_probability": pair.get("cover_probability", 0),
+                            "viability_score": validation.get("viability_score", 0),
+                            "validation_reason": validation.get("brief_analysis", ""),
+                        }
+                    )
 
-        if pairs_to_cache:
-            state.add_validated_pairs(pairs_to_cache, model)
-            new_validated_pairs.extend(pairs_to_cache)
+            # Update shared state (protected by lock)
+            async with lock:
+                all_validations.update(validations)
+                if pairs_to_cache:
+                    state.add_validated_pairs(pairs_to_cache, model)
+                    new_validated_pairs.extend(pairs_to_cache)
+
+                completed_batches += 1
+                if progress_callback:
+                    progress_callback(
+                        f"Validating batch {completed_batches}/{total_batches}"
+                    )
+
+            logger.info(f"  Batch {batch_num}/{total_batches} ({len(batch)} pairs)")
+
+    # Run all batches in parallel (semaphore limits concurrency)
+    await asyncio.gather(*[process_batch(batch, num) for batch, num in batches])
 
     # Filter all pairs by viability score
     validated = []
@@ -449,17 +473,32 @@ async def validate_pairs_simple(
     if pre_filtered_count > 0:
         logger.info(f"Pre-filtered {pre_filtered_count} pairs")
 
-    all_validations = {}
-    total_batches = (len(pairs_to_validate) + batch_size - 1) // batch_size
+    # Validate in parallel with semaphore-based rate limiting
+    import asyncio
 
+    all_validations = {}
+    lock = asyncio.Lock()
+
+    # Create all batches upfront
+    batches = []
     for i in range(0, len(pairs_to_validate), batch_size):
         batch = pairs_to_validate[i : i + batch_size]
         batch_num = i // batch_size + 1
+        batches.append((batch, batch_num))
 
-        logger.info(f"  Batch {batch_num}/{total_batches} ({len(batch)} pairs)")
+    total_batches = len(batches)
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_BATCHES)
 
-        validations = await validate_batch(batch, model, batch_num)
-        all_validations.update(validations)
+    async def process_batch(batch: list[dict], batch_num: int) -> None:
+        """Process a single batch with rate limiting."""
+        async with semaphore:
+            validations = await validate_batch(batch, model, batch_num)
+            async with lock:
+                all_validations.update(validations)
+            logger.info(f"  Batch {batch_num}/{total_batches} ({len(batch)} pairs)")
+
+    # Run all batches in parallel
+    await asyncio.gather(*[process_batch(batch, num) for batch, num in batches])
 
     # Filter by viability
     validated = []
