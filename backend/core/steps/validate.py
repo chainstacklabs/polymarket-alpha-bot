@@ -126,6 +126,59 @@ BE STRICT. False positives cost money. When in doubt, reject.
 
 
 # =============================================================================
+# PRE-FILTERING
+# =============================================================================
+
+
+def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
+    """
+    Apply deterministic pre-filters to reject pairs that would always fail.
+
+    These filters catch structural/temporal issues without needing LLM:
+    - Same market: target and cover are the same market
+    - Same group: target and cover are from the same event group
+    - Temporal: cover resolves before target (can't provide coverage)
+
+    Args:
+        pairs: Candidate pairs to filter
+
+    Returns:
+        Tuple of (filtered_pairs, rejection_stats)
+    """
+    filtered = []
+    rejections = {
+        "same_market": 0,
+        "same_group": 0,
+        "temporal_mismatch": 0,
+    }
+
+    for pair in pairs:
+        # Check 1: Same market (meaningless hedge)
+        if pair.get("target_market_id") == pair.get("cover_market_id"):
+            rejections["same_market"] += 1
+            continue
+
+        # Check 2: Same group (intra-event, handled by Polymarket)
+        if pair.get("target_group_id") == pair.get("cover_group_id"):
+            rejections["same_group"] += 1
+            continue
+
+        # Check 3: Temporal - cover must resolve at or after target
+        target_res = pair.get("target_resolution")
+        cover_res = pair.get("cover_resolution")
+
+        if target_res and cover_res:
+            # Resolution dates are ISO strings, lexicographic comparison works
+            if cover_res < target_res:
+                rejections["temporal_mismatch"] += 1
+                continue
+
+        filtered.append(pair)
+
+    return filtered, rejections
+
+
+# =============================================================================
 # HELPERS
 # =============================================================================
 
@@ -245,8 +298,15 @@ async def validate_pairs(
         else:
             pairs_to_validate.append(pair)
 
+    # Apply pre-filters to new pairs (skip pairs that would always fail)
+    pre_filter_rejections = {"same_market": 0, "same_group": 0, "temporal_mismatch": 0}
+    if pairs_to_validate:
+        pairs_to_validate, pre_filter_rejections = pre_filter_pairs(pairs_to_validate)
+
+    pre_filtered_count = sum(pre_filter_rejections.values())
     logger.info(
-        f"Validating {len(pairs_to_validate)} pairs ({len(cached_validations)} cached)"
+        f"Validating {len(pairs_to_validate)} pairs "
+        f"({len(cached_validations)} cached, {pre_filtered_count} pre-filtered)"
     )
 
     if not pairs_to_validate:
@@ -260,6 +320,8 @@ async def validate_pairs(
         return validated, {
             "total_candidates": len(candidate_pairs),
             "from_cache": len(cached_validations),
+            "pre_filtered": pre_filtered_count,
+            "pre_filter_reasons": pre_filter_rejections,
             "validated_count": len(validated),
             "new_validated": 0,
         }
@@ -340,6 +402,8 @@ async def validate_pairs(
     summary = {
         "total_candidates": len(candidate_pairs),
         "from_cache": len(cached_validations),
+        "pre_filtered": pre_filtered_count,
+        "pre_filter_reasons": pre_filter_rejections,
         "new_validated": len(new_validated_pairs),
         "validated_count": len(validated),
         "rejected_count": len(candidate_pairs) - len(validated),
@@ -378,11 +442,18 @@ async def validate_pairs_simple(
     """
     model = llm_model or DEFAULT_VALIDATION_MODEL
 
-    all_validations = {}
-    total_batches = (len(candidate_pairs) + batch_size - 1) // batch_size
+    # Apply pre-filters
+    pairs_to_validate, pre_filter_rejections = pre_filter_pairs(candidate_pairs)
+    pre_filtered_count = sum(pre_filter_rejections.values())
 
-    for i in range(0, len(candidate_pairs), batch_size):
-        batch = candidate_pairs[i : i + batch_size]
+    if pre_filtered_count > 0:
+        logger.info(f"Pre-filtered {pre_filtered_count} pairs")
+
+    all_validations = {}
+    total_batches = (len(pairs_to_validate) + batch_size - 1) // batch_size
+
+    for i in range(0, len(pairs_to_validate), batch_size):
+        batch = pairs_to_validate[i : i + batch_size]
         batch_num = i // batch_size + 1
 
         logger.info(f"  Batch {batch_num}/{total_batches} ({len(batch)} pairs)")
@@ -392,7 +463,7 @@ async def validate_pairs_simple(
 
     # Filter by viability
     validated = []
-    for pair in candidate_pairs:
+    for pair in pairs_to_validate:
         validation = all_validations.get(pair["pair_id"], {})
         score = validation.get("viability_score", 0)
 
@@ -401,6 +472,8 @@ async def validate_pairs_simple(
 
     summary = {
         "total_candidates": len(candidate_pairs),
+        "pre_filtered": pre_filtered_count,
+        "pre_filter_reasons": pre_filter_rejections,
         "validated_count": len(validated),
         "retention_rate": round(len(validated) / len(candidate_pairs), 3)
         if candidate_pairs
