@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { usePortfolioPrices, Portfolio } from '@/hooks/usePortfolioPrices'
 import { PriceChangeIndicator, TierChangeBadge } from '@/components/PriceFlash'
+import { PortfolioModal } from '@/components/PortfolioModal'
+import { TIER_CONFIG } from '@/config/tier-config'
 
 // =============================================================================
 // TYPES
@@ -11,31 +13,6 @@ import { PriceChangeIndicator, TierChangeBadge } from '@/components/PriceFlash'
 type TierFilter = 'all' | 1 | 2 | 3 | 4
 type SortField = 'coverage' | 'expected_profit' | 'total_cost' | 'tier'
 type SortDirection = 'asc' | 'desc'
-
-// =============================================================================
-// CONSTANTS
-// =============================================================================
-
-const TIER_COLORS: Record<number, { bg: string; text: string; border: string }> = {
-  1: { bg: 'bg-emerald/10', text: 'text-emerald', border: 'border-emerald/30' },
-  2: { bg: 'bg-cyan/10', text: 'text-cyan', border: 'border-cyan/30' },
-  3: { bg: 'bg-amber/10', text: 'text-amber', border: 'border-amber/30' },
-  4: { bg: 'bg-text-muted/10', text: 'text-text-muted', border: 'border-border' },
-}
-
-const TIER_LABELS: Record<number, string> = {
-  1: 'Excellent',
-  2: 'Good',
-  3: 'Fair',
-  4: 'Low',
-}
-
-const TIER_DESCRIPTIONS: Record<number, string> = {
-  1: '95%+ chance of getting paid',
-  2: '90-95% chance of getting paid',
-  3: '85-90% chance of getting paid',
-  4: 'Under 85% chance',
-}
 
 // =============================================================================
 // MAIN COMPONENT
@@ -231,20 +208,20 @@ export default function PortfoliosPage() {
             </button>
             {[1, 2, 3, 4].map(tier => {
               const count = tierCounts[`tier_${tier}`] || 0
-              const colors = TIER_COLORS[tier]
+              const config = TIER_CONFIG[tier]
               return (
                 <button
                   key={tier}
                   onClick={() => setTierFilter(tier as TierFilter)}
-                  title={TIER_DESCRIPTIONS[tier]}
+                  title={config.desc}
                   className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                     tierFilter === tier
-                      ? `${colors.bg} ${colors.text} shadow-sm`
+                      ? `${config.bg} ${config.color} shadow-sm`
                       : 'text-text-muted hover:text-text-secondary'
                   }`}
                 >
-                  {TIER_LABELS[tier]}
-                  <span className={`ml-1.5 text-xs font-mono ${tierFilter === tier ? colors.text : 'text-text-muted'}`}>
+                  {config.label}
+                  <span className={`ml-1.5 text-xs font-mono ${tierFilter === tier ? config.color : 'text-text-muted'}`}>
                     {count}
                   </span>
                 </button>
@@ -298,7 +275,7 @@ export default function PortfoliosPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {sortedPortfolios.map((p) => {
-                    const colors = TIER_COLORS[p.tier]
+                    const tierConfig = TIER_CONFIG[p.tier]
                     const isProfitable = p.expected_profit > 0.001
                     const coveragePercent = (p.coverage * 100).toFixed(1)
                     const isChanged = changedIds.has(p.pair_id)
@@ -323,10 +300,10 @@ export default function PortfoliosPage() {
                         <td className="px-2.5 py-2">
                           <div className="flex items-center gap-1">
                             <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors.bg} ${colors.text} border ${colors.border}`}
-                              title={TIER_DESCRIPTIONS[p.tier]}
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${tierConfig.bg} ${tierConfig.color} border ${tierConfig.border}`}
+                              title={tierConfig.desc}
                             >
-                              {TIER_LABELS[p.tier]}
+                              {tierConfig.label}
                             </span>
                             {tierChange && (
                               <span className={`text-xs ${tierChange.new_tier < tierChange.old_tier ? 'text-emerald' : 'text-rose'}`}>
@@ -408,163 +385,12 @@ export default function PortfoliosPage() {
       </div>
 
       {/* Portfolio Detail Modal */}
-      {selectedPortfolio && (() => {
-        const p = selectedPortfolio
-        const colors = TIER_COLORS[p.tier]
-        const isProfitable = p.expected_profit > 0.001
-        const priceChange = priceChanges.get(p.pair_id)
-
-        return (
-          <div
-            className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-            onClick={() => setSelectedPortfolio(null)}
-          >
-            <div
-              className="bg-surface border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-fade-in"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Modal Header */}
-              <div className="flex items-center justify-between p-4 border-b border-border">
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-medium ${colors.bg} ${colors.text} border ${colors.border}`}>
-                    {TIER_LABELS[p.tier]} Quality
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <span className={`text-sm font-mono font-semibold ${isProfitable ? 'text-emerald' : 'text-rose'}`}>
-                      {isProfitable ? '+' : ''}{(p.expected_profit * 100).toFixed(2)}%
-                    </span>
-                    <span className="text-xs text-text-muted">est. return</span>
-                    {priceChange && <PriceChangeIndicator direction={priceChange.direction} />}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setSelectedPortfolio(null)}
-                  className="text-text-muted hover:text-text-primary transition-colors text-xl"
-                >
-                  ×
-                </button>
-              </div>
-
-              {/* Modal Content */}
-              <div className="p-4 space-y-4">
-                {/* Target Bet */}
-                <div className="bg-surface-elevated rounded-lg p-4 border border-border">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Your Main Bet</span>
-                    <span className={`text-xs font-mono px-2 py-0.5 rounded ${p.target_position === 'YES' ? 'bg-emerald/10 text-emerald' : 'bg-rose/10 text-rose'}`}>
-                      Betting {p.target_position} @ ${p.target_price.toFixed(2)}
-                    </span>
-                  </div>
-                  <p className="text-sm text-text-primary mb-1">{p.target_question}</p>
-                  <p className="text-xs text-text-muted">{p.target_group_title}</p>
-                  {p.target_bracket && (
-                    <p className="text-xs text-text-muted mt-1">Range: {p.target_bracket}</p>
-                  )}
-                </div>
-
-                {/* Connection */}
-                <div className="flex items-center justify-center py-1">
-                  <div className="flex items-center gap-2 text-text-muted">
-                    <div className="h-px w-8 bg-border" />
-                    <span className="text-[10px] uppercase tracking-wide px-2 py-1 rounded bg-surface-elevated border border-border">
-                      Protected By
-                    </span>
-                    <span className="text-[10px] font-mono">
-                      ({(p.cover_probability * 100).toFixed(0)}% chance to trigger)
-                    </span>
-                    <div className="h-px w-8 bg-border" />
-                  </div>
-                </div>
-
-                {/* Backup Bet */}
-                <div className="bg-surface-elevated rounded-lg p-4 border-2 border-cyan/30">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Your Backup Bet</span>
-                    <span className={`text-xs font-mono px-2 py-0.5 rounded ${p.cover_position === 'YES' ? 'bg-emerald/10 text-emerald' : 'bg-rose/10 text-rose'}`}>
-                      Betting {p.cover_position} @ ${p.cover_price.toFixed(2)}
-                    </span>
-                  </div>
-                  <p className="text-sm text-text-primary mb-1">{p.cover_question}</p>
-                  <p className="text-xs text-text-muted">{p.cover_group_title}</p>
-                  {p.cover_bracket && (
-                    <p className="text-xs text-text-muted mt-1">Range: {p.cover_bracket}</p>
-                  )}
-                </div>
-
-                {/* Why These Work Together */}
-                {p.relationship && (
-                  <div className="bg-surface-elevated rounded-lg p-3 border border-border">
-                    <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Why These Work Together</h4>
-                    <p className="text-xs text-text-secondary">{p.relationship}</p>
-                  </div>
-                )}
-
-                {/* Key Numbers */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-surface-elevated rounded-lg p-3 border border-border">
-                    <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Win Rate</h4>
-                    <p className={`text-lg font-mono font-semibold ${p.coverage >= 0.95 ? 'text-emerald' : p.coverage >= 0.90 ? 'text-cyan' : 'text-amber'}`}>
-                      {(p.coverage * 100).toFixed(2)}%
-                    </p>
-                    <p className="text-[10px] text-text-muted mt-0.5">Chance of getting $1 back</p>
-                  </div>
-                  <div className="bg-surface-elevated rounded-lg p-3 border border-border">
-                    <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Total Investment</h4>
-                    <p className="text-lg font-mono font-semibold text-text-primary">
-                      ${p.total_cost.toFixed(2)}
-                    </p>
-                    <p className="text-[10px] text-text-muted mt-0.5">Cost of main + backup bets</p>
-                  </div>
-                  <div className="bg-surface-elevated rounded-lg p-3 border border-border">
-                    <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Estimated Return</h4>
-                    <p className={`text-lg font-mono font-semibold ${isProfitable ? 'text-emerald' : 'text-rose'}`}>
-                      {isProfitable ? '+' : ''}{(p.expected_profit * 100).toFixed(2)}%
-                    </p>
-                    <p className="text-[10px] text-text-muted mt-0.5">Average profit per dollar invested</p>
-                  </div>
-                  <div className="bg-surface-elevated rounded-lg p-3 border border-border">
-                    <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">Risk</h4>
-                    <p className="text-lg font-mono font-semibold text-text-muted">
-                      {(p.loss_probability * 100).toFixed(2)}%
-                    </p>
-                    <p className="text-[10px] text-text-muted mt-0.5">Chance of losing your ${p.total_cost.toFixed(2)}</p>
-                  </div>
-                </div>
-
-                {/* AI Analysis */}
-                {p.validation_analysis && (
-                  <div className="bg-surface-elevated rounded-lg p-3 border border-border">
-                    <h4 className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-1">AI Analysis</h4>
-                    <p className="text-xs text-text-secondary">{p.validation_analysis}</p>
-                    {p.viability_score !== undefined && (
-                      <p className="text-[10px] text-text-muted mt-1">Confidence: {(p.viability_score * 100).toFixed(0)}%</p>
-                    )}
-                  </div>
-                )}
-
-                {/* Open Markets Button */}
-                {(p.target_group_slug || p.cover_group_slug) && (
-                  <div className="pt-2">
-                    <button
-                      onClick={() => {
-                        if (p.target_group_slug) {
-                          window.open(`https://polymarket.com/event/${p.target_group_slug}`, '_blank')
-                        }
-                        if (p.cover_group_slug) {
-                          window.open(`https://polymarket.com/event/${p.cover_group_slug}`, '_blank')
-                        }
-                      }}
-                      className="w-full py-2.5 px-4 bg-cyan/10 hover:bg-cyan/20 border border-cyan/30 rounded-lg text-cyan text-sm font-medium transition-colors"
-                    >
-                      Open Both Markets on Polymarket ↗
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )
-      })()}
+      {selectedPortfolio && (
+        <PortfolioModal
+          portfolio={selectedPortfolio}
+          onClose={() => setSelectedPortfolio(null)}
+        />
+      )}
     </>
   )
 }
