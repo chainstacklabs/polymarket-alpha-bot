@@ -13,7 +13,6 @@ alphapoly-v1/
 │   ├── models.py    # Singleton model loaders (GLiNER, embedder, LLM)
 │   └── steps/       # Pipeline steps (fetch, entities, relations, alpha, arbitrage, etc.)
 ├── server/          # FastAPI backend - REST API, WebSocket prices
-├── cli/             # Minimal Typer CLI - automation only (run, reset, serve)
 ├── frontend/        # Next.js dashboard - primary UI
 └── data/            # Pipeline outputs (gitignored)
     └── _live/       # Production state (events.json, graph.json, opportunities.json)
@@ -43,7 +42,7 @@ alphapoly-v1/
 ```
 
 **Incremental mode** (default): Only processes new events, merges into existing graph.
-**Full mode** (`--full`): Resets state, reprocesses everything.
+**Full mode** (`full=True`): Resets state, reprocesses everything.
 
 ## Critical Rules
 
@@ -62,11 +61,17 @@ alphapoly-v1/
 ## Commands
 
 ```bash
-# CLI (minimal - for automation/cron)
-uv run poly run              # Incremental pipeline
-uv run poly run --full       # Full reprocess
-uv run poly reset            # Clear state
-uv run poly serve            # API server (localhost:8000)
+# Server
+uv run uvicorn server.main:app --reload   # Dev server (localhost:8000)
+
+# Pipeline (via API)
+curl -X POST localhost:8000/pipeline/run                    # Incremental
+curl -X POST localhost:8000/pipeline/run/production         # Full run
+curl -X POST localhost:8000/pipeline/reset                  # Clear state
+
+# Pipeline (via Python)
+uv run python -c "from core.runner import run; run()"       # Incremental
+uv run python -c "from core.runner import run; run(full=True)"  # Full
 
 # Development
 uv run python experiments/NN_name.py   # Run experiment script
