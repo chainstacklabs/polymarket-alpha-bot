@@ -159,7 +159,7 @@ export default function PortfoliosPage() {
           <div>
             <h1 className="text-xl font-semibold text-text-primary">Explore</h1>
             <p className="text-sm text-text-muted mt-0.5">
-              {totalCount} hedging strategies found, {profitableCount} with positive returns
+              Hedging strategies table
             </p>
           </div>
           <div className="flex items-center gap-3">
