@@ -140,12 +140,13 @@ export function usePortfolioPrices(
       return
     }
 
-    // Already connected
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    // Already connected or connecting - don't create duplicate connections
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) {
       return
     }
 
-    // Close any stale connection (CONNECTING or CLOSING state)
+    // Close any stale connection (CLOSING state)
     if (wsRef.current) {
       wsRef.current.onclose = null
       wsRef.current.onerror = null
@@ -301,7 +302,7 @@ export function usePortfolioPrices(
     }
   }, [])
 
-  // Initial connection
+  // Initial connection - only run once on mount
   useEffect(() => {
     mountedRef.current = true
     connect()
@@ -321,7 +322,8 @@ export function usePortfolioPrices(
         wsRef.current = null
       }
     }
-  }, [connect])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])  // Empty deps - connect is stable and doesn't need to trigger re-runs
 
   // Send filter updates to server
   const updateFilters = useCallback((filters: FilterState) => {
