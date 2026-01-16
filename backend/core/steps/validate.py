@@ -35,7 +35,7 @@ from core.utils import extract_json_from_response
 import os
 
 # Pairs per LLM call (balances efficiency with context limits)
-BATCH_SIZE = 8
+BATCH_SIZE = 32
 
 # Minimum viability score to keep a pair
 MIN_VIABILITY_SCORE = 0.70
