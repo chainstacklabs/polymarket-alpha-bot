@@ -53,6 +53,7 @@ class ClobWebSocketClient:
         self._connect_task: asyncio.Task | None = None
         self._ping_task: asyncio.Task | None = None
         self._reconnect_attempts = 0
+        self._resubscribe_event: asyncio.Event | None = None
 
     async def start(self, token_ids: list[str]) -> None:
         """
@@ -73,6 +74,7 @@ class ClobWebSocketClient:
 
         logger.info(f"Starting ClobWebSocketClient with {len(self._token_ids)} tokens")
         self._running = True
+        self._resubscribe_event = asyncio.Event()
         self._connect_task = asyncio.create_task(self._connect_loop())
 
     async def stop(self) -> None:
@@ -107,6 +109,10 @@ class ClobWebSocketClient:
         self._token_ids = token_ids[:MAX_TOKENS_PER_CONNECTION]
         logger.info(f"Resubscribing to {len(self._token_ids)} tokens")
 
+        # Wake up connect loop if it's waiting for tokens
+        if self._resubscribe_event:
+            self._resubscribe_event.set()
+
         # Close current connection to trigger reconnect
         if self._ws:
             try:
@@ -119,7 +125,17 @@ class ClobWebSocketClient:
         while self._running:
             if not self._token_ids:
                 logger.warning("No tokens to subscribe to, waiting...")
-                await asyncio.sleep(30)
+                # Wait for resubscribe event or timeout after 5s
+                if self._resubscribe_event:
+                    self._resubscribe_event.clear()
+                    try:
+                        await asyncio.wait_for(
+                            self._resubscribe_event.wait(), timeout=5.0
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+                else:
+                    await asyncio.sleep(5)
                 continue
 
             try:

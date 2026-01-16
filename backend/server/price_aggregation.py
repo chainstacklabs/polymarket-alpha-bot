@@ -19,7 +19,7 @@ from server.token_resolver import token_resolver
 # CONFIGURATION
 # =============================================================================
 
-SUBSCRIPTION_REFRESH_INTERVAL = 30  # Check for portfolio changes every 30s
+SUBSCRIPTION_REFRESH_INTERVAL = 5  # Check for portfolio changes every 5s
 CALLBACK_BATCH_INTERVAL = 0.1  # Batch callbacks every 100ms
 STALE_THRESHOLD_SECONDS = 30
 PRICE_QUEUE_MAX_SIZE = 10000  # Prevent memory exhaustion under high load
