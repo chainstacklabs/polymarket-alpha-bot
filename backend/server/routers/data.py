@@ -6,13 +6,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from core.paths import DATA_DIR, LIVE_DIR
 from server.price_aggregation import PriceData, price_aggregation
 
 router = APIRouter()
-
-# Data directory - relative to project root
-DATA_DIR = Path(__file__).parent.parent.parent / "data"
-LIVE_DIR = DATA_DIR / "_live"
 
 
 def recalculate_opportunities_with_live_prices(

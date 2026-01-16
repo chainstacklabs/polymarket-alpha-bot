@@ -1,8 +1,7 @@
 [project]
-name = "alphapoly-v1"
+name = "alphapoly-backend"
 version = "0.1.0"
-description = "Polymarket alpha detection pipeline with API and web UI"
-readme = "README.md"
+description = "Polymarket alpha detection API and ML pipeline"
 requires-python = ">=3.12"
 dependencies = [
     "faiss-cpu>=1.13.2",
@@ -18,6 +17,8 @@ dependencies = [
     "rapidfuzz>=3.14.3",
     "sentence-transformers>=5.2.0",
     "scikit-learn>=1.6.0",
+    # Console output
+    "rich>=13.0.0",
     # API
     "fastapi>=0.108.0",
     "uvicorn>=0.25.0",

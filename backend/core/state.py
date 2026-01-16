@@ -26,8 +26,8 @@ from loguru import logger
 # CONFIGURATION
 # =============================================================================
 
-DATA_DIR = Path(__file__).parent.parent / "data"
-LIVE_DIR = DATA_DIR / "_live"
+from core.paths import LIVE_DIR
+
 STATE_DB_PATH = LIVE_DIR / "state.db"
 
 # Legacy paths (kept for backward compatibility)

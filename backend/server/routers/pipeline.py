@@ -3,17 +3,16 @@
 import json
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from core.paths import BACKEND_ROOT, DATA_DIR
+
 router = APIRouter()
 
 # Paths
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
 MANIFEST_PATH = DATA_DIR / "manifest.json"
 
 # Pipeline state
@@ -174,7 +173,7 @@ def run_pipeline_task(from_step: str, to_step: str):
                 "--to-step",
                 to_step,
             ],
-            cwd=PROJECT_ROOT,
+            cwd=BACKEND_ROOT,
             capture_output=True,
             text=True,
         )

@@ -8,16 +8,14 @@ Used by the portfolio WebSocket to push updates to clients.
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 
 from loguru import logger
+
+from core.paths import LIVE_DIR
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-
-DATA_DIR = Path(__file__).parent.parent / "data"
-LIVE_DIR = DATA_DIR / "_live"
 RELOAD_INTERVAL_SECONDS = 60  # Reload portfolios.json periodically
 
 # Tier thresholds (coverage, tier_number, label)

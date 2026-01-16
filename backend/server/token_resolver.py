@@ -6,10 +6,11 @@ Token IDs are required for subscribing to the CLOB WebSocket.
 """
 
 import json
-from pathlib import Path
 
 import httpx
 from loguru import logger
+
+from core.paths import LIVE_DIR
 
 # =============================================================================
 # CONFIGURATION
@@ -17,9 +18,6 @@ from loguru import logger
 
 GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
 REQUEST_TIMEOUT = 10.0
-
-DATA_DIR = Path(__file__).parent.parent / "data"
-LIVE_DIR = DATA_DIR / "_live"
 
 
 # =============================================================================

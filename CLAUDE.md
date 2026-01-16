@@ -1,169 +1,108 @@
 # CLAUDE.md
 
-> Polymarket alpha detection platform: cross-market arbitrage and conditional probability mispricings via ML/NLP pipeline, REST API, and web dashboard.
+> Polymarket alpha detection platform: cross-market arbitrage and conditional probability mispricings via LLM pipeline, REST API, and web dashboard.
 
 ## Project Structure
 
 ```
-alphapoly-v1/
-├── experiments/     # R&D scripts - standalone, exploratory (NN_name.py format)
-├── core/            # Production pipeline - reusable steps, state management
-│   ├── runner.py    # Main pipeline orchestrator
-│   ├── state.py     # SQLite state management, _live/ exports
-│   ├── models.py    # Singleton model loaders (GLiNER, embedder, LLM)
-│   └── steps/       # Pipeline steps (fetch, entities, relations, alpha, arbitrage, etc.)
-├── server/          # FastAPI backend - REST API, WebSocket prices
-├── frontend/        # Next.js dashboard - primary UI
-└── data/            # Pipeline outputs (gitignored)
-    └── _live/       # Production state (events.json, graph.json, opportunities.json)
+alphapoly/
+├── backend/                 # Python backend (FastAPI + ML pipeline)
+│   ├── core/                # Pipeline logic
+│   │   ├── runner.py        # Main orchestrator
+│   │   ├── state.py         # SQLite state, _live/ exports
+│   │   ├── paths.py         # Shared path constants
+│   │   └── steps/           # Pipeline steps
+│   ├── server/              # FastAPI app
+│   │   ├── main.py          # App entrypoint
+│   │   └── routers/         # API routes
+│   ├── pyproject.toml
+│   └── uv.lock
+│
+├── frontend/                # Next.js dashboard
+│   ├── app/                 # Pages (App Router)
+│   ├── components/
+│   ├── hooks/
+│   └── package.json
+│
+├── experiments/             # Standalone scripts, tests, scratch work
+├── data/                    # Pipeline outputs (gitignored)
+├── Makefile                 # Common commands
+└── .env                     # Environment variables
 ```
 
-## Pipeline Architecture
+## Quick Start
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     core/runner.py (14 steps)                   │
-├─────────────────────────────────────────────────────────────────┤
-│  1. Fetch Events        → Polymarket API                        │
-│  2. Identify New Events → Compare with existing state           │
-│  3. Load ML Models      → GLiNER, embedder, LLM client          │
-│  4. Prepare NLP Data    → Clean text, extract markets           │
-│  5. Extract Entities    → GLiNER2 NER                           │
-│  6. Extract Semantics   → LLM event parsing                     │
-│  7. Generate Embeddings → Sentence transformers                 │
-│  8. Enrich Quality      → Negation detection, flags             │
-│  9. Find Candidate Pairs→ FAISS similarity + entity blocking    │
-│ 10. Classify Structural → Rule-based relation classification    │
-│ 11. Classify Causal     → LLM causal inference                  │
-│ 12. Build Graph         → NetworkX knowledge graph              │
-│ 13. Detect Alpha        → Conditional probability opportunities │
-│ 14. Detect Arbitrage    → Cross-market exhaustive sets          │
-└─────────────────────────────────────────────────────────────────┘
+```bash
+make install    # Install backend + frontend deps
+make dev        # Start both servers (backend :8000, frontend :3000)
+
+# Or run separately
+make backend    # API only
+make frontend   # UI only
+make check-node # Verify Node.js is detected
 ```
 
-**Incremental mode** (default): Only processes new events, merges into existing graph.
-**Full mode** (`full=True`): Resets state, reprocesses everything.
+> **Note**: Makefile auto-detects Node.js from fnm, nvm, volta, or system paths.
+
+## Commands
+
+```bash
+make install        # Install all dependencies
+make dev            # Start backend + frontend
+make backend        # Backend only (localhost:8000)
+make frontend       # Frontend only (localhost:3000)
+make pipeline       # Run ML pipeline (incremental)
+make pipeline-full  # Run ML pipeline (full)
+make lint           # Lint + format all code
+make check-node     # Verify Node.js is available
+make clean          # Remove build artifacts
+```
 
 ## Critical Rules
 
 - **Use `uv` exclusively** — never pip, never conda
 - **Use `polars`** — never pandas
-- **Default LLM model:** `xiaomi/mimo-v2-flash:free` via OpenRouter
-- **Experiments are independent** — no shared modules between experiment scripts
-- **Core uses singletons** — models loaded once via `core/models.py`
+- **Default LLM:** `xiaomi/mimo-v2-flash:free` via OpenRouter
+- **Experiments are independent** — no shared modules
+- **Run Python commands from `backend/`**
 
-## Alpha Detection Scope
+## Alpha Detection
 
-**Goal**: Find combinations of positions across DIFFERENT questions where total cost < $1.00 guarantees $1.00 payout in all outcomes.
+**Goal**: Find position combinations across DIFFERENT questions where total cost < $1.00 guarantees $1.00 payout.
 
-**Ignore**: Intra-event sibling arbitrage (sum of YES ≠ 1.0) — Polymarket handles this.
-
-## Commands
-
-```bash
-# Server
-uv run uvicorn server.main:app --reload   # Dev server (localhost:8000)
-
-# Pipeline (via API)
-curl -X POST localhost:8000/pipeline/run                    # Incremental
-curl -X POST localhost:8000/pipeline/run/production         # Full run
-curl -X POST localhost:8000/pipeline/reset                  # Clear state
-
-# Pipeline (via Python)
-uv run python -c "from core.runner import run; run()"       # Incremental
-uv run python -c "from core.runner import run; run(full=True)"  # Full
-
-# Development
-uv run python experiments/NN_name.py   # Run experiment script
-uv add package                         # Add dependency
-uvx ruff check . && uvx ruff format .  # Lint & format
-```
-
-## Experiment Script Structure
-
-### Naming: `NN_name.py` → `data/NN_name/<timestamp>/`
-
-```
-experiments/01_fetch_events.py  →  data/01_fetch_events/20251229_151059/
-experiments/02_prepare_nlp.py   →  data/02_prepare_nlp/20251229_160000/
-```
-
-### Template
-
-```python
-"""One-line description of what this script does."""
-
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-DATA_DIR = Path(__file__).parent.parent / "data"
-OUTPUT_DIR = DATA_DIR / "01_script_name"
-API_ENDPOINT = "https://..."
-TIMEOUT_SECONDS = 30
-# All tunables here, UPPER_CASE
-
-# =============================================================================
-# MAIN LOGIC
-# =============================================================================
-```
-
-### Output Requirements
-
-- Write to `data/NN_name/<timestamp>/`
-- Save as formatted JSON
-- Include `summary.json` with run stats and config snapshot
-
-## Code Style
-
-### DO
-
-- Type hints on all functions
-- `pathlib.Path` for file paths
-- f-strings for formatting
-- `httpx` for HTTP (async preferred)
-- Specific exceptions with context
-- `loguru` for logging (production), `logging` for experiments
-- Fail fast on bad inputs
-
-### DON'T
-
-- Bare `except:` clauses
-- Hardcoded values in logic
-- Long functions (split them)
-- Over-engineer — KISS, YAGNI
+**Ignore**: Intra-event sibling arbitrage — Polymarket handles this.
 
 ## API Endpoints
 
 ### Data
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/data/opportunities` | GET | Alpha opportunities (`?type=arbitrage\|conditional`) |
-| `/data/graph` | GET | Knowledge graph (nodes + edges) |
-| `/data/events` | GET | All processed events |
-| `/data/entities` | GET | Extracted entities |
-| `/data/relations` | GET | Event relations |
-| `/data/runs` | GET | Pipeline run history |
+| `/data/portfolios` | GET | Covering portfolios with live prices |
+| `/data/opportunities` | GET | Alpha opportunities |
 
 ### Pipeline
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/pipeline/status` | GET | Pipeline state overview |
-| `/pipeline/steps` | GET | Current step progress |
-| `/pipeline/run` | POST | Trigger pipeline run |
-| `/pipeline/run/production` | POST | Production run with options |
-| `/pipeline/reset` | POST | Clear pipeline state |
+| `/pipeline/status` | GET | Pipeline state |
+| `/pipeline/run` | POST | Trigger run |
+| `/pipeline/reset` | POST | Clear state |
 
 ### Prices
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/prices/current` | GET | Current cached prices |
-| `/prices/ws` | WS | Live price updates |
+| `/prices/current` | GET | Cached prices |
+| `/prices/ws` | WS | Live updates |
+
+## Code Style
+
+**DO**: Type hints, `pathlib.Path`, f-strings, `httpx`, `loguru`
+
+**DON'T**: Bare `except:`, hardcoded values, long functions, over-engineering
 
 ## Environment
 
 ```bash
-# .env (gitignored)
+# .env (at project root, gitignored)
 OPENROUTER_API_KEY=sk-...
 ```
 
@@ -171,6 +110,4 @@ OPENROUTER_API_KEY=sk-...
 
 - Commit format: `<type>: <description>`
 - Types: `feat`, `fix`, `docs`, `refactor`, `chore`
-- No Claude signatures in commits
-- Never commit: API keys, `/data` contents, large files
-- **Temporary documentation:** Use `.local.md` extension for temporary docs and do not commit them
+- Never commit: API keys, `/data` contents
