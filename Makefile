@@ -1,7 +1,7 @@
 # Alphapoly Development Commands
 # ================================
 
-.PHONY: help install dev backend frontend pipeline lint test clean check-node
+.PHONY: help install dev backend frontend pipeline lint test clean check-node export-seed import-seed
 
 # Node.js detection - supports fnm, nvm, volta, and system node
 # Searches common installation paths and adds to PATH
@@ -26,8 +26,12 @@ help:
 	@echo "  make frontend    Start frontend only (localhost:3000)"
 	@echo ""
 	@echo "Pipeline:"
-	@echo "  make pipeline    Run ML pipeline (incremental)"
+	@echo "  make pipeline       Run ML pipeline (incremental)"
 	@echo "  make pipeline-full  Run ML pipeline (full reprocess)"
+	@echo ""
+	@echo "Seed Data:"
+	@echo "  make export-seed    Export current state as seed data"
+	@echo "  make import-seed    Import seed data (resets DB first)"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make lint        Lint and format all code"
@@ -77,6 +81,16 @@ pipeline:
 
 pipeline-full:
 	cd backend && uv run python -c "from core.runner import run; run(full=True)"
+
+# =============================================================================
+# Seed Data
+# =============================================================================
+
+export-seed:
+	cd backend && uv run python -c "from core.state import load_state; load_state().export_seed_data()"
+
+import-seed:
+	cd backend && uv run python -c "from core.state import load_state; load_state().import_seed_data(force=True)"
 
 # =============================================================================
 # Quality

@@ -26,7 +26,7 @@ from loguru import logger
 # CONFIGURATION
 # =============================================================================
 
-from core.paths import LIVE_DIR
+from core.paths import LIVE_DIR, SEED_DIR
 
 STATE_DB_PATH = LIVE_DIR / "state.db"
 
@@ -40,6 +40,9 @@ OPPORTUNITIES_PATH = LIVE_DIR / "opportunities.json"
 # New covering portfolios paths
 GROUPS_PATH = LIVE_DIR / "groups.json"
 PORTFOLIOS_PATH = LIVE_DIR / "portfolios.json"
+
+# Seed data path
+SEED_DATA_PATH = SEED_DIR / "seed.json"
 
 
 # =============================================================================
@@ -128,6 +131,9 @@ class PipelineState:
         self._entity_mappings_cache: dict[str, str] | None = None
         # New covering portfolios caches
         self._processed_group_ids_cache: set[str] | None = None
+
+        # Auto-import seed data if database is empty
+        self._import_seed_if_empty()
 
     def _init_tables(self) -> None:
         """Initialize database schema."""
@@ -1095,6 +1101,188 @@ class PipelineState:
                 logger.debug(f"Deleted {path.name}")
 
         logger.info("Pipeline state reset complete")
+
+    # =========================================================================
+    # SEED DATA MANAGEMENT
+    # =========================================================================
+
+    def _is_empty_db(self) -> bool:
+        """Check if database has no groups (indicates fresh install)."""
+        cursor = self.conn.execute("SELECT COUNT(*) FROM groups")
+        return cursor.fetchone()[0] == 0
+
+    def _import_seed_if_empty(self) -> None:
+        """Auto-import seed data if database is empty and seed file exists."""
+        if not self._is_empty_db():
+            return
+
+        if not SEED_DATA_PATH.exists():
+            return
+
+        logger.info("Empty database detected, importing seed data...")
+        result = self.import_seed_data()
+        if result["status"] == "imported":
+            logger.info(
+                f"Imported seed: {result['groups']} groups, "
+                f"{result['implications']} implications, "
+                f"{result['validated_pairs']} pairs"
+            )
+
+    def export_seed_data(self) -> dict:
+        """
+        Export current state to seed file for bootstrapping new installations.
+
+        Exports: groups, implications, validated_pairs, markets
+        Skips: portfolios (recalculated from prices), run history
+
+        Returns:
+            Dict with export statistics
+        """
+        logger.info("Exporting seed data...")
+
+        # Fetch all tables
+        groups = self.get_all_groups()
+        implications = self.get_all_implications()
+        validated_pairs = self.get_all_validated_pairs()
+
+        # Get markets directly from DB
+        cursor = self.conn.execute(
+            """
+            SELECT market_id, group_id, question, price_yes, price_no,
+                   resolution_date, bracket_label
+            FROM markets
+            """
+        )
+        markets = [
+            {
+                "id": row[0],
+                "group_id": row[1],
+                "question": row[2],
+                "price_yes": row[3],
+                "price_no": row[4],
+                "resolution_date": row[5],
+                "bracket_label": row[6],
+            }
+            for row in cursor.fetchall()
+        ]
+
+        seed_data = {
+            "_meta": {
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "description": "Seed data for pipeline bootstrap",
+                "counts": {
+                    "groups": len(groups),
+                    "implications": len(implications),
+                    "validated_pairs": len(validated_pairs),
+                    "markets": len(markets),
+                },
+            },
+            "groups": groups,
+            "implications": implications,
+            "validated_pairs": validated_pairs,
+            "markets": markets,
+        }
+
+        # Create seed directory and write file
+        try:
+            SEED_DIR.mkdir(parents=True, exist_ok=True)
+            SEED_DATA_PATH.write_text(json.dumps(seed_data, indent=2))
+        except OSError as e:
+            logger.error(f"Failed to export seed data: {e}")
+            return {"status": "error", "reason": f"write_failed: {e}"}
+
+        result = {
+            "status": "exported",
+            "path": str(SEED_DATA_PATH),
+            "groups": len(groups),
+            "implications": len(implications),
+            "validated_pairs": len(validated_pairs),
+            "markets": len(markets),
+        }
+
+        logger.info(
+            f"Exported seed: {len(groups)} groups, "
+            f"{len(implications)} implications, "
+            f"{len(validated_pairs)} pairs, "
+            f"{len(markets)} markets → {SEED_DATA_PATH}"
+        )
+
+        return result
+
+    def import_seed_data(self, force: bool = False) -> dict:
+        """
+        Import seed data from seed file.
+
+        Args:
+            force: If True, reset database before importing (for manual re-import)
+
+        Returns:
+            Dict with import statistics
+        """
+        if not SEED_DATA_PATH.exists():
+            logger.warning(f"No seed file found at {SEED_DATA_PATH}")
+            return {"status": "skipped", "reason": "no_seed_file"}
+
+        if not force and not self._is_empty_db():
+            logger.warning("Database not empty. Use force=True to reset and import.")
+            return {"status": "skipped", "reason": "db_not_empty"}
+
+        if force:
+            logger.warning("Force import: resetting database...")
+            self.reset()
+
+        logger.info(f"Importing seed data from {SEED_DATA_PATH}...")
+
+        # Load seed file
+        try:
+            seed_data = json.loads(SEED_DATA_PATH.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Failed to load seed data: {e}")
+            return {"status": "error", "reason": f"invalid_seed_file: {e}"}
+
+        # Import in order (respects foreign key relationships)
+        groups = seed_data.get("groups", [])
+        implications = seed_data.get("implications", [])
+        validated_pairs = seed_data.get("validated_pairs", [])
+        markets = seed_data.get("markets", [])
+
+        if groups:
+            self.add_groups(groups)
+
+        if markets:
+            self.add_markets(markets)
+
+        if implications:
+            # Use llm_model from first implication or "seed" as fallback
+            llm_model = (
+                implications[0].get("llm_model", "seed") if implications else "seed"
+            )
+            self.add_implications(implications, llm_model=llm_model)
+
+        if validated_pairs:
+            llm_model = (
+                validated_pairs[0].get("llm_model", "seed")
+                if validated_pairs
+                else "seed"
+            )
+            self.add_validated_pairs(validated_pairs, llm_model=llm_model)
+
+        result = {
+            "status": "imported",
+            "groups": len(groups),
+            "implications": len(implications),
+            "validated_pairs": len(validated_pairs),
+            "markets": len(markets),
+        }
+
+        logger.info(
+            f"Imported: {len(groups)} groups, "
+            f"{len(implications)} implications, "
+            f"{len(validated_pairs)} pairs, "
+            f"{len(markets)} markets"
+        )
+
+        return result
 
     def close(self) -> None:
         """Close database connection."""

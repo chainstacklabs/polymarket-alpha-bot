@@ -13,8 +13,9 @@ wheels/
 .venv
 .env
 
-# Local data
-data
+# Local data (ignore all except seed data)
+data/
+!data/_seed/
 data_2
 *.local.*
 lib
