@@ -12,6 +12,7 @@ from loguru import logger
 from server import __version__
 from server.price_aggregation import price_aggregation
 from server.routers import data, pipeline, prices
+from core.market_poller import market_poller
 
 
 @asynccontextmanager
@@ -20,11 +21,13 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Alphapoly API...")
     await price_aggregation.start()
+    await market_poller.start()
 
     yield
 
     # Shutdown
     logger.info("Shutting down Alphapoly API...")
+    await market_poller.stop()
     await price_aggregation.stop()
 
 
