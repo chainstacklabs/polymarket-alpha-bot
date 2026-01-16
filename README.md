@@ -50,7 +50,3 @@ cd backend && uv run python -m uvicorn server.main:app --reload --port 8000
 cd frontend && npm install
 cd frontend && npm run dev
 ```
-
-## License
-
-MIT
