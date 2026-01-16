@@ -20,9 +20,8 @@ GLINER2_MODEL = "fastino/gliner2-base-v1"
 # Sentence Transformer for embeddings
 EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
 
-# OpenRouter LLM for semantic extraction and classification
+# OpenRouter LLM configuration
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-LLM_MODEL = "xiaomi/mimo-v2-flash:free"
 
 # Request settings
 LLM_TIMEOUT = 60.0
@@ -91,8 +90,8 @@ class LLMClient:
 
     def __init__(
         self,
+        model: str,
         api_key: str | None = None,
-        model: str = LLM_MODEL,
         timeout: float = LLM_TIMEOUT,
     ):
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
@@ -220,25 +219,23 @@ class LLMClient:
 _llm_clients: dict[str, LLMClient] = {}
 
 
-def get_llm_client(model: str | None = None) -> LLMClient:
+def get_llm_client(model: str) -> LLMClient:
     """
     Get LLM client for the specified model.
 
     Args:
-        model: Optional model name. If not provided, uses default LLM_MODEL.
-               Examples: "xiaomi/mimo-v2-flash:free", "anthropic/claude-sonnet-4"
+        model: Model identifier from OpenRouter (see https://openrouter.ai/models)
 
     Returns:
         LLMClient instance for the specified model
     """
     global _llm_clients
-    model_key = model or LLM_MODEL
 
-    if model_key not in _llm_clients:
-        _llm_clients[model_key] = LLMClient(model=model_key)
-        logger.debug(f"Created LLM client for model: {model_key}")
+    if model not in _llm_clients:
+        _llm_clients[model] = LLMClient(model=model)
+        logger.debug(f"Created LLM client for model: {model}")
 
-    return _llm_clients[model_key]
+    return _llm_clients[model]
 
 
 async def close_all_llm_clients() -> None:

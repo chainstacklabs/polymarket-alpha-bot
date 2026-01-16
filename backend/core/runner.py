@@ -37,11 +37,17 @@ from core.steps.validate import validate_pairs
 # CONFIGURATION
 # =============================================================================
 
+import os
+
 # LLM model for implications (cheaper, good enough for relationship extraction)
-IMPLICATIONS_LLM_MODEL = "xiaomi/mimo-v2-flash:free"
+IMPLICATIONS_LLM_MODEL = os.getenv("IMPLICATIONS_MODEL")
+if not IMPLICATIONS_LLM_MODEL:
+    raise ValueError("IMPLICATIONS_MODEL environment variable not set")
 
 # LLM model for validation (more expensive, needs reasoning for temporal logic)
-VALIDATION_LLM_MODEL = "anthropic/claude-sonnet-4"
+VALIDATION_LLM_MODEL = os.getenv("VALIDATION_MODEL")
+if not VALIDATION_LLM_MODEL:
+    raise ValueError("VALIDATION_MODEL environment variable not set")
 
 
 # =============================================================================

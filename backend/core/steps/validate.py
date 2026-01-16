@@ -33,6 +33,8 @@ from core.utils import extract_json_from_response
 # CONFIGURATION
 # =============================================================================
 
+import os
+
 # Pairs per LLM call (balances efficiency with context limits)
 BATCH_SIZE = 8
 
@@ -40,7 +42,9 @@ BATCH_SIZE = 8
 MIN_VIABILITY_SCORE = 0.70
 
 # Default model for validation (can be overridden)
-DEFAULT_VALIDATION_MODEL = "anthropic/claude-sonnet-4"
+DEFAULT_VALIDATION_MODEL = os.getenv("VALIDATION_MODEL")
+if not DEFAULT_VALIDATION_MODEL:
+    raise ValueError("VALIDATION_MODEL environment variable not set")
 
 
 # =============================================================================
