@@ -395,22 +395,24 @@ async def extract_implications_batch(
     all_groups: list[dict],
     state: PipelineState,
     llm_model: str | None = None,
-    batch_size: int = 5,
+    batch_size: int = 5,  # Not used anymore, kept for API compat
     max_concurrent: int = 3,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """
-    Extract implications with batched concurrent LLM calls.
+    Extract implications with concurrent LLM calls.
 
-    More efficient for large numbers of groups.
+    Uses semaphore-based concurrency and processes results as they complete
+    (not waiting for batches). This prevents slow LLM responses from blocking
+    other requests.
 
     Args:
         groups: Groups to process
         all_groups: All groups for context
         state: Pipeline state for caching
         llm_model: Optional LLM model override
-        batch_size: Groups per batch
-        max_concurrent: Maximum concurrent batches
+        batch_size: Deprecated, kept for API compatibility
+        max_concurrent: Maximum concurrent LLM requests
         progress_callback: Optional progress callback
 
     Returns:
@@ -443,12 +445,12 @@ async def extract_implications_batch(
     model_name = llm_model or llm.model
 
     semaphore = asyncio.Semaphore(max_concurrent)
+    completed_count = 0
+    total_count = len(groups_to_process)
 
-    async def process_group(target_group: dict, idx: int) -> dict | None:
+    async def process_group(target_group: dict, idx: int) -> dict:
+        nonlocal completed_count
         async with semaphore:
-            if progress_callback:
-                progress_callback(f"Extracting {idx + 1}/{len(groups_to_process)}")
-
             prompt = IMPLICATION_PROMPT.format(
                 group_titles_text=group_titles_text,
                 target_title=target_group["title"],
@@ -463,47 +465,57 @@ async def extract_implications_batch(
                 llm_result = extract_json_from_response(str(response))
 
                 if not llm_result:
-                    return {
+                    result = {
                         "group_id": target_group["group_id"],
                         "title": target_group["title"],
                         "yes_covered_by": [],
                         "no_covered_by": [],
                     }
-
-                return derive_covers(
-                    llm_result,
-                    target_group,
-                    groups_by_title,
-                    groups_by_title_lower,
-                )
+                else:
+                    result = derive_covers(
+                        llm_result,
+                        target_group,
+                        groups_by_title,
+                        groups_by_title_lower,
+                    )
 
             except Exception as e:
                 logger.error(f"Error processing {target_group['title'][:40]}: {e}")
-                return {
+                result = {
                     "group_id": target_group["group_id"],
                     "title": target_group["title"],
                     "yes_covered_by": [],
                     "no_covered_by": [],
                 }
 
-    # Process in batches
+            # Update progress after completion
+            completed_count += 1
+            if progress_callback:
+                progress_callback(f"Extracted {completed_count}/{total_count}")
+
+            return result
+
+    # Start all tasks at once - semaphore controls concurrency
+    tasks = [process_group(g, i) for i, g in enumerate(groups_to_process)]
+
+    # Process results as they complete (not waiting for batches)
     all_new_implications = []
+    save_buffer = []
+    save_interval = 10  # Save to cache every N completions
 
-    for batch_start in range(0, len(groups_to_process), batch_size):
-        batch = groups_to_process[batch_start : batch_start + batch_size]
+    for coro in asyncio.as_completed(tasks):
+        result = await coro
+        all_new_implications.append(result)
+        save_buffer.append(result)
 
-        tasks = [process_group(g, batch_start + i) for i, g in enumerate(batch)]
+        # Save to cache periodically
+        if len(save_buffer) >= save_interval:
+            state.add_implications(save_buffer, model_name)
+            save_buffer = []
 
-        results = await asyncio.gather(*tasks)
-
-        for result in results:
-            if result:
-                all_new_implications.append(result)
-
-        # Save batch to cache immediately
-        valid_results = [r for r in results if r]
-        if valid_results:
-            state.add_implications(valid_results, model_name)
+    # Save any remaining results
+    if save_buffer:
+        state.add_implications(save_buffer, model_name)
 
     logger.info(f"Processed {len(all_new_implications)} new implications")
 

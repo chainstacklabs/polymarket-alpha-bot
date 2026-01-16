@@ -29,7 +29,7 @@ from core.state import export_live_data, load_state
 from core.steps.expand import expand_all_to_pairs, expand_to_pairs
 from core.steps.fetch import fetch_events
 from core.steps.groups import build_groups, extract_markets_from_groups
-from core.steps.implications import extract_implications
+from core.steps.implications import extract_implications_batch
 from core.steps.portfolios import build_and_save_portfolios
 from core.steps.validate import validate_pairs
 
@@ -185,11 +185,13 @@ async def run_async(
         # STEP 4: Extract implications (LLM, CACHED)
         # =====================================================================
         with tracker.step(4, "Find Implications"):
-            implications = await extract_implications(
-                new_groups=new_groups,
+            implications = await extract_implications_batch(
+                groups=new_groups,
                 all_groups=groups,
                 state=state,
                 llm_model=impl_model,
+                batch_size=10,
+                max_concurrent=8,
                 progress_callback=tracker.update_details,
             )
 
