@@ -31,6 +31,8 @@ USAGE
     uv run python experiments/08_new_market_polling.py --interval 30  # Poll every 30s
     uv run python experiments/08_new_market_polling.py --strategy events  # Use events endpoint
     uv run python experiments/08_new_market_polling.py --duration 300  # Run for 5 minutes
+    uv run python experiments/08_new_market_polling.py --tag politics  # Filter by tag (default)
+    uv run python experiments/08_new_market_polling.py --tag none  # No tag filter (all markets)
 """
 
 import asyncio
@@ -53,6 +55,7 @@ GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
 
 # Polling settings
 DEFAULT_POLL_INTERVAL_SECONDS = 60  # How often to check for new markets
+DEFAULT_TAG = "politics"  # Filter by tag (same as pipeline uses)
 PAGE_SIZE = 100  # Max items per request
 REQUEST_TIMEOUT = 30.0
 MAX_RETRIES = 3
@@ -142,6 +145,18 @@ async def fetch_json(
     return None
 
 
+async def fetch_tag_id(client: httpx.AsyncClient, tag_slug: str) -> str | None:
+    """Fetch tag ID from slug (e.g., 'politics' -> '123')."""
+    tag = await fetch_json(client, f"/tags/slug/{tag_slug}")
+    if tag:
+        tag_id = tag.get("id")
+        label = tag.get("label", tag_slug)
+        log.info(f"Resolved tag '{tag_slug}' -> id={tag_id} ({label})")
+        return str(tag_id)
+    log.warning(f"Tag '{tag_slug}' not found")
+    return None
+
+
 def parse_json_field(value: Any) -> Any:
     """Parse JSON string field if needed."""
     if isinstance(value, str):
@@ -228,11 +243,17 @@ async def poll_markets_endpoint(
 async def poll_events_endpoint(
     client: httpx.AsyncClient,
     limit: int = PAGE_SIZE,
+    tag_id: str | None = None,
 ) -> list[MarketInfo]:
     """
     Strategy B: Poll /events endpoint to get events with their markets.
 
     Events are containers for related markets.
+
+    Args:
+        client: HTTP client
+        limit: Max events to fetch
+        tag_id: Optional tag ID to filter by (e.g., politics tag)
     """
     params: dict[str, Any] = {
         "limit": limit,
@@ -242,6 +263,9 @@ async def poll_events_endpoint(
         "active": "true",
         "closed": "false",
     }
+
+    if tag_id:
+        params["tag_id"] = tag_id
 
     events_raw = await fetch_json(client, "/events", params)
     if not events_raw:
@@ -349,6 +373,7 @@ async def run_polling_loop(
     strategy: str = "markets",
     interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
     duration: int | None = None,
+    tag: str | None = DEFAULT_TAG,
 ) -> NewMarketTracker:
     """
     Run continuous polling loop to detect new markets.
@@ -357,6 +382,7 @@ async def run_polling_loop(
         strategy: "markets", "events", or "new_only"
         interval: Seconds between polls
         duration: Optional max duration in seconds
+        tag: Tag slug to filter by (e.g., "politics"). Use None for all markets.
     """
     tracker = NewMarketTracker()
     shutdown_event = asyncio.Event()
@@ -373,6 +399,7 @@ async def run_polling_loop(
     log.info("=" * 70)
     log.info("POLYMARKET NEW MARKET POLLING")
     log.info(f"  Strategy: {strategy}")
+    log.info(f"  Tag filter: {tag or 'none (all markets)'}")
     log.info(f"  Poll interval: {interval}s")
     log.info(f"  Duration: {duration}s" if duration else "  Duration: unlimited")
     log.info("=" * 70)
@@ -382,6 +409,14 @@ async def run_polling_loop(
     async with httpx.AsyncClient(
         base_url=GAMMA_API_BASE_URL, timeout=REQUEST_TIMEOUT
     ) as client:
+        # Resolve tag_id if tag is specified
+        tag_id = None
+        if tag:
+            tag_id = await fetch_tag_id(client, tag)
+            if not tag_id:
+                log.error(f"Could not resolve tag '{tag}'. Aborting.")
+                return tracker
+
         while not shutdown_event.is_set():
             try:
                 # Check duration limit
@@ -397,7 +432,7 @@ async def run_polling_loop(
                 if strategy == "markets":
                     markets = await poll_markets_endpoint(client)
                 elif strategy == "events":
-                    markets = await poll_events_endpoint(client)
+                    markets = await poll_events_endpoint(client, tag_id=tag_id)
                 elif strategy == "new_only":
                     markets = await poll_new_markets_only(client)
                 else:
@@ -521,6 +556,7 @@ async def main(
     interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
     duration: int | None = None,
     compare: bool = False,
+    tag: str | None = DEFAULT_TAG,
 ) -> None:
     """Main entry point."""
     if compare:
@@ -531,6 +567,7 @@ async def main(
         strategy=strategy,
         interval=interval,
         duration=duration,
+        tag=tag,
     )
 
     # Print summary
@@ -549,6 +586,7 @@ if __name__ == "__main__":
     interval = DEFAULT_POLL_INTERVAL_SECONDS
     duration = None
     compare = False
+    tag: str | None = DEFAULT_TAG
 
     args = sys.argv[1:]
     i = 0
@@ -562,6 +600,9 @@ if __name__ == "__main__":
         elif args[i] == "--duration" and i + 1 < len(args):
             duration = int(args[i + 1])
             i += 2
+        elif args[i] == "--tag" and i + 1 < len(args):
+            tag = args[i + 1] if args[i + 1].lower() != "none" else None
+            i += 2
         elif args[i] == "--compare":
             compare = True
             i += 1
@@ -569,5 +610,11 @@ if __name__ == "__main__":
             i += 1
 
     asyncio.run(
-        main(strategy=strategy, interval=interval, duration=duration, compare=compare)
+        main(
+            strategy=strategy,
+            interval=interval,
+            duration=duration,
+            compare=compare,
+            tag=tag,
+        )
     )
