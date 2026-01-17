@@ -30,9 +30,9 @@ export default function RootLayout({
     <html lang="en" className={`${jetbrains.variable} ${syne.variable}`}>
       <body className="font-mono bg-void text-text-primary antialiased">
         <PriceProvider>
-          <div className="flex min-h-screen">
+          <div className="flex h-screen">
             <Sidebar />
-            <main className="flex-1 ml-48 p-6">
+            <main className="flex-1 flex flex-col ml-48 p-6 min-h-0">
               {children}
             </main>
           </div>
