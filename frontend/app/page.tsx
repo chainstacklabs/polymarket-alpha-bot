@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePrices } from '@/hooks/usePrices'
 import { PortfolioModal, type Portfolio } from '@/components/PortfolioModal'
 import { TIER_CONFIG } from '@/config/tier-config'
+import { getApiBaseUrl } from '@/config/api-config'
 
 interface PipelineStatus {
   step_progress: {
@@ -62,15 +63,16 @@ export default function OverviewPage() {
     async function fetchData() {
       try {
         // Fetch pipeline status first (always available)
-        const pipelineRes = await fetch('http://localhost:8000/pipeline/status')
+        const apiBase = getApiBaseUrl()
+        const pipelineRes = await fetch(`${apiBase}/pipeline/status`)
         if (pipelineRes.ok) {
           setPipeline(await pipelineRes.json())
         }
 
         // Fetch portfolios - may return 404 during pipeline reset
         const [excellentRes, statsRes] = await Promise.all([
-          fetch('http://localhost:8000/data/portfolios?limit=4&max_tier=1'),
-          fetch('http://localhost:8000/data/portfolios?limit=100&max_tier=3'),
+          fetch(`${apiBase}/data/portfolios?limit=4&max_tier=1`),
+          fetch(`${apiBase}/data/portfolios?limit=100&max_tier=3`),
         ])
 
         if (excellentRes.ok) {
@@ -130,9 +132,19 @@ export default function OverviewPage() {
               Updated {formatTime(lastRunTime)}
             </span>
           )}
-          <div className="flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald' : 'bg-text-muted'}`} />
+          <div className="flex items-center gap-1.5 group/live relative">
+            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald animate-pulse' : 'bg-text-muted'}`} />
             <span className="text-xs text-text-muted">{connected ? 'Live' : 'Offline'}</span>
+            {/* Live prices tooltip */}
+            <div className="absolute right-0 top-6 w-64 p-2.5 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/live:opacity-100 group-hover/live:visible transition-all z-50">
+              <p className="text-[11px] font-medium text-text-primary mb-1.5">Live Price Tracking</p>
+              <p className="text-[10px] text-text-secondary mb-1">
+                Prices update in real-time via WebSocket connection to Polymarket&apos;s order book.
+              </p>
+              <p className="text-[10px] text-text-muted">
+                Only displayed strategies are tracked — efficient &amp; lightweight.
+              </p>
+            </div>
           </div>
         </div>
       </header>

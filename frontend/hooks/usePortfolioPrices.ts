@@ -83,11 +83,13 @@ export interface UsePortfolioPricesResult {
   reconnect: () => void
 }
 
+import { getPortfolioWsUrl } from '@/config/api-config'
+
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-const WS_URL = 'ws://localhost:8000/portfolios/ws'
+const getWsUrl = () => getPortfolioWsUrl()
 const RECONNECT_DELAY = 5000
 const CHANGE_FLASH_DURATION = 2000
 
@@ -159,7 +161,7 @@ export function usePortfolioPrices(
     setStatus('connecting')
 
     try {
-      const ws = new WebSocket(WS_URL)
+      const ws = new WebSocket(getWsUrl())
       wsRef.current = ws
 
       ws.onopen = () => {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import PipelineTimeline from '@/components/PipelineTimeline'
 import type { PipelineStatus } from '@/types/pipeline'
+import { getApiBaseUrl } from '@/config/api-config'
 
 export default function PipelinePage() {
   const [status, setStatus] = useState<PipelineStatus | null>(null)
@@ -11,7 +12,7 @@ export default function PipelinePage() {
 
   async function fetchStatus() {
     try {
-      const res = await fetch('http://localhost:8000/pipeline/status')
+      const res = await fetch(`${getApiBaseUrl()}/pipeline/status`)
       if (res.ok) {
         setStatus(await res.json())
       }
@@ -39,7 +40,7 @@ export default function PipelinePage() {
   async function runPipeline(full: boolean = true, maxEvents?: number) {
     setRunningPipeline(true)
     try {
-      const res = await fetch('http://localhost:8000/pipeline/run/production', {
+      const res = await fetch(`${getApiBaseUrl()}/pipeline/run/production`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ full, max_events: maxEvents }),
@@ -76,10 +77,10 @@ export default function PipelinePage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => runPipeline(false, 20)}
+            onClick={() => runPipeline(false, 50)}
             disabled={isRunning}
             className="btn-secondary text-xs disabled:opacity-50"
-            title="Quick test with 20 events"
+            title="Quick test with 50 events"
           >
             Quick Demo
           </button>

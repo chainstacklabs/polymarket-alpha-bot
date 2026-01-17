@@ -5,6 +5,7 @@ import { usePortfolioPrices, Portfolio } from '@/hooks/usePortfolioPrices'
 import { PriceChangeIndicator, TierChangeBadge } from '@/components/PriceFlash'
 import { PortfolioModal } from '@/components/PortfolioModal'
 import { TIER_CONFIG } from '@/config/tier-config'
+import { getApiBaseUrl } from '@/config/api-config'
 
 // =============================================================================
 // TYPES
@@ -51,7 +52,7 @@ export default function PortfoliosPage() {
 
   // Fetch global stats on mount (for accurate tier totals)
   useEffect(() => {
-    fetch('http://localhost:8000/data/portfolios?limit=1&max_tier=3')
+    fetch(`${getApiBaseUrl()}/data/portfolios?limit=1&max_tier=3`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data) {
@@ -178,8 +179,8 @@ export default function PortfoliosPage() {
                 )}
               </div>
             )}
-            {/* Connection status */}
-            <div className="flex items-center gap-1.5">
+            {/* Connection status with tooltip */}
+            <div className="flex items-center gap-1.5 group/live relative">
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
                   connected ? 'bg-emerald animate-pulse' : 'bg-text-muted'
@@ -188,6 +189,33 @@ export default function PortfoliosPage() {
               <span className="text-xs text-text-muted">
                 {status === 'connecting' ? 'Connecting...' : connected ? 'Live' : 'Offline'}
               </span>
+              {/* Live prices tooltip */}
+              <div className="absolute right-0 top-6 w-72 p-3 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/live:opacity-100 group-hover/live:visible transition-all z-50">
+                <p className="text-[11px] font-medium text-text-primary mb-2">Live Price Tracking</p>
+                <div className="space-y-2 text-[10px]">
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald">●</span>
+                    <p className="text-text-secondary">
+                      Prices stream in real-time via WebSocket from Polymarket&apos;s CLOB (order book).
+                    </p>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-cyan">●</span>
+                    <p className="text-text-secondary">
+                      Rows flash <span className="text-emerald">green</span> or <span className="text-rose">red</span> when prices change.
+                    </p>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-amber">●</span>
+                    <p className="text-text-secondary">
+                      Win rate &amp; return recalculate instantly as market prices move.
+                    </p>
+                  </div>
+                </div>
+                <p className="text-[9px] text-text-muted mt-2 pt-2 border-t border-border">
+                  Only markets in displayed strategies are tracked — bandwidth efficient.
+                </p>
+              </div>
             </div>
           </div>
         </div>

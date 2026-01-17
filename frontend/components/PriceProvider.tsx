@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { getPricesWsUrl } from '@/config/api-config'
 
 interface PriceData {
   price: number
@@ -32,7 +33,7 @@ export function PriceProvider({ children }: { children: ReactNode }) {
 
     function connect() {
       try {
-        ws = new WebSocket('ws://localhost:8000/prices/ws')
+        ws = new WebSocket(getPricesWsUrl())
 
         ws.onopen = () => {
           console.log('WebSocket connected')

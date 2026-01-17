@@ -2,22 +2,23 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { getApiDocsUrl } from '@/config/api-config'
 
-const navigation = [
-  { name: 'Overview', href: '/' },
-  { name: 'Explore', href: '/portfolios' },
+const getNavigation = () => [
+  { name: 'Terminal', href: '/terminal' },
   { name: 'Pipeline', href: '/pipeline' },
-  { name: 'API Docs', href: 'http://localhost:8000/docs', external: true },
+  { name: 'API Docs', href: getApiDocsUrl(), external: true },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
+  const navigation = getNavigation()
 
   return (
     <div className="fixed inset-y-0 left-0 w-48 bg-surface border-r border-border flex flex-col">
       {/* Brand */}
       <div className="px-4 py-5 border-b border-border">
-        <Link href="/" className="block group">
+        <Link href="/terminal" className="block group">
           <span className="text-base font-semibold tracking-tight text-text-primary group-hover:text-cyan transition-colors">
             alphapoly
           </span>
