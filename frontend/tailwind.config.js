@@ -3,6 +3,8 @@ module.exports = {
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './config/**/*.{js,ts}',
+    './hooks/**/*.{js,ts,tsx}',
   ],
   theme: {
     extend: {
