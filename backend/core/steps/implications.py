@@ -1,23 +1,23 @@
 """
-Extract logical implications between groups using LLM.
+Extract NECESSARY logical implications between groups using LLM.
 
-This module extracts "if A happens, then B must happen" relationships
-between market groups. These logical implications are the foundation
-for building covering hedges.
+This module finds "if A happens, then B MUST happen" relationships
+between market groups. Only logically necessary implications are accepted -
+correlations and "likely" relationships are rejected.
 
 Key features:
+- STRICT: Only necessary implications (0.98 probability)
+- Contrapositive logic: "other → target" means "NOT target → NOT other"
 - SQLite caching: Never recompute implications for existing groups
-- Configurable LLM: Support for multiple models (mimo-v2-flash, claude-sonnet-4)
-- Contrapositive derivation: Converts implies/implied_by to YES/NO covers
 
 Example:
     "If Ukraine holds an election → Ukraine must have called one"
     (you can't hold an election without calling it first)
 
-Relationship types:
-    - "implies": target YES → other YES (target happening causes other)
-    - "implied_by": other YES → target YES (other happening causes target)
-    - "inverse": negative correlation (one up, other down)
+How it works:
+    1. LLM finds "implied_by" relationships: other → target
+    2. We derive cover via contrapositive: if target=NO, then other=NO
+    3. So buying NO on "other" covers a YES position on "target"
 """
 
 import asyncio
@@ -33,22 +33,18 @@ from core.utils import extract_json_from_response
 # CONFIGURATION
 # =============================================================================
 
-# Probability mapping by confidence level
-PROBABILITY_MAP = {
-    "necessary": 0.98,  # Logical/geographic certainty
-    "strong": 0.85,  # Very likely but not guaranteed
-    "inverse": 0.70,  # Correlation, not causation
-}
+# Probability for necessary relationships
+NECESSARY_PROBABILITY = 0.98
 
-# Downgrade "implies" direction (LLMs often confuse correlation with implication)
-IMPLIES_MULTIPLIER = 0.90
+# Multiplier for "implies" direction (1.0 = treat both directions equally)
+IMPLIES_MULTIPLIER = 1.0
 
 
 # =============================================================================
 # PROMPT
 # =============================================================================
 
-IMPLICATION_PROMPT = """Analyze logical relationships between prediction market events.
+IMPLICATION_PROMPT = """Find ONLY logically necessary relationships between prediction market events.
 
 ## TARGET EVENT:
 "{target_title}"
@@ -56,39 +52,44 @@ IMPLICATION_PROMPT = """Analyze logical relationships between prediction market 
 ## AVAILABLE EVENTS:
 {group_titles_text}
 
-## CRITICAL: NECESSARY vs CORRELATION
+## WHAT IS "NECESSARY"?
 
-A **NECESSARY** implication (A → B) means: "If A is true, B MUST be true. There is NO POSSIBLE scenario where A is true and B is false."
+A **NECESSARY** implication (A → B) means: "If A is true, B MUST be true BY DEFINITION OR PHYSICAL LAW."
 
-Test: Can you imagine ANY realistic scenario where A=YES but B=NO? If yes, it's NOT necessary.
+There must be ZERO possible scenarios where A=YES and B=NO. Not "unlikely" - IMPOSSIBLE.
 
-### EXAMPLES OF NECESSARY IMPLICATIONS:
-- "election held" → "election called" (NECESSARY: physically impossible to hold uncalled election)
-- "city captured" → "military entered city" (NECESSARY: can't capture without entering)
+## VALID NECESSARY RELATIONSHIPS (include these):
+- "election held" → "election called" (DEFINITION: can't hold without calling)
+- "city captured" → "military operation in city" (PHYSICAL: can't capture without entering)
+- "person dies" → "person was alive" (LOGICAL: death requires prior life)
+- "child born" → "pregnancy occurred" (BIOLOGICAL: birth requires pregnancy)
 
-### EXAMPLES THAT ARE NOT NECESSARY (just correlations):
-- "election called" → "election held" (WRONG: election can be called then cancelled)
-- "war started" → "peace talks failed" (WRONG: war can start without prior peace talks)
+## NOT NECESSARY - DO NOT INCLUDE:
+- "war started" → "peace talks failed" (WRONG: war can start without talks)
+- "election called" → "election held" (WRONG: can be cancelled)
+- "military clash" → "nuclear weapon used" (WRONG: clash doesn't require nukes)
+- "ceasefire broken" → "war escalates" (WRONG: could de-escalate)
+- "sanctions imposed" → "conflict worsens" (WRONG: correlation, not causation)
+- "candidate wins primary" → "candidate wins general" (WRONG: can lose general)
 
 ## YOUR TASK
 
-For the target event, identify:
+Find relationships where events GUARANTEE each other:
 
-### 1. implied_by (OTHER → TARGET): What guarantees the target?
-- "If OTHER=YES, then TARGET=YES is GUARANTEED"
-- Confidence: "necessary" (no counterexample) or "strong" (rare counterexamples)
+### 1. implied_by (OTHER → TARGET): What GUARANTEES the target?
+- "If OTHER=YES, then TARGET=YES is 100% CERTAIN"
+- Must be definitionally or physically impossible for OTHER=YES and TARGET=NO
 
-### 2. implies (TARGET → OTHER): What does the target guarantee?
-- "If TARGET=YES, then OTHER=YES is GUARANTEED"
-- BE VERY CAREFUL: This is often confused with correlation!
-- Confidence: "necessary" (no counterexample) or "strong" (rare counterexamples)
+### 2. implies (TARGET → OTHER): What does the target GUARANTEE?
+- "If TARGET=YES, then OTHER=YES is 100% CERTAIN"
+- BE VERY CAREFUL: This direction is often confused with correlation!
 
-### 3. inverse: Negatively correlated events
-- When TARGET=NO, what becomes MORE LIKELY to be YES?
+## STRICT COUNTEREXAMPLE TEST (REQUIRED)
 
-## COUNTEREXAMPLE CHECK (REQUIRED)
-
-For each "necessary" relationship, verify: Can you construct ANY plausible scenario that violates it?
+For EACH relationship, you MUST:
+1. Try to construct a scenario that violates the implication
+2. If you can imagine ANY such scenario (even unlikely), DO NOT INCLUDE IT
+3. Only include if the scenario is LOGICALLY IMPOSSIBLE
 
 ## OUTPUT FORMAT (JSON only):
 ```json
@@ -96,34 +97,26 @@ For each "necessary" relationship, verify: Can you construct ANY plausible scena
   "implied_by": [
     {{
       "group_title": "exact title from list",
-      "confidence": "necessary or strong",
-      "explanation": "why other=YES guarantees target=YES",
-      "counterexample_check": "why no counterexample exists OR describe the rare exception"
+      "explanation": "why other=YES makes target=YES logically certain",
+      "counterexample_attempt": "I tried to imagine [scenario] but it's impossible because [reason]"
     }}
   ],
   "implies": [
     {{
       "group_title": "exact title from list",
-      "confidence": "necessary or strong",
-      "explanation": "why target=YES guarantees other=YES",
-      "counterexample_check": "why no counterexample exists OR describe the rare exception"
-    }}
-  ],
-  "inverse": [
-    {{
-      "group_title": "exact title from list",
-      "explanation": "why these are negatively correlated"
+      "explanation": "why target=YES makes other=YES logically certain",
+      "counterexample_attempt": "I tried to imagine [scenario] but it's impossible because [reason]"
     }}
   ]
 }}
 ```
 
-REMEMBER: When in doubt, leave it out. False positives are costly.
-
-## IMPORTANT: Asymmetric relationships
-
-If A → B is necessary (e.g., "held → called"), then B → A is usually NOT necessary!
-Only ONE direction can be a logical necessity. Be very careful!
+## CRITICAL RULES:
+1. QUALITY OVER QUANTITY - empty lists are fine, false positives are NOT
+2. "Likely" or "usually" means DO NOT INCLUDE
+3. Correlations are NOT implications - "A often leads to B" is NOT "A guarantees B"
+4. Political/social predictions are almost NEVER necessary (humans are unpredictable)
+5. When in doubt, LEAVE IT OUT
 """
 
 
@@ -170,14 +163,14 @@ def derive_covers(
     Derive covers from raw LLM implications using contrapositive logic.
 
     For target event T:
-    - "implies" (T → other): other_YES covers T_NO
-    - "implied_by" (other → T): other_NO covers T_YES (contrapositive)
+    - "implied_by" (other → target): contrapositive gives YES cover (buy NO on other)
+    - "implies" (target → other): direct gives NO cover (buy YES on other)
     """
     target_id = target_group["group_id"]
     target_title = target_group["title"]
 
-    yes_covered_by = []  # Covers for target_YES (fire when target=NO)
-    no_covered_by = []  # Covers for target_NO (fire when target=YES)
+    yes_covered_by = []  # Covers for target_YES position (fire when target=NO)
+    no_covered_by = []  # Covers for target_NO position (fire when target=YES)
 
     # Process "implied_by": other → target (contrapositive gives YES cover)
     for item in llm_result.get("implied_by", []):
@@ -188,22 +181,20 @@ def derive_covers(
         if not matched or matched["group_id"] == target_id:
             continue
 
-        confidence = item.get("confidence", "strong")
-        prob = PROBABILITY_MAP.get(confidence, 0.85)
-
         yes_covered_by.append(
             {
                 "group_id": matched["group_id"],
                 "title": matched["title"],
                 "cover_position": "NO",
-                "relationship": f"other→target (contrapositive): {item.get('explanation', '')}",
-                "relationship_type": confidence,
-                "probability": prob,
-                "counterexample_check": item.get("counterexample_check", ""),
+                "relationship": f"necessary (contrapositive): {item.get('explanation', '')}",
+                "relationship_type": "necessary",
+                "probability": NECESSARY_PROBABILITY,
+                "counterexample_attempt": item.get("counterexample_attempt", ""),
             }
         )
 
     # Process "implies": target → other (direct gives NO cover)
+    # Apply multiplier since "implies" direction is less reliable
     for item in llm_result.get("implies", []):
         other_title = item.get("group_title", "")
         matched = match_title_to_group(
@@ -212,50 +203,16 @@ def derive_covers(
         if not matched or matched["group_id"] == target_id:
             continue
 
-        confidence = item.get("confidence", "strong")
-        base_prob = PROBABILITY_MAP.get(confidence, 0.85)
-        prob = round(base_prob * IMPLIES_MULTIPLIER, 4)  # Downgrade "implies"
-
+        prob = round(NECESSARY_PROBABILITY * IMPLIES_MULTIPLIER, 4)
         no_covered_by.append(
             {
                 "group_id": matched["group_id"],
                 "title": matched["title"],
                 "cover_position": "YES",
-                "relationship": f"target→other: {item.get('explanation', '')}",
-                "relationship_type": confidence,
+                "relationship": f"necessary (direct): {item.get('explanation', '')}",
+                "relationship_type": "necessary",
                 "probability": prob,
-                "counterexample_check": item.get("counterexample_check", ""),
-            }
-        )
-
-    # Process "inverse": negatively correlated
-    inverse_prob = PROBABILITY_MAP["inverse"]
-    for item in llm_result.get("inverse", []):
-        other_title = item.get("group_title", "")
-        matched = match_title_to_group(
-            other_title, groups_by_title, groups_by_title_lower
-        )
-        if not matched or matched["group_id"] == target_id:
-            continue
-
-        yes_covered_by.append(
-            {
-                "group_id": matched["group_id"],
-                "title": matched["title"],
-                "cover_position": "YES",
-                "relationship": f"inverse: {item.get('explanation', '')}",
-                "relationship_type": "inverse",
-                "probability": inverse_prob,
-            }
-        )
-        no_covered_by.append(
-            {
-                "group_id": matched["group_id"],
-                "title": matched["title"],
-                "cover_position": "NO",
-                "relationship": f"inverse: {item.get('explanation', '')}",
-                "relationship_type": "inverse",
-                "probability": inverse_prob,
+                "counterexample_attempt": item.get("counterexample_attempt", ""),
             }
         )
 

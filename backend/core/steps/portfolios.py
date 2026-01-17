@@ -356,6 +356,7 @@ def update_portfolio_prices(
 
             # Recalculate metrics
             total_cost = new_target_price + new_cover_price
+
             cover_prob = portfolio["cover_probability"]
             metrics = calculate_coverage_metrics(
                 new_target_price, cover_prob, total_cost

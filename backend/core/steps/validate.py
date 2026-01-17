@@ -41,7 +41,8 @@ BATCH_SIZE = 32
 MAX_CONCURRENT_BATCHES = 10
 
 # Minimum viability score to keep a pair
-MIN_VIABILITY_SCORE = 0.70
+# 0.90 requires very high LLM confidence in hedge validity
+MIN_VIABILITY_SCORE = 0.90
 
 # Default model for validation (can be overridden)
 DEFAULT_VALIDATION_MODEL = os.getenv("VALIDATION_MODEL")
@@ -64,6 +65,12 @@ For the hedge to work:
 1. Cover must resolve in time to provide coverage
 2. The implication direction must actually apply to these specific deadlines
 3. The relationship must be logically valid (not just correlated)
+
+## INPUT FIELDS EXPLAINED
+- PROBABILITY: Pre-assigned confidence (0.98 = logically necessary relationship)
+  - 0.98 means upstream analysis found this to be a NECESSARY implication
+  - Your job is to verify if this holds for THESE SPECIFIC markets and deadlines
+  - High probability doesn't mean auto-valid - you must verify temporal and logical coherence
 
 ## PAIRS TO VALIDATE
 
@@ -118,13 +125,24 @@ INVALID: Target="Election called by March", Cover="Election held by June 30" wit
 }}
 ```
 
-Score meanings:
+## CRITICAL: is_valid MUST BE CONSISTENT
+
+**is_valid determines whether this pair is cached and used. Your analysis MUST match this boolean.**
+
+- If your analysis concludes the hedge is INVALID, BROKEN, or WON'T WORK → set `is_valid: false`
+- If temporal_valid=false OR logical_valid=false → set `is_valid: false`
+- If you describe the hedge as "invalid", "doesn't work", "logical mismatch" → set `is_valid: false`
+- A high viability_score does NOT override is_valid. You can have high confidence that something is INVALID.
+
+**NEVER** set is_valid=true if your brief_analysis describes any problem with the hedge.
+
+## Score meanings:
 - 1.0: Perfect hedge, logically necessary
 - 0.8-0.9: Strong hedge, minor concerns
 - 0.6-0.7: Questionable, temporal or logical issues
 - <0.5: Invalid hedge
 
-BE STRICT. False positives cost money. When in doubt, reject.
+BE STRICT. False positives cost money. When in doubt, set is_valid=false.
 """
 
 
@@ -179,6 +197,45 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
         filtered.append(pair)
 
     return filtered, rejections
+
+
+# =============================================================================
+# KEYWORD AUTO-REJECTION
+# =============================================================================
+
+# Keywords that indicate invalid hedge (even if LLM set is_valid=true)
+REJECTION_KEYWORDS = [
+    "invalid",
+    "does not guarantee",
+    "doesn't guarantee",
+    "not guarantee",
+    "no guarantee",
+    "logical mismatch",
+    "mismatch",
+    "won't work",
+    "will not work",
+    "cannot provide coverage",
+    "no coverage",
+    "hedge is broken",
+    "not a valid hedge",
+]
+
+
+def should_auto_reject(analysis: str) -> bool:
+    """
+    Check if validation analysis contains keywords indicating invalid hedge.
+
+    This catches cases where LLM wrote is_valid=true but the analysis
+    text clearly describes problems with the hedge.
+    """
+    if not analysis:
+        return False
+
+    analysis_lower = analysis.lower()
+    for keyword in REJECTION_KEYWORDS:
+        if keyword in analysis_lower:
+            return True
+    return False
 
 
 # =============================================================================
@@ -317,7 +374,10 @@ async def validate_pairs(
         validated = []
         for pair in candidate_pairs:
             cached = cached_validations.get(pair["pair_id"], {})
-            if cached.get("viability_score", 0) >= min_viability:
+            # Check both viability_score AND is_valid (default True for backward compat)
+            if cached.get("viability_score", 0) >= min_viability and cached.get(
+                "is_valid", True
+            ):
                 validated.append({**pair, "_validation": cached})
 
         return validated, {
@@ -356,11 +416,25 @@ async def validate_pairs(
 
             # Prepare valid pairs for caching
             pairs_to_cache = []
+            auto_rejected = 0
             for pair in batch:
                 pair_id = pair["pair_id"]
                 validation = validations.get(pair_id, {})
+                analysis = validation.get("brief_analysis", "")
 
-                if validation.get("is_valid", False):
+                # Check LLM's is_valid flag
+                llm_valid = validation.get("is_valid", False)
+
+                # Auto-reject if analysis contains concerning keywords
+                if llm_valid and should_auto_reject(analysis):
+                    validation["is_valid"] = False
+                    validation["rejection_reason"] = (
+                        "Auto-rejected: analysis contains invalid keywords"
+                    )
+                    auto_rejected += 1
+                    llm_valid = False
+
+                if llm_valid:
                     pairs_to_cache.append(
                         {
                             "pair_id": pair_id,
@@ -372,9 +446,15 @@ async def validate_pairs(
                             "cover_position": pair["cover_position"],
                             "cover_probability": pair.get("cover_probability", 0),
                             "viability_score": validation.get("viability_score", 0),
-                            "validation_reason": validation.get("brief_analysis", ""),
+                            "is_valid": True,
+                            "validation_reason": analysis,
                         }
                     )
+
+            if auto_rejected > 0:
+                logger.info(
+                    f"  Auto-rejected {auto_rejected} pairs due to keyword detection"
+                )
 
             # Update shared state (protected by lock)
             async with lock:

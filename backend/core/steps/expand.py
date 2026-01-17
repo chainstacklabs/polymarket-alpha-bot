@@ -34,7 +34,8 @@ from core.state import PipelineState
 # =============================================================================
 
 # Minimum probability threshold for covers to include
-MIN_COVER_PROBABILITY = 0.70
+# 0.88 keeps only "necessary" (0.98), filters out lower confidence relationships
+MIN_COVER_PROBABILITY = 0.88
 
 
 # =============================================================================

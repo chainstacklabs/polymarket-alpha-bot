@@ -234,6 +234,7 @@ class PipelineState:
                 cover_position TEXT,       -- 'YES' or 'NO'
                 cover_probability REAL,
                 viability_score REAL,      -- 0.0-1.0 from LLM
+                is_valid INTEGER DEFAULT 1, -- 1=valid, 0=invalid (explicit LLM judgment)
                 validation_reason TEXT,
                 validated_at TEXT,
                 llm_model TEXT
@@ -280,6 +281,21 @@ class PipelineState:
             CREATE INDEX IF NOT EXISTS idx_markets_group ON markets(group_id);
         """)
         self.conn.commit()
+
+        # Migrations for existing databases
+        self._run_migrations()
+
+    def _run_migrations(self) -> None:
+        """Run database migrations for schema updates."""
+        # Migration 1: Add is_valid column to validated_pairs (if not exists)
+        cursor = self.conn.execute("PRAGMA table_info(validated_pairs)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "is_valid" not in columns:
+            self.conn.execute(
+                "ALTER TABLE validated_pairs ADD COLUMN is_valid INTEGER DEFAULT 1"
+            )
+            self.conn.commit()
+            logger.info("Migration: Added is_valid column to validated_pairs")
 
     # =========================================================================
     # EVENT MANAGEMENT
@@ -821,7 +837,7 @@ class PipelineState:
             """
             SELECT pair_id, target_group_id, target_market_id, target_position,
                    cover_group_id, cover_market_id, cover_position,
-                   cover_probability, viability_score, validation_reason,
+                   cover_probability, viability_score, is_valid, validation_reason,
                    validated_at, llm_model
             FROM validated_pairs WHERE pair_id = ?
             """,
@@ -839,22 +855,23 @@ class PipelineState:
                 "cover_position": row[6],
                 "cover_probability": row[7],
                 "viability_score": row[8],
-                "validation_reason": row[9],
-                "validated_at": row[10],
-                "llm_model": row[11],
+                "is_valid": bool(row[9]) if row[9] is not None else True,
+                "validation_reason": row[10],
+                "validated_at": row[11],
+                "llm_model": row[12],
             }
         return None
 
     def get_all_validated_pairs(self) -> list[dict]:
-        """Get all cached validated pairs."""
+        """Get all cached validated pairs (only valid ones)."""
         cursor = self.conn.execute(
             """
             SELECT pair_id, target_group_id, target_market_id, target_position,
                    cover_group_id, cover_market_id, cover_position,
-                   cover_probability, viability_score, validation_reason,
+                   cover_probability, viability_score, is_valid, validation_reason,
                    validated_at, llm_model
             FROM validated_pairs
-            WHERE viability_score >= 0.7
+            WHERE viability_score >= 0.9 AND (is_valid = 1 OR is_valid IS NULL)
             """
         )
         return [
@@ -868,9 +885,10 @@ class PipelineState:
                 "cover_position": row[6],
                 "cover_probability": row[7],
                 "viability_score": row[8],
-                "validation_reason": row[9],
-                "validated_at": row[10],
-                "llm_model": row[11],
+                "is_valid": bool(row[9]) if row[9] is not None else True,
+                "validation_reason": row[10],
+                "validated_at": row[11],
+                "llm_model": row[12],
             }
             for row in cursor.fetchall()
         ]
@@ -887,9 +905,9 @@ class PipelineState:
             INSERT OR REPLACE INTO validated_pairs
             (pair_id, target_group_id, target_market_id, target_position,
              cover_group_id, cover_market_id, cover_position,
-             cover_probability, viability_score, validation_reason,
+             cover_probability, viability_score, is_valid, validation_reason,
              validated_at, llm_model)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -902,6 +920,7 @@ class PipelineState:
                     p["cover_position"],
                     p.get("cover_probability", 0.0),
                     p.get("viability_score", 0.0),
+                    1 if p.get("is_valid", True) else 0,  # Store as integer
                     p.get("validation_reason", ""),
                     now,
                     llm_model,
@@ -935,6 +954,20 @@ class PipelineState:
         """Save portfolios (replaces all existing)."""
         now = datetime.now(timezone.utc).isoformat()
 
+        # Deduplicate by pair_id (keep first occurrence, which has best coverage due to sorting)
+        seen_ids: set[str] = set()
+        unique_portfolios = []
+        for p in portfolios:
+            pair_id = p.get("pair_id", "")
+            if pair_id and pair_id not in seen_ids:
+                seen_ids.add(pair_id)
+                unique_portfolios.append(p)
+
+        if len(unique_portfolios) < len(portfolios):
+            logger.warning(
+                f"Deduplicated portfolios: {len(portfolios)} -> {len(unique_portfolios)}"
+            )
+
         # Clear existing
         self.conn.execute("DELETE FROM portfolios")
 
@@ -965,7 +998,7 @@ class PipelineState:
                     now,
                     json.dumps(p),
                 )
-                for i, p in enumerate(portfolios)
+                for i, p in enumerate(unique_portfolios)
             ],
         )
         self.conn.commit()
