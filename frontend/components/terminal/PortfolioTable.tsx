@@ -299,7 +299,7 @@ export function PortfolioTable({
           {pinnedCount > 0 && (
             <span className="ml-2 text-amber">★ {pinnedCount} pinned</span>
           )}
-          {connected && <span className="ml-2 text-emerald">● Live updates</span>}
+          {connected && <span className="ml-2 text-emerald">● Live prices</span>}
           {selectedIndex >= 0 && (
             <span className="ml-2 text-cyan">• Row {selectedIndex + 1} selected</span>
           )}

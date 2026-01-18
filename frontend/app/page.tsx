@@ -128,13 +128,16 @@ export default function OverviewPage() {
         </div>
         <div className="flex items-center gap-3">
           {lastRunTime && (
-            <span className="text-xs text-text-muted">
-              Updated {formatTime(lastRunTime)}
+            <span
+              className="text-xs text-text-muted cursor-help"
+              title="When the pipeline last analyzed markets for arbitrage opportunities"
+            >
+              Markets scanned {formatTime(lastRunTime)}
             </span>
           )}
           <div className="flex items-center gap-1.5 group/live relative">
             <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald animate-pulse' : 'bg-text-muted'}`} />
-            <span className="text-xs text-text-muted">{connected ? 'Live' : 'Offline'}</span>
+            <span className="text-xs text-text-muted">{connected ? 'Live prices' : 'Offline'}</span>
             {/* Live prices tooltip */}
             <div className="absolute right-0 top-6 w-64 p-2.5 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/live:opacity-100 group-hover/live:visible transition-all z-50">
               <p className="text-[11px] font-medium text-text-primary mb-1.5">Live Price Tracking</p>

@@ -170,7 +170,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
           )}
 
           {/* Key Metrics - Compact row */}
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div className="bg-surface-elevated rounded-lg p-2.5 text-center group/conf relative">
               <p className={`text-base font-mono font-semibold ${coverageColor}`}>
                 {(p.coverage * 100).toFixed(1)}%
@@ -197,12 +197,6 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                 {isProfitable ? '+' : ''}{(p.expected_profit * 100).toFixed(1)}%
               </p>
               <p className="text-[9px] text-text-muted uppercase tracking-wide mt-0.5">Return</p>
-            </div>
-            <div className="bg-surface-elevated rounded-lg p-2.5 text-center">
-              <p className="text-base font-mono font-semibold text-text-muted">
-                {(p.loss_probability * 100).toFixed(1)}%
-              </p>
-              <p className="text-[9px] text-text-muted uppercase tracking-wide mt-0.5">Risk</p>
             </div>
           </div>
 

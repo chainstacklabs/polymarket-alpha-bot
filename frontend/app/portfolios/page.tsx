@@ -187,7 +187,7 @@ export default function PortfoliosPage() {
                 }`}
               />
               <span className="text-xs text-text-muted">
-                {status === 'connecting' ? 'Connecting...' : connected ? 'Live' : 'Offline'}
+                {status === 'connecting' ? 'Connecting...' : connected ? 'Live prices' : 'Offline'}
               </span>
               {/* Live prices tooltip */}
               <div className="absolute right-0 top-6 w-72 p-3 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/live:opacity-100 group-hover/live:visible transition-all z-50">
@@ -405,7 +405,7 @@ export default function PortfoliosPage() {
             <div className="px-2.5 py-2 bg-surface-elevated border-t border-border flex items-center justify-between">
               <span className="text-[10px] text-text-muted">
                 Showing {sortedPortfolios.length} strategies
-                {connected && <span className="ml-2 text-emerald">● Live updates</span>}
+                {connected && <span className="ml-2 text-emerald">● Live prices</span>}
               </span>
             </div>
           </div>

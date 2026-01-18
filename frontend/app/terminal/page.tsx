@@ -296,7 +296,12 @@ export default function TerminalPage() {
             {/* Right: Status indicators */}
             <div className="flex items-center gap-3">
               {lastRunTime && (
-                <span className="text-xs text-text-muted">Updated {formatTime(lastRunTime)}</span>
+                <span
+                  className="text-xs text-text-muted cursor-help"
+                  title="When the pipeline last analyzed markets for arbitrage opportunities"
+                >
+                  Markets scanned {formatTime(lastRunTime)}
+                </span>
               )}
 
               {/* Connection status */}
@@ -307,7 +312,7 @@ export default function TerminalPage() {
                   }`}
                 />
                 <span className="text-xs text-text-muted">
-                  {status === 'connecting' ? 'Connecting...' : connected ? 'Live' : 'Offline'}
+                  {status === 'connecting' ? 'Connecting...' : connected ? 'Live prices' : 'Offline'}
                 </span>
               </div>
 
