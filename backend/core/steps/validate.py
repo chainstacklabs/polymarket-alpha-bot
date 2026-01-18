@@ -94,6 +94,31 @@ For each pair, assess:
 - Is the hedge direction correct?
 - Would buying these positions actually provide coverage?
 
+### 4. ENTITY COHERENCE (CRITICAL FOR MULTI-CANDIDATE MARKETS)
+- Check if TARGET and COVER brackets refer to the SAME entity (person, team, etc.)
+- For markets about specific individuals (elections, nominations, winners):
+  - The hedge ONLY works if BOTH markets are about the SAME person
+  - "Person A wins nomination" CANNOT be hedged by "Person B wins election"
+  - Different people = INVALID hedge, even if the group-level relationship seems logical
+- Compare the Bracket fields: if they name different entities, the hedge is INVALID
+- Minor spelling variations are OK ("J.D. Vance" = "JD Vance"), but different people are NOT
+
+## ENTITY COHERENCE EXAMPLES
+
+INVALID: Target="Will Sarah Sanders win Republican nomination?", Cover="Will Michelle Obama win presidency?"
+- Target Bracket: "Sarah Huckabee Sanders"
+- Cover Bracket: "Michelle Obama"
+- These are DIFFERENT PEOPLE → hedge is INVALID regardless of group relationship
+
+INVALID: Target="Will Josh Hawley win Republican nomination?", Cover="Will Donald Trump win presidency?"
+- Different people → INVALID
+
+VALID: Target="Will Kim Kardashian win Republican nomination?", Cover="Will Kim Kardashian win presidency?"
+- SAME person in both markets → hedge can be valid (if temporal/logical criteria also pass)
+
+VALID: Target="Will J.D. Vance win nomination?", Cover="Will JD Vance win presidency?"
+- Same person (minor spelling difference) → valid
+
 ## TEMPORAL LOGIC EXAMPLES
 
 VALID: Target="X by June", Cover="Y by December"
@@ -118,6 +143,7 @@ INVALID: Target="Election called by March", Cover="Election held by June 30" wit
       "is_valid": true/false,
       "temporal_valid": true/false,
       "logical_valid": true/false,
+      "entity_valid": true/false,
       "rejection_reason": "null if valid, else explanation",
       "brief_analysis": "1-2 sentence reasoning"
     }}
@@ -130,8 +156,9 @@ INVALID: Target="Election called by March", Cover="Election held by June 30" wit
 **is_valid determines whether this pair is cached and used. Your analysis MUST match this boolean.**
 
 - If your analysis concludes the hedge is INVALID, BROKEN, or WON'T WORK → set `is_valid: false`
-- If temporal_valid=false OR logical_valid=false → set `is_valid: false`
-- If you describe the hedge as "invalid", "incorrect", "wrong", "flawed", "doesn't work", "won't work", "logical mismatch", "bad hedge" → set `is_valid: false`
+- If temporal_valid=false OR logical_valid=false OR entity_valid=false → set `is_valid: false`
+- If TARGET and COVER brackets name DIFFERENT entities (different people) → set `entity_valid: false` AND `is_valid: false`
+- If you describe the hedge as "invalid", "incorrect", "wrong", "flawed", "doesn't work", "won't work", "logical mismatch", "bad hedge", "different person", "different entity" → set `is_valid: false`
 - A high viability_score does NOT override is_valid. You can have high confidence that something is INVALID.
 
 **NEVER** set is_valid=true if your brief_analysis describes ANY problem, issue, or flaw with the hedge.
@@ -229,6 +256,12 @@ REJECTION_KEYWORDS = [
     "hedge is broken",
     "not a valid hedge",
     "bad hedge",
+    "different person",
+    "different people",
+    "different entity",
+    "different entities",
+    "not the same person",
+    "not the same entity",
 ]
 
 # =============================================================================
@@ -604,6 +637,7 @@ async def validate_pairs(
     rejection_reasons = {
         "temporal": 0,
         "logical": 0,
+        "entity": 0,
         "low_score": 0,
         "llm_failed": 0,
     }
@@ -623,6 +657,8 @@ async def validate_pairs(
                 rejection_reasons["temporal"] += 1
             elif not validation.get("logical_valid", True):
                 rejection_reasons["logical"] += 1
+            elif not validation.get("entity_valid", True):
+                rejection_reasons["entity"] += 1
             elif "LLM" in str(validation.get("rejection_reason", "")):
                 rejection_reasons["llm_failed"] += 1
             else:
