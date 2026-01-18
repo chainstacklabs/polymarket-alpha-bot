@@ -17,7 +17,7 @@ export function QuickActions({ portfolio: p, isFavorite, onToggleFavorite }: Qui
     return `Strategy: ${p.target_question}
 Target: ${p.target_position} @ $${p.target_price.toFixed(2)}
 Backup: ${p.cover_question} (${p.cover_position} @ $${p.cover_price.toFixed(2)})
-Win Rate: ${(p.coverage * 100).toFixed(1)}%
+LLM Confidence: ${(p.coverage * 100).toFixed(1)}%
 Cost: $${p.total_cost.toFixed(2)}
 Expected Return: ${(p.expected_profit * 100).toFixed(1)}%`
   }

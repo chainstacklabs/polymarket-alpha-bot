@@ -45,7 +45,7 @@ export function ExportDropdown({ portfolios, filename = 'alphapoly-strategies' }
       'Cover Question',
       'Cover Position',
       'Cover Price',
-      'Win Rate',
+      'LLM Confidence',
       'Total Cost',
       'Expected Return',
       'Loss Probability',
@@ -90,7 +90,7 @@ export function ExportDropdown({ portfolios, filename = 'alphapoly-strategies' }
         probability: p.cover_probability,
       },
       metrics: {
-        win_rate: p.coverage,
+        llm_confidence: p.coverage,
         total_cost: p.total_cost,
         expected_profit: p.expected_profit,
         loss_probability: p.loss_probability,

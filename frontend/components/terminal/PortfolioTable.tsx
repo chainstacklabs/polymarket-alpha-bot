@@ -162,8 +162,8 @@ export function PortfolioTable({
                 </th>
                 <SortHeader
                   field="coverage"
-                  label="Win Rate"
-                  hint="Chance of getting paid"
+                  label="LLM Conf."
+                  hint="LLM-derived payout probability"
                   className="w-20"
                 />
                 <SortHeader

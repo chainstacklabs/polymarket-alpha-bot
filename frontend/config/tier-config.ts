@@ -20,7 +20,7 @@ export const TIER_CONFIG: Record<number, TierConfig> = {
     textColor: '#34d399',
     bg: 'bg-emerald/10',
     border: 'border-emerald/30',
-    desc: '95%+ win rate'
+    desc: '95%+ LLM confidence'
   },
   2: {
     label: 'Good',
@@ -29,7 +29,7 @@ export const TIER_CONFIG: Record<number, TierConfig> = {
     textColor: '#38bdf8',
     bg: 'bg-cyan/10',
     border: 'border-cyan/30',
-    desc: '90-95% win rate'
+    desc: '90-95% LLM confidence'
   },
   3: {
     label: 'Fair',
@@ -38,7 +38,7 @@ export const TIER_CONFIG: Record<number, TierConfig> = {
     textColor: '#fbbf24',
     bg: 'bg-amber/10',
     border: 'border-amber/30',
-    desc: '85-90% win rate'
+    desc: '85-90% LLM confidence'
   },
   4: {
     label: 'Low',

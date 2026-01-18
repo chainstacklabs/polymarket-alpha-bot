@@ -123,7 +123,7 @@ export default function OverviewPage() {
         <div>
           <h1 className="text-xl font-semibold text-text-primary">Overview</h1>
           <p className="text-sm text-text-muted mt-0.5">
-            Top hedging pairs with ≥95% win rate — near-guaranteed payouts
+            Top hedging pairs with ≥95% confidence — near-guaranteed payouts
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -166,19 +166,22 @@ export default function OverviewPage() {
               <span className="text-2xl font-semibold font-mono text-amber">
                 {stats.avgCoverage > 0 ? `${(stats.avgCoverage * 100).toFixed(0)}%` : '—'}
               </span>
-              <span className="text-xs text-text-muted">avg win rate</span>
+              <span className="text-xs text-text-muted">avg LLM confidence</span>
               {/* Info tooltip */}
               <div className="relative group/winrate">
                 <button className="w-4 h-4 rounded-full bg-surface-elevated border border-border text-[10px] text-text-muted hover:text-text-secondary hover:border-text-muted transition-colors flex items-center justify-center">
                   ?
                 </button>
-                <div className="absolute left-0 top-6 w-56 p-2.5 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/winrate:opacity-100 group-hover/winrate:visible transition-all z-50">
-                  <p className="text-[11px] text-text-secondary">
-                    Average probability of getting $1 back across all strategies.
+                <div className="absolute left-0 top-6 w-72 p-2.5 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/winrate:opacity-100 group-hover/winrate:visible transition-all z-50">
+                  <p className="text-[11px] font-medium text-violet-400 mb-1.5">LLM Confidence Score</p>
+                  <p className="text-[10px] text-text-secondary mb-2">
+                    Probability of $1 payout, derived from LLM-detected logical relationships between markets.
                   </p>
-                  <p className="text-[10px] text-text-muted mt-1.5">
-                    Higher is better — 100% would mean guaranteed payout on every strategy.
-                  </p>
+                  <div className="text-[10px] text-text-muted space-y-1 border-t border-border pt-2">
+                    <p><span className="text-violet-400">1.</span> LLM extracts implications (A→B) between markets</p>
+                    <p><span className="text-violet-400">2.</span> Maps strength → probability: <span className="text-text-secondary">necessary</span>=98%, <span className="text-text-secondary">strong</span>=85%</p>
+                    <p><span className="text-violet-400">3.</span> Formula: P(target) + P(¬target) × P(cover)</p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -210,9 +213,9 @@ export default function OverviewPage() {
                 <p className="text-xs font-medium text-text-primary mb-2">How quality tiers work</p>
 
                 <div className="space-y-1 text-[10px] mb-3">
-                  <p><span className="text-emerald font-medium">Excellent:</span> ≥95% win rate</p>
-                  <p><span className="text-cyan font-medium">Good:</span> 90-95% win rate</p>
-                  <p><span className="text-amber font-medium">Fair:</span> 85-90% win rate</p>
+                  <p><span className="text-emerald font-medium">Excellent:</span> ≥95% confidence</p>
+                  <p><span className="text-cyan font-medium">Good:</span> 90-95% confidence</p>
+                  <p><span className="text-amber font-medium">Fair:</span> 85-90% confidence</p>
                   <p className="text-text-muted/70 italic">Strategies under 85% are filtered out</p>
                 </div>
 
@@ -229,8 +232,8 @@ export default function OverviewPage() {
                   <p className="font-medium text-cyan">Calculated (deterministic):</p>
                   <p className="text-text-muted"><span className="text-cyan">•</span> Maps strength → probability: necessary=98%, strong=85%, inverse=70%</p>
                   <p className="text-text-muted"><span className="text-cyan">•</span> Derives cover positions via contrapositive logic</p>
-                  <p className="text-text-muted"><span className="text-cyan">•</span> Win rate = P(target) + P(¬target) × P(cover)</p>
-                  <p className="text-text-muted"><span className="text-cyan">•</span> Tier assigned by win rate thresholds above</p>
+                  <p className="text-text-muted"><span className="text-cyan">•</span> Confidence = P(target) + P(¬target) × P(cover)</p>
+                  <p className="text-text-muted"><span className="text-cyan">•</span> Tier assigned by confidence thresholds above</p>
                 </div>
               </div>
             </div>
@@ -352,11 +355,18 @@ function PortfolioCard({ portfolio: p, rank, onClick }: { portfolio: Portfolio; 
       {/* Metrics */}
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <div className="flex items-center gap-4">
-          <div>
-            <span className="text-[10px] text-text-muted">Win Rate</span>
+          <div className="group/conf relative">
+            <span className="text-[10px] text-text-muted flex items-center gap-1">
+              LLM Conf.
+              <span className="w-3 h-3 rounded-full bg-surface border border-border text-[8px] flex items-center justify-center opacity-50 group-hover/conf:opacity-100 transition-opacity">?</span>
+            </span>
             <p className={`text-sm font-mono ${p.coverage >= 0.95 ? 'text-emerald' : p.coverage >= 0.90 ? 'text-cyan' : 'text-amber'}`}>
               {(p.coverage * 100).toFixed(1)}%
             </p>
+            {/* Tooltip */}
+            <div className="absolute left-0 bottom-full mb-2 w-56 p-2 bg-surface-elevated border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/conf:opacity-100 group-hover/conf:visible transition-all z-50 pointer-events-none">
+              <p className="text-[10px] text-text-secondary">LLM-derived probability of $1 payout based on detected logical relationship strength.</p>
+            </div>
           </div>
           <div>
             <span className="text-[10px] text-text-muted">Investment</span>

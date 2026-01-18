@@ -171,11 +171,20 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
 
           {/* Key Metrics - Compact row */}
           <div className="grid grid-cols-4 gap-2">
-            <div className="bg-surface-elevated rounded-lg p-2.5 text-center">
+            <div className="bg-surface-elevated rounded-lg p-2.5 text-center group/conf relative">
               <p className={`text-base font-mono font-semibold ${coverageColor}`}>
                 {(p.coverage * 100).toFixed(1)}%
               </p>
-              <p className="text-[9px] text-text-muted uppercase tracking-wide mt-0.5">Win Rate</p>
+              <p className="text-[9px] text-text-muted uppercase tracking-wide mt-0.5 flex items-center justify-center gap-0.5">
+                LLM Conf.
+                <span className="w-3 h-3 rounded-full bg-surface border border-border text-[7px] flex items-center justify-center opacity-50 group-hover/conf:opacity-100 transition-opacity cursor-help">?</span>
+              </p>
+              {/* Tooltip */}
+              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 p-2 bg-surface border border-border rounded-lg shadow-lg opacity-0 invisible group-hover/conf:opacity-100 group-hover/conf:visible transition-all z-50 text-left pointer-events-none">
+                <p className="text-[10px] font-medium text-violet-400 mb-1">LLM Confidence</p>
+                <p className="text-[9px] text-text-secondary mb-1.5">Probability of $1 payout based on LLM-detected logical relationships.</p>
+                <p className="text-[9px] text-text-muted">Formula: P(target) + P(¬target) × P(cover)</p>
+              </div>
             </div>
             <div className="bg-surface-elevated rounded-lg p-2.5 text-center">
               <p className="text-base font-mono font-semibold text-text-primary">

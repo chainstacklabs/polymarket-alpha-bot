@@ -208,7 +208,7 @@ export default function PortfoliosPage() {
                   <div className="flex items-start gap-2">
                     <span className="text-amber">●</span>
                     <p className="text-text-secondary">
-                      Win rate &amp; return recalculate instantly as market prices move.
+                      LLM confidence &amp; return recalculate instantly as market prices move.
                     </p>
                   </div>
                 </div>
@@ -296,7 +296,7 @@ export default function PortfoliosPage() {
                     <th className="px-2.5 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted w-[25%]" title="The backup bet that pays if target loses">
                       Backup Bet
                     </th>
-                    <SortHeader field="coverage" label="Win Rate" hint="Chance of getting paid from either bet (higher = safer)" className="w-20" />
+                    <SortHeader field="coverage" label="LLM Conf." hint="LLM-derived payout probability based on detected market relationships" className="w-20" />
                     <SortHeader field="total_cost" label="Cost" hint="Total investment to buy both positions" className="w-16" />
                     <SortHeader field="expected_profit" label="Return" hint="Expected return on your investment" className="w-16" />
                   </tr>
