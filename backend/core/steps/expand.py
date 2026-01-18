@@ -39,6 +39,46 @@ MIN_COVER_PROBABILITY = 0.88
 
 
 # =============================================================================
+# MUTUALLY EXCLUSIVE GROUP DETECTION
+# =============================================================================
+
+
+def is_mutually_exclusive_group(group: dict) -> bool:
+    """
+    Detect if a group has mutually exclusive outcomes (vs temporal progression).
+
+    Mutually exclusive groups have multiple markets with the SAME resolution date
+    but different brackets (e.g., "Presidential Election Winner" with 30 candidates).
+
+    For these groups, betting NO on one bracket (Dimon loses) does NOT mean
+    betting NO on the group outcome (no winner exists). Someone else wins.
+
+    Temporal groups have different resolution dates (e.g., "Captured by March/June/Sept").
+    For these, NO on a later date CAN validly relate to group-level implications.
+
+    Returns:
+        True if group has mutually exclusive outcomes (skip NO expansion)
+        False if temporal or single-market group (NO expansion may be valid)
+    """
+    markets = group.get("markets", [])
+
+    if len(markets) <= 1:
+        return False  # Single market - NO on market = NO on group
+
+    # Count markets per resolution date
+    resolution_dates = {}
+    for m in markets:
+        res_date = m.get("resolution_date", "unknown")
+        resolution_dates[res_date] = resolution_dates.get(res_date, 0) + 1
+
+    # If multiple markets share any resolution date, they're mutually exclusive
+    # (e.g., 30 candidates all resolving on election day)
+    max_same_date = max(resolution_dates.values()) if resolution_dates else 0
+
+    return max_same_date > 1
+
+
+# =============================================================================
 # PAIR ID GENERATION
 # =============================================================================
 
@@ -134,6 +174,13 @@ def expand_implication_to_pairs(
     yes_covering_groups = impl.get("yes_covered_by", [])
     no_covering_groups = impl.get("no_covered_by", [])
 
+    # Check if this is a mutually exclusive group (skip NO expansion if so)
+    skip_no_expansion = is_mutually_exclusive_group(target_group)
+    if skip_no_expansion and no_covering_groups:
+        logger.debug(
+            f"Skipping NO expansion for mutually exclusive group: {target_title}"
+        )
+
     pairs = []
 
     target_group_slug = target_group.get("slug", "")
@@ -185,41 +232,46 @@ def expand_implication_to_pairs(
                 )
 
         # Expand NO covers (for target_NO position)
-        for cover_info in no_covering_groups:
-            cover_markets = get_cover_markets(cover_info, groups_by_id, target_group_id)
-            for cm in cover_markets:
-                pair_id = generate_pair_id(
-                    target_market_id, "NO", cm["market_id"], cm["cover_position"]
+        # Skip for mutually exclusive groups where NO on one bracket
+        # doesn't mean NO on the group outcome (e.g., candidates)
+        if not skip_no_expansion:
+            for cover_info in no_covering_groups:
+                cover_markets = get_cover_markets(
+                    cover_info, groups_by_id, target_group_id
                 )
-                pairs.append(
-                    {
-                        "pair_id": pair_id,
-                        "target_group_id": target_group_id,
-                        "target_group_title": target_title,
-                        "target_group_slug": target_group_slug,
-                        "target_market_id": target_market_id,
-                        "target_market_slug": target_market_slug,
-                        "target_question": target_question,
-                        "target_position": "NO",
-                        "target_resolution": target_resolution,
-                        "target_price": target_price_no,
-                        "target_bracket": target_bracket,
-                        "cover_group_id": cm["source_group_id"],
-                        "cover_group_title": cm["source_group_title"],
-                        "cover_group_slug": cm["source_group_slug"],
-                        "cover_market_id": cm["market_id"],
-                        "cover_market_slug": cm["market_slug"],
-                        "cover_question": cm["question"],
-                        "cover_position": cm["cover_position"],
-                        "cover_resolution": cm["resolution_date"],
-                        "cover_price_yes": cm["price_yes"],
-                        "cover_price_no": cm["price_no"],
-                        "cover_bracket": cm["bracket_label"],
-                        "cover_probability": cm["probability"],
-                        "relationship": cm["relationship"],
-                        "relationship_type": cm["relationship_type"],
-                    }
-                )
+                for cm in cover_markets:
+                    pair_id = generate_pair_id(
+                        target_market_id, "NO", cm["market_id"], cm["cover_position"]
+                    )
+                    pairs.append(
+                        {
+                            "pair_id": pair_id,
+                            "target_group_id": target_group_id,
+                            "target_group_title": target_title,
+                            "target_group_slug": target_group_slug,
+                            "target_market_id": target_market_id,
+                            "target_market_slug": target_market_slug,
+                            "target_question": target_question,
+                            "target_position": "NO",
+                            "target_resolution": target_resolution,
+                            "target_price": target_price_no,
+                            "target_bracket": target_bracket,
+                            "cover_group_id": cm["source_group_id"],
+                            "cover_group_title": cm["source_group_title"],
+                            "cover_group_slug": cm["source_group_slug"],
+                            "cover_market_id": cm["market_id"],
+                            "cover_market_slug": cm["market_slug"],
+                            "cover_question": cm["question"],
+                            "cover_position": cm["cover_position"],
+                            "cover_resolution": cm["resolution_date"],
+                            "cover_price_yes": cm["price_yes"],
+                            "cover_price_no": cm["price_no"],
+                            "cover_bracket": cm["bracket_label"],
+                            "cover_probability": cm["probability"],
+                            "relationship": cm["relationship"],
+                            "relationship_type": cm["relationship_type"],
+                        }
+                    )
 
     return pairs
 

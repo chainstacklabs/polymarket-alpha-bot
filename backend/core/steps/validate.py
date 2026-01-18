@@ -131,10 +131,11 @@ INVALID: Target="Election called by March", Cover="Election held by June 30" wit
 
 - If your analysis concludes the hedge is INVALID, BROKEN, or WON'T WORK → set `is_valid: false`
 - If temporal_valid=false OR logical_valid=false → set `is_valid: false`
-- If you describe the hedge as "invalid", "doesn't work", "logical mismatch" → set `is_valid: false`
+- If you describe the hedge as "invalid", "incorrect", "wrong", "flawed", "doesn't work", "won't work", "logical mismatch", "bad hedge" → set `is_valid: false`
 - A high viability_score does NOT override is_valid. You can have high confidence that something is INVALID.
 
-**NEVER** set is_valid=true if your brief_analysis describes any problem with the hedge.
+**NEVER** set is_valid=true if your brief_analysis describes ANY problem, issue, or flaw with the hedge.
+**If you write a negative word about the hedge in brief_analysis, is_valid MUST be false.**
 
 ## Score meanings:
 - 1.0: Perfect hedge, logically necessary
@@ -193,6 +194,10 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
         # Check 3: Deadline coherence based on relationship type
         is_valid, reason = check_deadline_coherence(pair)
         if not is_valid:
+            logger.debug(
+                f"Pre-filter rejecting pair: {pair.get('target_question', '?')[:30]} -> "
+                f"{pair.get('cover_question', '?')[:30]}: {reason}"
+            )
             rejections["deadline_mismatch"] += 1
             continue
 
@@ -208,6 +213,9 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
 # Keywords that indicate invalid hedge (even if LLM set is_valid=true)
 REJECTION_KEYWORDS = [
     "invalid",
+    "incorrect",
+    "wrong",
+    "flawed",
     "does not guarantee",
     "doesn't guarantee",
     "not guarantee",
@@ -220,6 +228,7 @@ REJECTION_KEYWORDS = [
     "no coverage",
     "hedge is broken",
     "not a valid hedge",
+    "bad hedge",
 ]
 
 # =============================================================================
@@ -284,8 +293,10 @@ def check_deadline_coherence(pair: dict) -> tuple[bool, str | None]:
     - Direct (implies): Prerequisite chains need matching deadlines
       Example: "Held by March" → "Called by March" (same deadline required)
 
-    - Contrapositive (implied_by): Nested deadlines, cover can be earlier
-      Example: "by March" → "by June" (cover resolves first, that's fine)
+    - Contrapositive (implied_by) with YES/NO positions:
+      Cover date must be <= target date for the implication to hold.
+      Example: "NOT called by June → NOT held by Y" requires Y <= June
+      Because if Y > June, event could happen between June and Y.
 
     Args:
         pair: Candidate pair with resolution dates and relationship
@@ -296,6 +307,8 @@ def check_deadline_coherence(pair: dict) -> tuple[bool, str | None]:
     relationship = pair.get("relationship", "")
     target_res = pair.get("target_resolution")
     cover_res = pair.get("cover_resolution")
+    target_pos = pair.get("target_position")
+    cover_pos = pair.get("cover_position")
 
     target_date = parse_resolution_date(target_res)
     cover_date = parse_resolution_date(cover_res)
@@ -312,9 +325,23 @@ def check_deadline_coherence(pair: dict) -> tuple[bool, str | None]:
                 f"direct_deadline_mismatch: {days_diff} days between "
                 f"target ({target_res[:10]}) and cover ({cover_res[:10]})"
             )
-
-    # For contrapositive: cover can be earlier (nested deadlines)
-    # No additional check needed - the basic temporal check handles it
+    else:
+        # Contrapositive relationships with YES target / NO cover:
+        # When target loses (NOT by target_date), cover must win (NOT by cover_date)
+        # "NOT X by target_date → NOT Y by cover_date" requires cover_date <= target_date
+        # Otherwise, event could occur between target_date and cover_date
+        logger.debug(
+            f"Checking contrapositive: target_pos={target_pos}, cover_pos={cover_pos}, "
+            f"target_date={target_date}, cover_date={cover_date}"
+        )
+        if target_pos == "YES" and cover_pos == "NO":
+            if cover_date > target_date:
+                days_diff = (cover_date - target_date).days
+                return False, (
+                    f"contrapositive_deadline_invalid: cover ({cover_res[:10]}) "
+                    f"is {days_diff} days after target ({target_res[:10]}). "
+                    f"For YES/NO hedge, cover must resolve at or before target."
+                )
 
     return True, None
 
