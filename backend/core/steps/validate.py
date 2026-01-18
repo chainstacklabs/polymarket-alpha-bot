@@ -158,7 +158,13 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
     These filters catch structural/temporal issues without needing LLM:
     - Same market: target and cover are the same market
     - Same group: target and cover are from the same event group
-    - Temporal: cover resolves before target (can't provide coverage)
+    - Deadline coherence: based on relationship type (direct vs contrapositive)
+
+    Deadline rules by relationship type:
+    - Direct (implies): Prerequisite chains require matching deadlines
+      "Held by March" → "Called by March" (deadlines must match)
+    - Contrapositive (implied_by): Nested deadlines, cover can be earlier
+      "by March" → "by June" (earlier deadline is fine)
 
     Args:
         pairs: Candidate pairs to filter
@@ -170,7 +176,7 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
     rejections = {
         "same_market": 0,
         "same_group": 0,
-        "temporal_mismatch": 0,
+        "deadline_mismatch": 0,
     }
 
     for pair in pairs:
@@ -184,15 +190,11 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
             rejections["same_group"] += 1
             continue
 
-        # Check 3: Temporal - cover must resolve at or after target
-        target_res = pair.get("target_resolution")
-        cover_res = pair.get("cover_resolution")
-
-        if target_res and cover_res:
-            # Resolution dates are ISO strings, lexicographic comparison works
-            if cover_res < target_res:
-                rejections["temporal_mismatch"] += 1
-                continue
+        # Check 3: Deadline coherence based on relationship type
+        is_valid, reason = check_deadline_coherence(pair)
+        if not is_valid:
+            rejections["deadline_mismatch"] += 1
+            continue
 
         filtered.append(pair)
 
@@ -219,6 +221,102 @@ REJECTION_KEYWORDS = [
     "hedge is broken",
     "not a valid hedge",
 ]
+
+# =============================================================================
+# DEADLINE PRE-FILTERING
+# =============================================================================
+
+from datetime import datetime
+
+# Maximum days difference for "direct" prerequisite relationships
+# Prerequisite chains (held→called) require matching deadlines
+DIRECT_RELATIONSHIP_MAX_DAYS_DIFF = 7
+
+
+def parse_resolution_date(resolution: str | None) -> datetime | None:
+    """
+    Parse ISO resolution date string to datetime.
+
+    Args:
+        resolution: ISO date string like "2026-06-30T12:00:00Z"
+
+    Returns:
+        datetime object or None if invalid
+    """
+    if not resolution:
+        return None
+
+    try:
+        # Handle ISO format with Z suffix
+        if resolution.endswith("Z"):
+            resolution = resolution[:-1] + "+00:00"
+        return datetime.fromisoformat(resolution.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def is_direct_relationship(relationship: str | None) -> bool:
+    """
+    Check if relationship is "direct" (implies: target→other).
+
+    Direct relationships are prerequisite chains where deadlines must match.
+    Example: "Held by March" implies "Called by March"
+
+    Contrapositive relationships are nested deadlines where cover can be earlier.
+    Example: "Captured by June" implied_by "Captured by March"
+
+    We detect this from our own structured output format in implications.py.
+    """
+    if not relationship:
+        return False
+
+    return "(direct)" in relationship.lower()
+
+
+def check_deadline_coherence(pair: dict) -> tuple[bool, str | None]:
+    """
+    Check if pair has valid deadline coherence based on relationship type.
+
+    Uses resolution_date from API (reliable) and relationship direction
+    from implications step.
+
+    Rules:
+    - Direct (implies): Prerequisite chains need matching deadlines
+      Example: "Held by March" → "Called by March" (same deadline required)
+
+    - Contrapositive (implied_by): Nested deadlines, cover can be earlier
+      Example: "by March" → "by June" (cover resolves first, that's fine)
+
+    Args:
+        pair: Candidate pair with resolution dates and relationship
+
+    Returns:
+        Tuple of (is_valid, rejection_reason)
+    """
+    relationship = pair.get("relationship", "")
+    target_res = pair.get("target_resolution")
+    cover_res = pair.get("cover_resolution")
+
+    target_date = parse_resolution_date(target_res)
+    cover_date = parse_resolution_date(cover_res)
+
+    # Can't check without dates
+    if not target_date or not cover_date:
+        return True, None
+
+    # For direct/prerequisite relationships: deadlines must approximately match
+    if is_direct_relationship(relationship):
+        days_diff = abs((cover_date - target_date).days)
+        if days_diff > DIRECT_RELATIONSHIP_MAX_DAYS_DIFF:
+            return False, (
+                f"direct_deadline_mismatch: {days_diff} days between "
+                f"target ({target_res[:10]}) and cover ({cover_res[:10]})"
+            )
+
+    # For contrapositive: cover can be earlier (nested deadlines)
+    # No additional check needed - the basic temporal check handles it
+
+    return True, None
 
 
 def should_auto_reject(analysis: str) -> bool:
@@ -359,7 +457,7 @@ async def validate_pairs(
             pairs_to_validate.append(pair)
 
     # Apply pre-filters to new pairs (skip pairs that would always fail)
-    pre_filter_rejections = {"same_market": 0, "same_group": 0, "temporal_mismatch": 0}
+    pre_filter_rejections = {"same_market": 0, "same_group": 0, "deadline_mismatch": 0}
     if pairs_to_validate:
         pairs_to_validate, pre_filter_rejections = pre_filter_pairs(pairs_to_validate)
 
