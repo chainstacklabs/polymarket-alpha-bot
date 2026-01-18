@@ -125,6 +125,143 @@ def is_placeholder(market: dict) -> bool:
     return bool(PLACEHOLDER_PATTERN.match(str(name)))
 
 
+# =============================================================================
+# RESOLUTION DATE EXTRACTION
+# =============================================================================
+
+# Month name to number mapping
+MONTH_MAP = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+
+# Pattern to extract dates like "June 30, 2026" or "December 31, 2025"
+FULL_DATE_PATTERN = re.compile(
+    r"(January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+(\d{1,2}),?\s*(\d{4})",
+    re.IGNORECASE,
+)
+
+# Pattern for dates without year like "June 30" or "December 31"
+PARTIAL_DATE_PATTERN = re.compile(
+    r"(January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+(\d{1,2})(?:,|\s|$)",
+    re.IGNORECASE,
+)
+
+# Pattern for description dates like "by June 30, 2026, 11:59 PM ET"
+DESCRIPTION_DATE_PATTERN = re.compile(
+    r"(?:by|and)\s+"
+    r"(January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+(\d{1,2}),?\s*(\d{4})",
+    re.IGNORECASE,
+)
+
+
+def parse_date_string(month_str: str, day: int, year: int) -> str | None:
+    """
+    Convert parsed date components to ISO format string.
+
+    Args:
+        month_str: Month name (e.g., "June")
+        day: Day of month
+        year: Four-digit year
+
+    Returns:
+        ISO format date string like "2026-06-30T23:59:59Z" or None if invalid
+    """
+    month = MONTH_MAP.get(month_str.lower())
+    if not month:
+        return None
+
+    try:
+        # Validate the date
+        from datetime import datetime
+
+        dt = datetime(year, month, day, 23, 59, 59)
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
+
+
+def extract_resolution_date(
+    market: dict,
+    event_end_date: str | None = None,
+) -> str | None:
+    """
+    Extract the actual resolution date for a market from multiple sources.
+
+    Priority order:
+    1. Parse from groupItemTitle (bracket_label) if it has a full date with year
+    2. Parse from description if it contains explicit date
+    3. Parse from groupItemTitle with year inferred from event_end_date
+    4. Fall back to API's endDate
+
+    Args:
+        market: Raw market dict from Polymarket API
+        event_end_date: Event-level endDate for year inference
+
+    Returns:
+        ISO format resolution date string or None
+    """
+    bracket_label = market.get("groupItemTitle", "")
+    description = market.get("description", "")
+    api_end_date = market.get("endDate")
+
+    # Strategy 1: Try to parse full date from bracket_label
+    if bracket_label:
+        match = FULL_DATE_PATTERN.search(bracket_label)
+        if match:
+            month_str, day_str, year_str = match.groups()
+            parsed = parse_date_string(month_str, int(day_str), int(year_str))
+            if parsed:
+                return parsed
+
+    # Strategy 2: Try to parse from description
+    if description:
+        match = DESCRIPTION_DATE_PATTERN.search(description)
+        if match:
+            month_str, day_str, year_str = match.groups()
+            parsed = parse_date_string(month_str, int(day_str), int(year_str))
+            if parsed:
+                return parsed
+
+    # Strategy 3: Parse partial date from bracket_label, infer year
+    if bracket_label:
+        match = PARTIAL_DATE_PATTERN.search(bracket_label)
+        if match:
+            month_str, day_str = match.groups()
+            month = MONTH_MAP.get(month_str.lower())
+
+            # Infer year from event_end_date or API endDate
+            inferred_year = None
+            for date_source in [event_end_date, api_end_date]:
+                if date_source and len(date_source) >= 4:
+                    try:
+                        inferred_year = int(date_source[:4])
+                        break
+                    except ValueError:
+                        pass
+
+            if inferred_year and month:
+                parsed = parse_date_string(month_str, int(day_str), inferred_year)
+                if parsed:
+                    return parsed
+
+    # Strategy 4: Fall back to API's endDate
+    return api_end_date
+
+
 def normalize_for_embedding(title: str) -> str:
     """
     Normalize event title for embedding comparison.
@@ -203,6 +340,7 @@ def build_group_from_event(event: dict) -> Group | None:
     event_id = str(event.get("id", ""))
     event_title = event.get("title", "")
     event_slug = event.get("slug", "")
+    event_end_date = event.get("endDate")  # For year inference
     tags = [t.get("label") or t.get("slug", "") for t in event.get("tags", [])]
 
     # Detect partition type
@@ -224,7 +362,10 @@ def build_group_from_event(event: dict) -> Group | None:
 
         liquidity = float(m.get("liquidityNum") or m.get("liquidity") or 0)
         volume = float(m.get("volumeNum") or m.get("volume") or 0)
-        resolution = m.get("endDate")
+
+        # Extract resolution date from multiple sources (bracket_label, description, etc.)
+        # instead of relying on unreliable API endDate
+        resolution = extract_resolution_date(m, event_end_date)
 
         market = Market(
             id=str(m.get("id", "")),
