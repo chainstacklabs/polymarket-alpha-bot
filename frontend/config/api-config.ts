@@ -4,57 +4,45 @@
 
 /**
  * Get the base URL for API requests.
- * Dynamically uses the current hostname to support remote access (e.g., OrbStack).
+ * Uses Next.js API proxy (/api) for client-side to avoid CORS issues.
+ * Server-side uses direct connection.
  */
 export function getApiBaseUrl(): string {
   if (typeof window === 'undefined') {
-    // Server-side rendering - use localhost
+    // Server-side rendering - direct connection
     return 'http://localhost:8000'
   }
 
-  const hostname = window.location.hostname
-
-  // If accessing from localhost, use localhost
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'http://localhost:8000'
-  }
-
-  // Otherwise, use the same hostname with backend port
-  return `http://${hostname}:8000`
+  // Client-side - use Next.js API proxy to avoid CORS/Safari issues
+  return '/api'
 }
 
 /**
  * Get the WebSocket URL for portfolio price updates.
+ * Uses same-origin proxy path to avoid CORS/Safari issues.
  */
 export function getPortfolioWsUrl(): string {
   if (typeof window === 'undefined') {
     return 'ws://localhost:8000/portfolios/ws'
   }
 
-  const hostname = window.location.hostname
-
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'ws://localhost:8000/portfolios/ws'
-  }
-
-  return `ws://${hostname}:8000/portfolios/ws`
+  // Use same-origin WebSocket via Next.js proxy
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}/ws/portfolios/ws`
 }
 
 /**
  * Get the WebSocket URL for price updates.
+ * Uses same-origin proxy path to avoid CORS/Safari issues.
  */
 export function getPricesWsUrl(): string {
   if (typeof window === 'undefined') {
     return 'ws://localhost:8000/prices/ws'
   }
 
-  const hostname = window.location.hostname
-
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'ws://localhost:8000/prices/ws'
-  }
-
-  return `ws://${hostname}:8000/prices/ws`
+  // Use same-origin WebSocket via Next.js proxy
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}/ws/prices/ws`
 }
 
 /**

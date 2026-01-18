@@ -83,7 +83,7 @@ export interface UsePortfolioPricesResult {
   reconnect: () => void
 }
 
-import { getPortfolioWsUrl } from '@/config/api-config'
+import { getPortfolioWsUrl, getApiBaseUrl } from '@/config/api-config'
 
 // =============================================================================
 // CONSTANTS
@@ -92,6 +92,8 @@ import { getPortfolioWsUrl } from '@/config/api-config'
 const getWsUrl = () => getPortfolioWsUrl()
 const RECONNECT_DELAY = 5000
 const CHANGE_FLASH_DURATION = 2000
+const POLLING_INTERVAL = 3000  // Fallback polling interval when WS fails
+const WS_TIMEOUT = 5000  // Time to wait for WS before falling back to polling
 
 // =============================================================================
 // HOOK
@@ -110,8 +112,59 @@ export function usePortfolioPrices(
   const wsRef = useRef<WebSocket | null>(null)
   const filtersRef = useRef<FilterState>(initialFilters)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
+  const pollingIntervalRef = useRef<NodeJS.Timeout>()
   const portfolioMapRef = useRef<Map<string, Portfolio>>(new Map())
   const mountedRef = useRef(true)  // Track if component is mounted
+  const wsFailedRef = useRef(false)  // Track if WS has failed (use polling instead)
+
+  // REST API fallback for when WebSocket fails
+  const fetchViaRest = useCallback(async () => {
+    if (!mountedRef.current) return
+
+    try {
+      const filters = filtersRef.current
+      const params = new URLSearchParams({
+        max_tier: String(filters.maxTier),
+        ...(filters.profitableOnly && { profitable_only: 'true' }),
+      })
+      const res = await fetch(`${getApiBaseUrl()}/data/portfolios?${params}`)
+      if (!res.ok) return
+
+      const data = await res.json()
+      const fetchedPortfolios = data.portfolios as Portfolio[]
+
+      // Update state
+      portfolioMapRef.current = new Map(
+        fetchedPortfolios.map(p => [p.pair_id, p])
+      )
+      setPortfolios(fetchedPortfolios)
+      if (data.summary) setSummary(data.summary)
+
+      // Mark as connected (via polling)
+      if (status !== 'connected') {
+        setStatus('connected')
+      }
+    } catch (e) {
+      console.error('REST fetch failed:', e)
+    }
+  }, [status])
+
+  // Start polling when WebSocket fails
+  const startPolling = useCallback(() => {
+    if (pollingIntervalRef.current) return  // Already polling
+
+    console.log('Starting REST polling fallback')
+    fetchViaRest()  // Initial fetch
+    pollingIntervalRef.current = setInterval(fetchViaRest, POLLING_INTERVAL)
+  }, [fetchViaRest])
+
+  // Stop polling
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = undefined
+    }
+  }, [])
 
   // Clear old changes
   useEffect(() => {
@@ -167,6 +220,8 @@ export function usePortfolioPrices(
       ws.onopen = () => {
         console.log('Portfolio WebSocket connected')
         setStatus('connected')
+        wsFailedRef.current = false
+        stopPolling()  // Stop polling if WS connects
       }
 
       ws.onmessage = (event) => {
@@ -273,8 +328,16 @@ export function usePortfolioPrices(
         }
 
         console.log('Portfolio WebSocket disconnected')
-        setStatus('disconnected')
         wsRef.current = null
+
+        // If WS has failed before, use polling instead of reconnecting
+        if (wsFailedRef.current) {
+          setStatus('connected')  // Show as connected (via polling)
+          startPolling()
+          return
+        }
+
+        setStatus('disconnected')
 
         // Reconnect after delay (only if still mounted)
         if (mountedRef.current) {
@@ -291,18 +354,26 @@ export function usePortfolioPrices(
           return
         }
 
-        console.error('Portfolio WebSocket error')
-        setStatus('error')
+        console.error('Portfolio WebSocket error - falling back to REST polling')
+        wsFailedRef.current = true
+        startPolling()  // Start REST polling as fallback
         ws.close()
       }
+      // Set a timeout - if WS doesn't connect in time, fall back to polling
+      setTimeout(() => {
+        if (ws.readyState !== WebSocket.OPEN && !wsFailedRef.current) {
+          console.log('WebSocket connection timeout - falling back to REST polling')
+          wsFailedRef.current = true
+          startPolling()
+        }
+      }, WS_TIMEOUT)
+
     } catch (e) {
       console.error('Failed to connect WebSocket:', e)
-      setStatus('error')
-
-      // Retry connection
-      reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_DELAY)
+      wsFailedRef.current = true
+      startPolling()  // Fall back to polling
     }
-  }, [])
+  }, [startPolling, stopPolling])
 
   // Initial connection - only run once on mount
   useEffect(() => {
@@ -313,6 +384,9 @@ export function usePortfolioPrices(
       mountedRef.current = false  // Mark as unmounted to prevent reconnect
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
+      }
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
       }
       if (wsRef.current) {
         // Remove handlers before closing to prevent error events
