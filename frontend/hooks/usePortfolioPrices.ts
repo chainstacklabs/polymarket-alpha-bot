@@ -411,8 +411,11 @@ export function usePortfolioPrices(
         max_tier: filters.maxTier,
         profitable_only: filters.profitableOnly,
       }))
+    } else {
+      // WebSocket not connected - fetch immediately via REST
+      fetchViaRest()
     }
-  }, [])
+  }, [fetchViaRest])
 
   // Manual reconnect
   const reconnect = useCallback(() => {
