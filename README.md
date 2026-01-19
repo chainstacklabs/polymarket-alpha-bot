@@ -1,12 +1,12 @@
 # Alphapoly
 
-Polymarket alpha detection: finds covering portfolios across correlated prediction markets.
+Polymarket alpha detection: finds covering portfolios across correlated prediction markets based on pre-defined rules and LLM decisions.
 
 ![Dashboard Screenshot](assets/dashboard-screenshot.png)
 
 ## How It Works
 
-1. **Groups** — Fetches multi-outcome markets from Polymarket (e.g., "Ukraine election by X date")
+1. **Groups** — Fetches multi-outcome markets from Polymarket (e.g., "US election by X date")
 2. **Implications** — LLM extracts logical relationships between groups
 3. **Portfolios** — Finds position pairs that hedge each other with high coverage probability
 
@@ -18,7 +18,7 @@ Polymarket alpha detection: finds covering portfolios across correlated predicti
 ## Quick Start
 
 ```bash
-cp .env.example .env          # Add OPENROUTER_API_KEY
+cp .env.example .env          # Add OPENROUTER_API_KEY and other parameters
 
 # With make
 make install && make dev

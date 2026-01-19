@@ -1,7 +1,7 @@
 # Alphapoly Development Commands
 # ================================
 
-.PHONY: help install dev backend frontend pipeline lint test clean check-node export-seed import-seed
+.PHONY: help install dev backend frontend pipeline pipeline-full lint clean check-node export-seed import-seed
 
 # Node.js detection - supports fnm, nvm, volta, and system node
 # Searches common installation paths and adds to PATH
