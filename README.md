@@ -18,7 +18,7 @@ Polymarket alpha detection: finds covering portfolios across correlated predicti
 ## Quick Start
 
 ```bash
-cp .env.example .env          # Add OPENROUTER_API_KEY and other parameters
+cp .env.example .env          # Add OPENROUTER_API_KEY (and CHAINSTACK_NODE for blockchain transactions)
 
 # With make
 make install && make dev
