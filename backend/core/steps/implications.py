@@ -413,31 +413,60 @@ async def extract_implications_batch(
                 target_title=target_group["title"],
             )
 
-            try:
-                response = await llm.complete(
-                    [{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                )
+            result = None
+            max_retries = 3
+            timeout_seconds = 90  # Hard timeout per attempt
 
-                llm_result = extract_json_from_response(str(response))
-
-                if not llm_result:
-                    result = {
-                        "group_id": target_group["group_id"],
-                        "title": target_group["title"],
-                        "yes_covered_by": [],
-                        "no_covered_by": [],
-                    }
-                else:
-                    result = derive_covers(
-                        llm_result,
-                        target_group,
-                        groups_by_title,
-                        groups_by_title_lower,
+            for attempt in range(max_retries):
+                try:
+                    response = await asyncio.wait_for(
+                        llm.complete(
+                            [{"role": "user", "content": prompt}],
+                            temperature=0.1,
+                        ),
+                        timeout=timeout_seconds,
                     )
 
-            except Exception as e:
-                logger.error(f"Error processing {target_group['title'][:40]}: {e}")
+                    llm_result = extract_json_from_response(str(response))
+
+                    if not llm_result:
+                        result = {
+                            "group_id": target_group["group_id"],
+                            "title": target_group["title"],
+                            "yes_covered_by": [],
+                            "no_covered_by": [],
+                        }
+                    else:
+                        result = derive_covers(
+                            llm_result,
+                            target_group,
+                            groups_by_title,
+                            groups_by_title_lower,
+                        )
+                    break  # Success, exit retry loop
+
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"Timeout (attempt {attempt + 1}/{max_retries}) for "
+                        f"{target_group['title'][:40]}"
+                    )
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2**attempt)  # Exponential backoff
+                    continue
+
+                except Exception as e:
+                    logger.error(
+                        f"Error (attempt {attempt + 1}/{max_retries}) processing "
+                        f"{target_group['title'][:40]}: {e}"
+                    )
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(1)
+                        continue
+                    break
+
+            # If all retries failed, return empty result
+            if result is None:
+                logger.error(f"All retries failed for {target_group['title'][:40]}")
                 result = {
                     "group_id": target_group["group_id"],
                     "title": target_group["title"],
