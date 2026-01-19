@@ -112,6 +112,7 @@ export function usePortfolioPrices(
   const wsRef = useRef<WebSocket | null>(null)
   const filtersRef = useRef<FilterState>(initialFilters)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
+  const wsTimeoutRef = useRef<NodeJS.Timeout>()  // Timeout for WS connection
   const pollingIntervalRef = useRef<NodeJS.Timeout>()
   const portfolioMapRef = useRef<Map<string, Portfolio>>(new Map())
   const mountedRef = useRef(true)  // Track if component is mounted
@@ -219,7 +220,12 @@ export function usePortfolioPrices(
       wsRef.current = ws
 
       ws.onopen = () => {
-        console.log('Portfolio WebSocket connected')
+        console.log('Portfolio WebSocket connected, mounted:', mountedRef.current)
+        if (!mountedRef.current) {
+          console.log('Component unmounted, closing WS')
+          ws.close()
+          return
+        }
         setStatus('connected')
         wsFailedRef.current = false
         stopPolling()  // Stop polling if WS connects
@@ -361,8 +367,13 @@ export function usePortfolioPrices(
         ws.close()
       }
       // Set a timeout - if WS doesn't connect in time, fall back to polling
-      setTimeout(() => {
-        if (ws.readyState !== WebSocket.OPEN && !wsFailedRef.current) {
+      // Clear any existing timeout first
+      if (wsTimeoutRef.current) {
+        clearTimeout(wsTimeoutRef.current)
+      }
+      wsTimeoutRef.current = setTimeout(() => {
+        // Only trigger if this is still the current WebSocket and component is mounted
+        if (wsRef.current === ws && mountedRef.current && ws.readyState !== WebSocket.OPEN && !wsFailedRef.current) {
           console.log('WebSocket connection timeout - falling back to REST polling')
           wsFailedRef.current = true
           startPolling()
@@ -378,29 +389,163 @@ export function usePortfolioPrices(
 
   // Initial connection - only run once on mount
   useEffect(() => {
+    console.log('usePortfolioPrices: mounting')
     mountedRef.current = true
-    connect()
+    wsFailedRef.current = false
 
-    return () => {
-      mountedRef.current = false  // Mark as unmounted to prevent reconnect
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
+    // Create WebSocket - each effect instance gets its own
+    const ws = new WebSocket(getWsUrl())
+    wsRef.current = ws
+    setStatus('connecting')
+
+    ws.onopen = () => {
+      if (!mountedRef.current) {
+        ws.close()
+        return
       }
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current)
-      }
-      if (wsRef.current) {
-        // Remove handlers before closing to prevent error events
-        wsRef.current.onclose = null
-        wsRef.current.onerror = null
-        wsRef.current.onmessage = null
-        wsRef.current.onopen = null
-        wsRef.current.close()
-        wsRef.current = null
+      console.log('Portfolio WebSocket connected')
+      setStatus('connected')
+      wsFailedRef.current = false
+      stopPolling()
+    }
+
+    ws.onmessage = (event) => {
+      if (!mountedRef.current) return
+      try {
+        const data = JSON.parse(event.data)
+
+        switch (data.type) {
+          case 'connected':
+            break
+
+          case 'initial': {
+            const initialPortfolios = data.portfolios as Portfolio[]
+            portfolioMapRef.current = new Map(
+              initialPortfolios.map(p => [p.pair_id, p])
+            )
+            setPortfolios(initialPortfolios)
+            setSummary(data.summary)
+            break
+          }
+
+          case 'portfolio_update': {
+            const changed = data.changed as Portfolio[]
+            const newTierChanges = data.tier_changes as TierChange[]
+
+            if (changed.length > 0) {
+              const newChangedIds = new Set<string>()
+              const newPriceChanges = new Map<string, PriceChange>()
+
+              changed.forEach(updated => {
+                const old = portfolioMapRef.current.get(updated.pair_id)
+                if (old) {
+                  const oldProfit = old.expected_profit
+                  const newProfit = updated.expected_profit
+                  if (Math.abs(newProfit - oldProfit) > 0.001) {
+                    newPriceChanges.set(updated.pair_id, {
+                      direction: newProfit > oldProfit ? 'up' : 'down',
+                      timestamp: Date.now(),
+                    })
+                  }
+                }
+                newChangedIds.add(updated.pair_id)
+                portfolioMapRef.current.set(updated.pair_id, updated)
+              })
+
+              const merged = Array.from(portfolioMapRef.current.values())
+              merged.sort((a, b) =>
+                a.tier !== b.tier ? a.tier - b.tier : b.coverage - a.coverage
+              )
+
+              setPortfolios(merged)
+              setChangedIds(prev => new Set([...prev, ...newChangedIds]))
+              setPriceChanges(prev => new Map([...prev, ...newPriceChanges]))
+            }
+
+            if (newTierChanges.length > 0) {
+              setTierChanges(newTierChanges)
+              setTimeout(() => setTierChanges([]), 3000)
+            }
+            break
+          }
+
+          case 'filter_ack': {
+            const filteredPortfolios = data.portfolios as Portfolio[]
+            portfolioMapRef.current = new Map(
+              filteredPortfolios.map(p => [p.pair_id, p])
+            )
+            setPortfolios(filteredPortfolios)
+            break
+          }
+
+          case 'full_reload': {
+            const reloadedPortfolios = data.portfolios as Portfolio[]
+            portfolioMapRef.current = new Map(
+              reloadedPortfolios.map(p => [p.pair_id, p])
+            )
+            setPortfolios(reloadedPortfolios)
+            setSummary(data.summary)
+            setChangedIds(new Set())
+            setPriceChanges(new Map())
+            setTierChanges([])
+            break
+          }
+
+          case 'heartbeat':
+            break
+        }
+      } catch (e) {
+        console.error('Failed to parse WebSocket message:', e)
       }
     }
+
+    ws.onclose = () => {
+      if (!mountedRef.current) return
+      console.log('Portfolio WebSocket disconnected')
+
+      if (wsFailedRef.current) {
+        setStatus('connected')
+        startPolling()
+        return
+      }
+
+      setStatus('disconnected')
+      reconnectTimeoutRef.current = setTimeout(() => {
+        if (mountedRef.current) connect()
+      }, RECONNECT_DELAY)
+    }
+
+    ws.onerror = () => {
+      if (!mountedRef.current) return
+      console.error('Portfolio WebSocket error - falling back to REST polling')
+      wsFailedRef.current = true
+      startPolling()
+      ws.close()
+    }
+
+    wsTimeoutRef.current = setTimeout(() => {
+      if (mountedRef.current && ws.readyState !== WebSocket.OPEN && !wsFailedRef.current) {
+        console.log('WebSocket connection timeout - falling back to REST polling')
+        wsFailedRef.current = true
+        startPolling()
+      }
+    }, WS_TIMEOUT)
+
+    // Cleanup: close THIS specific WebSocket instance
+    return () => {
+      console.log('usePortfolioPrices: cleanup')
+      mountedRef.current = false
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current)
+      if (wsTimeoutRef.current) clearTimeout(wsTimeoutRef.current)
+      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current)
+      ws.onclose = null
+      ws.onerror = null
+      ws.onmessage = null
+      ws.onopen = null
+      ws.close()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])  // Empty deps - connect is stable and doesn't need to trigger re-runs
+  }, [])
 
   // Send filter updates to server
   const updateFilters = useCallback((filters: FilterState) => {
