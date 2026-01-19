@@ -131,7 +131,8 @@ export function usePortfolioPrices(
       if (!res.ok) return
 
       const data = await res.json()
-      const fetchedPortfolios = data.portfolios as Portfolio[]
+      // API returns { data: { portfolios: [...] }, ... }
+      const fetchedPortfolios = (data.data?.portfolios || data.portfolios || []) as Portfolio[]
 
       // Update state
       portfolioMapRef.current = new Map(
@@ -405,15 +406,16 @@ export function usePortfolioPrices(
   const updateFilters = useCallback((filters: FilterState) => {
     filtersRef.current = filters
 
+    // Always fetch via REST immediately for responsive UI
+    fetchViaRest()
+
+    // Also send via WebSocket if connected (for real-time updates)
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'filter',
         max_tier: filters.maxTier,
         profitable_only: filters.profitableOnly,
       }))
-    } else {
-      // WebSocket not connected - fetch immediately via REST
-      fetchViaRest()
     }
   }, [fetchViaRest])
 
