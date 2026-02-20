@@ -94,9 +94,18 @@ async def buy_pair(req: BuyPairRequest):
             warnings.append(f"Cover CLOB sell failed: {result.cover.error}")
 
         if warnings:
-            warnings.append(
-                "You now hold both YES and NO tokens. Sell unwanted side manually on Polymarket."
+            is_geoblock = any(
+                "geoblock" in (w or "").lower() or "restricted" in (w or "").lower()
+                for w in warnings
             )
+            if is_geoblock:
+                warnings.append(
+                    "CLOB sells blocked by region restriction. Enable a proxy, then go to Positions to sell unwanted tokens."
+                )
+            else:
+                warnings.append(
+                    "You hold both YES and NO tokens. Go to Positions to sell unwanted sides."
+                )
 
         # Record position entry for tracking
         # Uses market info captured during trade - no extra API calls needed

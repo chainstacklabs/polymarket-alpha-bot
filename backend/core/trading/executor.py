@@ -168,7 +168,7 @@ class TradingExecutor:
         amount: float,
         price: float,
     ) -> tuple[Optional[str], bool, Optional[str]]:
-        """Sell tokens via CLOB using FOK market order. Returns (order_id, filled, error_message)."""
+        """Sell tokens via CLOB using IOC market order. Returns (order_id, filled, error_message)."""
         client = self._get_clob_client()
         if not client:
             return None, False, "CLOB client initialization failed"
@@ -177,9 +177,9 @@ class TradingExecutor:
             from py_clob_client.clob_types import OrderArgs, OrderType
             from py_clob_client.order_builder.constants import SELL
 
-            # Use FOK (Fill or Kill) for instant execution
-            # Set low price to match any buy orders (market sell)
-            sell_price = round(max(price * 0.90, 0.01), 2)  # 10% below market, min 0.01
+            # IOC (Immediate-or-Cancel): fills whatever liquidity is available, cancels rest
+            # 40% slippage below market price
+            sell_price = round(max(price * 0.60, 0.01), 2)
 
             order = client.create_order(
                 OrderArgs(
@@ -189,20 +189,16 @@ class TradingExecutor:
                     side=SELL,
                 )
             )
-            result = client.post_order(order, OrderType.FOK)
+            result = client.post_order(order, OrderType.FAK)
             order_id = result.get("orderID", str(result)[:40])
-            logger.info(f"CLOB market order filled: {order_id}")
+            logger.info(f"CLOB FAK order executed: {order_id}")
             return order_id, True, None
         except Exception as e:
             error_msg = str(e)
-            # Extract meaningful error from Cloudflare block
-            if "403" in error_msg and "blocked" in error_msg.lower():
-                error_msg = (
-                    "IP blocked by Cloudflare - CLOB API inaccessible from this network"
-                )
-            # FOK orders fail if they can't fill completely
-            if "no match" in error_msg.lower() or "insufficient" in error_msg.lower():
-                error_msg = f"Market order couldn't fill (no liquidity at {sell_price})"
+            if "403" in error_msg and (
+                "blocked" in error_msg.lower() or "restricted" in error_msg.lower()
+            ):
+                error_msg = "Trading restricted in your region — enable proxy"
             logger.error(f"CLOB sell error: {error_msg}")
             return None, False, error_msg
 

@@ -473,7 +473,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-text-primary">
-                    {result.warnings?.length ? 'Partial Success' : 'Purchase Complete'}
+                    {result.warnings?.length ? 'Tokens Acquired — Sell Pending' : 'Purchase Complete'}
                   </p>
                   <p className="text-xs text-text-muted">
                     Spent ${result.total_spent.toFixed(2)} · Balance: ${result.final_balances.usdc_e.toFixed(2)}
@@ -482,10 +482,13 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
               </div>
 
               {result.warnings && result.warnings.length > 0 && (
-                <div className="bg-amber-500/10 border border-amber-500/25 rounded-lg p-2">
-                  {result.warnings.map((warning, i) => (
-                    <p key={i} className="text-amber-500 text-xs">{warning}</p>
-                  ))}
+                <div className="bg-amber-500/10 border border-amber-500/25 rounded-lg p-2 space-y-1">
+                  <p className="text-amber-500 text-xs font-medium">
+                    Splits succeeded but CLOB sells were blocked.
+                  </p>
+                  <p className="text-amber-500 text-xs">
+                    Enable your proxy, then go to Positions to sell unwanted tokens.
+                  </p>
                 </div>
               )}
 

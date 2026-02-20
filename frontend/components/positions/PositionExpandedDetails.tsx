@@ -9,10 +9,10 @@ interface PositionExpandedDetailsProps {
   onRefresh: () => void
 }
 
-function getSideStatus(filled: boolean, orderId: string | null): { label: string; color: string } {
-  if (filled) return { label: 'RECOVERED', color: 'text-emerald' }
+function getSideStatus(filled: boolean, orderId: string | null, unwantedBalance: number): { label: string; color: string } {
+  if (filled || unwantedBalance < 0.01) return { label: 'RECOVERED', color: 'text-emerald' }
   if (orderId) return { label: 'PENDING', color: 'text-amber' }
-  return { label: 'UNKNOWN', color: 'text-rose' }
+  return { label: 'NEEDS SELL', color: 'text-rose' }
 }
 
 function formatTxHash(hash: string): string {
@@ -25,8 +25,8 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const targetStatus = getSideStatus(p.target_clob_filled, p.target_clob_order_id)
-  const coverStatus = getSideStatus(p.cover_clob_filled, p.cover_clob_order_id)
+  const targetStatus = getSideStatus(p.target_clob_filled, p.target_clob_order_id, p.target_unwanted_balance)
+  const coverStatus = getSideStatus(p.cover_clob_filled, p.cover_clob_order_id, p.cover_unwanted_balance)
 
   const handleSell = async (side: 'target' | 'cover', tokenType: 'wanted' | 'unwanted') => {
     setLoading(`${side}-${tokenType}`)

@@ -90,7 +90,7 @@ async def sell_position_tokens(position_id: str, req: SellTokenRequest):
     - side: "target" or "cover" market
     - token_type: "wanted" (your position) or "unwanted" (to be recovered)
 
-    Uses FOK (Fill-or-Kill) market order at 10% below market price.
+    Uses IOC (Immediate-or-Cancel) market order at aggressive price for instant execution.
     """
     manager = get_manager()
     storage = get_storage()
