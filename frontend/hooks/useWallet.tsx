@@ -97,7 +97,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const err = await res.json()
       throw new Error(err.detail || 'Invalid password')
     }
-    await refresh()
+    const data = await res.json()
+    // Optimistic update - show unlocked immediately, refresh balances in background
+    setStatus(prev => prev ? { ...prev, unlocked: true, address: data.address } : null)
+    refresh()
   }, [apiBase, refresh])
 
   const lock = useCallback(async (): Promise<void> => {
