@@ -63,6 +63,19 @@ make clean          # Remove build artifacts
 
 > Internal debug endpoints: `/prices/current`, `/prices/ws`
 
+## Skills
+
+Project-level Claude Code skills in `.claude/skills/`:
+
+| Skill | When to use |
+|-------|-------------|
+| `alphapoly-feature` | Adding a new feature, endpoint, pipeline step, or UI page |
+| `alphapoly-experiment` | Creating a new standalone script in `experiments/` |
+| `alphapoly-pipeline` | Running, debugging, or managing the ML pipeline |
+| `alphapoly-portfolios` | Listing current portfolio opportunities |
+| `alphapoly-enter-position` | Executing a covered pair trade |
+| `alphapoly-exit-position` | Exiting or managing an open position |
+
 ## Environment
 
 ```bash
