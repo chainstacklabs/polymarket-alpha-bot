@@ -28,6 +28,8 @@ class BuyPairRequest(BaseModel):
     cover_group_slug: str = ""
     amount_per_position: float
     skip_clob_sell: bool = False
+    order_type: str = "FAK"
+    slippage: float = 10
 
 
 class TradeResultModel(BaseModel):
@@ -84,6 +86,8 @@ async def buy_pair(req: BuyPairRequest):
             cover_position=req.cover_position,
             amount_per_position=req.amount_per_position,
             skip_clob_sell=req.skip_clob_sell,
+            order_type=req.order_type,
+            slippage=req.slippage,
         )
 
         # Collect warnings for CLOB failures

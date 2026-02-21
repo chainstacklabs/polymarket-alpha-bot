@@ -38,6 +38,8 @@ class SellTokenRequest(BaseModel):
 
     side: Literal["target", "cover"]
     token_type: Literal["wanted", "unwanted"]
+    order_type: str = "FAK"
+    slippage: float = 10
 
 
 class SellTokenResponse(BaseModel):
@@ -66,6 +68,13 @@ class MergeTokensResponse(BaseModel):
     merged_amount: float
     tx_hash: Optional[str]
     error: Optional[str] = None
+
+
+class RetryPendingRequest(BaseModel):
+    """Request for retry pending sells."""
+
+    order_type: str = "FAK"
+    slippage: float = 10
 
 
 class RetryPendingResponse(BaseModel):
@@ -106,6 +115,8 @@ async def sell_position_tokens(position_id: str, req: SellTokenRequest):
             position_id=position_id,
             side=req.side,
             token_type=req.token_type,
+            order_type=req.order_type,
+            slippage=req.slippage,
         )
 
         if not result.success and result.error == "Position not found":
@@ -174,12 +185,14 @@ async def merge_position_tokens(position_id: str, req: MergeTokensRequest):
 
 
 @router.post("/{position_id}/retry", response_model=RetryPendingResponse)
-async def retry_pending_sells(position_id: str):
+async def retry_pending_sells(
+    position_id: str, req: RetryPendingRequest = RetryPendingRequest()
+):
     """
     Retry selling unwanted tokens for positions in pending state.
 
     Checks both target and cover sides for unwanted token balances
-    and attempts to sell them via CLOB FOK orders.
+    and attempts to sell them via CLOB orders.
     """
     manager = get_manager()
 
@@ -187,7 +200,9 @@ async def retry_pending_sells(position_id: str):
         raise HTTPException(status_code=401, detail="Unlock wallet first")
 
     try:
-        result = await manager.retry_pending_sells(position_id)
+        result = await manager.retry_pending_sells(
+            position_id, order_type=req.order_type, slippage=req.slippage
+        )
 
         if result.get("message") == "Position not found":
             raise HTTPException(status_code=404, detail="Position not found")
