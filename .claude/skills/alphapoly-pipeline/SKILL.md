@@ -42,4 +42,3 @@ make import-seed    # Reset DB and import seed (resets state)
 - LLM errors → verify `OPENROUTER_API_KEY` in `.env`
 - Stale state → `make pipeline-full` to reprocess everything
 - Partial outputs → check `data/_live/` then re-run `make pipeline` to resume incrementally
-```

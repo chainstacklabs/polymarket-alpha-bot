@@ -9,7 +9,7 @@ Scaffold a new standalone script in `experiments/`.
 
 ## Rules
 - **Completely standalone** — no shared modules; no imports from `backend/` or other `experiments/` files
-- **Sequential numbering** — next after existing `experiments/08_*.py`
+- **Sequential numbering** — check existing files in `experiments/` and use the next number
 - **uv inline dependencies** — declare all deps in script header
 
 ## Template
