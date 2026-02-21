@@ -25,7 +25,7 @@ if file_path.startswith(backend) and file_path.endswith(".py"):
     if result.returncode != 0:
         print(result.stdout, end="")
         print(result.stderr, end="", file=sys.stderr)
-        exit_code = result.returncode
+        exit_code = 2  # Exit 2 feeds stderr back to Claude as an error message
 
 elif file_path.startswith(frontend) and file_path.endswith(
     (".ts", ".tsx", ".js", ".jsx", ".css", ".json")
@@ -41,6 +41,6 @@ elif file_path.startswith(frontend) and file_path.endswith(
         if result.returncode != 0:
             print(result.stdout, end="")
             print(result.stderr, end="", file=sys.stderr)
-            exit_code = result.returncode
+            exit_code = 2  # Exit 2 feeds stderr back to Claude as an error message
 
 sys.exit(exit_code)
