@@ -8,7 +8,7 @@ description: Use when creating a new standalone experiment script in the alphapo
 Scaffold a new standalone script in `experiments/`.
 
 ## Rules
-- **Completely standalone** — no imports from `backend/` modules
+- **Completely standalone** — no shared modules; no imports from `backend/` or other `experiments/` files
 - **Sequential numbering** — next after existing `experiments/08_*.py`
 - **uv inline dependencies** — declare all deps in script header
 
