@@ -108,8 +108,18 @@ class PositionManager:
         token_id: str,
         amount: float,
         price: float,
+        order_type: str = "FAK",
+        slippage: float = 10,
     ) -> tuple[Optional[str], bool, Optional[str]]:
-        """Sell tokens via CLOB using IOC market order. Returns (order_id, filled, error)."""
+        """Sell tokens via CLOB market order. Returns (order_id, filled, error).
+
+        Args:
+            token_id: Token to sell.
+            amount: Number of tokens.
+            price: Current market price.
+            order_type: Order type - FAK, FOK, or GTC.
+            slippage: Slippage percentage (10-50).
+        """
         client = self._get_clob_client()
         if not client:
             return None, False, "CLOB client initialization failed"
@@ -118,9 +128,16 @@ class PositionManager:
             from py_clob_client.clob_types import OrderArgs, OrderType
             from py_clob_client.order_builder.constants import SELL
 
-            # IOC (Immediate-or-Cancel): fills whatever liquidity is available, cancels rest
-            # 40% slippage below market price
-            sell_price = round(max(price * 0.60, 0.01), 2)
+            # Clamp slippage to 10-50%
+            slippage_pct = max(10, min(50, slippage))
+            sell_price = round(max(price * (1 - slippage_pct / 100), 0.01), 2)
+
+            order_type_map = {
+                "FAK": OrderType.FAK,
+                "FOK": OrderType.FOK,
+                "GTC": OrderType.GTC,
+            }
+            ot = order_type_map.get(order_type, OrderType.FAK)
 
             order = client.create_order(
                 OrderArgs(
@@ -130,9 +147,11 @@ class PositionManager:
                     side=SELL,
                 )
             )
-            result = client.post_order(order, OrderType.FAK)
+            result = client.post_order(order, ot)
             order_id = result.get("orderID", str(result)[:40])
-            logger.info(f"CLOB FAK order executed: {order_id}")
+            logger.info(
+                f"CLOB {order_type} order executed (slippage={slippage_pct}%): {order_id}"
+            )
             return order_id, True, None
         except Exception as e:
             error_msg = str(e)
@@ -199,6 +218,8 @@ class PositionManager:
         position_id: str,
         side: str,  # "target" or "cover"
         token_type: str,  # "wanted" or "unwanted"
+        order_type: str = "FAK",
+        slippage: float = 10,
     ) -> SellResult:
         """Sell tokens from a position via CLOB."""
         # Get position with live data
@@ -253,10 +274,12 @@ class PositionManager:
             )
 
         # Execute sell
-        order_id, filled, error = self._sell_via_clob(token_id, balance, price)
+        order_id, filled, error = self._sell_via_clob(
+            token_id, balance, price, order_type=order_type, slippage=slippage
+        )
 
         # Calculate recovered value (approximate)
-        sell_price = round(max(price * 0.90, 0.01), 2)
+        sell_price = round(max(price * (1 - slippage / 100), 0.01), 2)
         recovered = balance * sell_price if filled else 0
 
         # Update storage if selling unwanted tokens
@@ -353,7 +376,9 @@ class PositionManager:
             error=None,
         )
 
-    async def retry_pending_sells(self, position_id: str) -> dict:
+    async def retry_pending_sells(
+        self, position_id: str, order_type: str = "FAK", slippage: float = 10
+    ) -> dict:
         """Retry selling unwanted tokens for pending positions."""
         position = self.service.get_position(position_id)
         if not position:
@@ -369,7 +394,13 @@ class PositionManager:
 
         # Retry target unwanted if balance > 0
         if position.target_unwanted_balance > 0.01:
-            result = await self.sell_position_tokens(position_id, "target", "unwanted")
+            result = await self.sell_position_tokens(
+                position_id,
+                "target",
+                "unwanted",
+                order_type=order_type,
+                slippage=slippage,
+            )
             results["target_result"] = {
                 "success": result.success,
                 "token_id": result.token_id,
@@ -387,7 +418,13 @@ class PositionManager:
 
         # Retry cover unwanted if balance > 0
         if position.cover_unwanted_balance > 0.01:
-            result = await self.sell_position_tokens(position_id, "cover", "unwanted")
+            result = await self.sell_position_tokens(
+                position_id,
+                "cover",
+                "unwanted",
+                order_type=order_type,
+                slippage=slippage,
+            )
             results["cover_result"] = {
                 "success": result.success,
                 "token_id": result.token_id,
