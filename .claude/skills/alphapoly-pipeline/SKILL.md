@@ -1,6 +1,6 @@
 ---
 name: alphapoly-pipeline
-description: Use when running, debugging, or managing the alphapoly ML pipeline
+description: Use when you need to run, debug, override LLM models, or restore seed data for the ML pipeline
 ---
 
 # Alphapoly Pipeline
@@ -30,6 +30,7 @@ run(
 6. Validate pairs (LLM, cached)
 7. Build portfolios with tier metrics
 8. Export to `data/_live/`
+9. (Background) Update prices
 
 ## Seed Data
 ```bash
@@ -40,5 +41,5 @@ make import-seed    # Reset DB and import seed (resets state)
 ## Troubleshooting
 - LLM errors → verify `OPENROUTER_API_KEY` in `.env`
 - Stale state → `make pipeline-full` to reprocess everything
-- Partial outputs → check `data/_live/` for what was exported
+- Partial outputs → check `data/_live/` then re-run `make pipeline` to resume incrementally
 ```
