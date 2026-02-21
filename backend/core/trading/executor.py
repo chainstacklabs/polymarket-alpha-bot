@@ -167,8 +167,18 @@ class TradingExecutor:
         token_id: str,
         amount: float,
         price: float,
+        order_type: str = "FAK",
+        slippage: float = 10,
     ) -> tuple[Optional[str], bool, Optional[str]]:
-        """Sell tokens via CLOB using IOC market order. Returns (order_id, filled, error_message)."""
+        """Sell tokens via CLOB. Returns (order_id, filled, error_message).
+
+        Args:
+            token_id: Token to sell.
+            amount: Number of tokens.
+            price: Current market price.
+            order_type: Order type — "FAK", "FOK", or "GTC".
+            slippage: Slippage percentage (clamped to 10–50%).
+        """
         client = self._get_clob_client()
         if not client:
             return None, False, "CLOB client initialization failed"
@@ -177,9 +187,16 @@ class TradingExecutor:
             from py_clob_client.clob_types import OrderArgs, OrderType
             from py_clob_client.order_builder.constants import SELL
 
-            # IOC (Immediate-or-Cancel): fills whatever liquidity is available, cancels rest
-            # 40% slippage below market price
-            sell_price = round(max(price * 0.60, 0.01), 2)
+            # Clamp slippage to 10–50%
+            slippage_pct = max(10, min(50, slippage))
+            sell_price = round(max(price * (1 - slippage_pct / 100), 0.01), 2)
+
+            order_type_map = {
+                "FAK": OrderType.FAK,
+                "FOK": OrderType.FOK,
+                "GTC": OrderType.GTC,
+            }
+            ot = order_type_map.get(order_type, OrderType.FAK)
 
             order = client.create_order(
                 OrderArgs(
@@ -189,9 +206,11 @@ class TradingExecutor:
                     side=SELL,
                 )
             )
-            result = client.post_order(order, OrderType.FAK)
+            result = client.post_order(order, ot)
             order_id = result.get("orderID", str(result)[:40])
-            logger.info(f"CLOB FAK order executed: {order_id}")
+            logger.info(
+                f"CLOB {order_type} order executed (slippage {slippage_pct}%): {order_id}"
+            )
             return order_id, True, None
         except Exception as e:
             error_msg = str(e)
@@ -208,6 +227,8 @@ class TradingExecutor:
         position: str,  # "YES" or "NO"
         amount: float,
         skip_clob_sell: bool = False,
+        order_type: str = "FAK",
+        slippage: float = 10,
     ) -> TradeResult:
         """Buy a single position on a market."""
         position = position.upper()
@@ -259,6 +280,8 @@ class TradingExecutor:
                 unwanted_token,
                 amount,
                 unwanted_price,
+                order_type=order_type,
+                slippage=slippage,
             )
 
         # Determine wanted token info for position recording
@@ -290,6 +313,8 @@ class TradingExecutor:
         cover_position: str,
         amount_per_position: float,
         skip_clob_sell: bool = False,
+        order_type: str = "FAK",
+        slippage: float = 10,
     ) -> BuyPairResult:
         """Buy both positions in a portfolio pair."""
 
@@ -312,6 +337,8 @@ class TradingExecutor:
             target_position,
             amount_per_position,
             skip_clob_sell,
+            order_type=order_type,
+            slippage=slippage,
         )
 
         # Buy cover position
@@ -321,6 +348,8 @@ class TradingExecutor:
             cover_position,
             amount_per_position,
             skip_clob_sell,
+            order_type=order_type,
+            slippage=slippage,
         )
 
         # Get final balances
