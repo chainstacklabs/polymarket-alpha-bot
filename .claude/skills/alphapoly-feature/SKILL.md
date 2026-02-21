@@ -1,9 +1,9 @@
 ---
-name: alphapoly-feature
-description: Use when adding a new feature, endpoint, pipeline step, or UI page to the alphapoly codebase
+name: Adding Alphapoly Features
+description: Guides feature development in the alphapoly codebase following stack conventions (uv, polars, FastAPI+Next.js). Use when adding a new feature, endpoint, pipeline step, or UI page.
 ---
 
-# Alphapoly Feature Development
+# Adding Alphapoly Features
 
 ## Key Conventions
 - **Backend:** Python + FastAPI, `uv` only (never pip/conda), `polars` (never pandas)

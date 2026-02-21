@@ -1,9 +1,9 @@
 ---
-name: alphapoly-pipeline
-description: Use when you need to run, debug, override LLM models, or restore seed data for the ML pipeline
+name: Running the Alphapoly Pipeline
+description: Runs, debugs, and manages the alphapoly ML pipeline with make commands and model overrides. Use when running, resetting, or troubleshooting the pipeline.
 ---
 
-# Alphapoly Pipeline
+# Running the Alphapoly Pipeline
 
 ## Quick Run
 ```bash

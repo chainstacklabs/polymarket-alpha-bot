@@ -1,9 +1,9 @@
 ---
-name: alphapoly-portfolios
-description: Use when listing or browsing current portfolio opportunities in alphapoly
+name: Browsing Alphapoly Portfolios
+description: Fetches and displays current hedging portfolio opportunities from the backend API. Use when browsing or listing portfolio opportunities to trade.
 ---
 
-# Alphapoly Portfolios
+# Browsing Alphapoly Portfolios
 
 Fetch and display current portfolio opportunities from the running backend.
 

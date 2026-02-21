@@ -1,9 +1,9 @@
 ---
-name: alphapoly-experiment
-description: Use when creating a new standalone experiment script in the alphapoly experiments/ directory
+name: Creating Alphapoly Experiments
+description: Scaffolds a standalone experiment script in experiments/ with uv inline dependencies. Use when creating a new experiment or prototype outside the main backend.
 ---
 
-# Alphapoly Experiment
+# Creating Alphapoly Experiments
 
 Scaffold a new standalone script in `experiments/`.
 
