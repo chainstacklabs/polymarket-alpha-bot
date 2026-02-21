@@ -35,5 +35,5 @@ description: Use when adding a new feature, endpoint, pipeline step, or UI page 
 - Link from: `frontend/components/Sidebar.tsx`
 
 **WebSocket service:**
-- Backend: `backend/server/` (follow `portfolio_prices.py` pattern)
+- Backend: `backend/server/routers/` (follow `portfolio_prices.py` pattern)
 - Frontend hook: `frontend/hooks/`
