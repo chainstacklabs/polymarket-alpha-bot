@@ -10,16 +10,6 @@
             "timeout": 30
           }
         ]
-      },
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "case \"$CLAUDE_TOOL_INPUT_FILE_PATH\" in \"$CLAUDE_PROJECT_DIR/frontend/\"*) cd \"$CLAUDE_PROJECT_DIR/frontend\" && npm run lint ;; esac",
-            "timeout": 30
-          }
-        ]
       }
     ]
   }

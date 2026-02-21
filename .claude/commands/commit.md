@@ -1,1 +1,0 @@
-Commit made changes with a short message following the convention "type: message" without Claude code signature.
