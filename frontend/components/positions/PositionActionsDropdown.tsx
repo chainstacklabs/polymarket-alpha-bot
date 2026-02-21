@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { getApiBaseUrl } from '@/config/api-config'
+import { getOrderSettings } from '@/components/OrderSettings'
 import type { Position } from '@/app/positions/page'
 
 interface PositionActionsDropdownProps {
@@ -9,10 +10,7 @@ interface PositionActionsDropdownProps {
   onRefresh: () => void
 }
 
-export function PositionActionsDropdown({
-  position: p,
-  onRefresh,
-}: PositionActionsDropdownProps) {
+export function PositionActionsDropdown({ position: p, onRefresh }: PositionActionsDropdownProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -21,10 +19,7 @@ export function PositionActionsDropdown({
   // Close on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
@@ -46,14 +41,17 @@ export function PositionActionsDropdown({
     setLoading(`sell-${side}`)
     setError(null)
     try {
-      const res = await fetch(
-        `${getApiBaseUrl()}/positions/${p.position_id}/sell`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ side, token_type: 'wanted' }),
-        }
-      )
+      const settings = getOrderSettings()
+      const res = await fetch(`${getApiBaseUrl()}/positions/${p.position_id}/sell`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          side,
+          token_type: 'wanted',
+          order_type: settings.orderType,
+          slippage: settings.slippage,
+        }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Sell failed')
       if (!data.success) throw new Error(data.error || 'Order not filled')
@@ -70,14 +68,11 @@ export function PositionActionsDropdown({
     setLoading(`merge-${side}`)
     setError(null)
     try {
-      const res = await fetch(
-        `${getApiBaseUrl()}/positions/${p.position_id}/merge`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ side }),
-        }
-      )
+      const res = await fetch(`${getApiBaseUrl()}/positions/${p.position_id}/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ side }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Merge failed')
       if (!data.success) throw new Error(data.error || 'Merge failed')
@@ -117,9 +112,7 @@ export function PositionActionsDropdown({
             className="w-full px-3 py-2 text-left text-sm hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between"
           >
             <span>{isSellingTarget ? 'Selling...' : 'Sell Target'}</span>
-            {isSellingTarget && (
-              <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-            )}
+            {isSellingTarget && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />}
           </button>
 
           <button
@@ -128,9 +121,7 @@ export function PositionActionsDropdown({
             className="w-full px-3 py-2 text-left text-sm hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between"
           >
             <span>{isSellingCover ? 'Selling...' : 'Sell Cover'}</span>
-            {isSellingCover && (
-              <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-            )}
+            {isSellingCover && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />}
           </button>
 
           <button
@@ -139,9 +130,7 @@ export function PositionActionsDropdown({
             className="w-full px-3 py-2 text-left text-sm hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between"
           >
             <span>Merge to USDC</span>
-            {loading?.startsWith('merge') && (
-              <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-            )}
+            {loading?.startsWith('merge') && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />}
           </button>
 
           <div className="border-t border-border my-1" />
