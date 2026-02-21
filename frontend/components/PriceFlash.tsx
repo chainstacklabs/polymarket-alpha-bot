@@ -30,4 +30,3 @@ export const PriceChangeIndicator = memo(function PriceChangeIndicator({
     </span>
   )
 })
-

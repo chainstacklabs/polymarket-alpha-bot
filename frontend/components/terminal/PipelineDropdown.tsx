@@ -46,7 +46,10 @@ export function PipelineDropdown() {
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false)
       }
     }
@@ -96,7 +99,8 @@ export function PipelineDropdown() {
   const stepProgress = status?.step_progress
   const completedSteps = stepProgress?.completed_count || 0
   const totalSteps = stepProgress?.total_steps || 8
-  const progressPercent = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0
+  const progressPercent =
+    totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0
   const currentStep = stepProgress?.current_step
   const lastRun = status?.production?.last_run
 
@@ -114,7 +118,11 @@ export function PipelineDropdown() {
         {/* Status indicator */}
         <span
           className={`w-2 h-2 rounded-full ${
-            isRunning ? 'bg-cyan animate-pulse' : lastRun?.status === 'completed' ? 'bg-emerald' : 'bg-text-muted'
+            isRunning
+              ? 'bg-cyan animate-pulse'
+              : lastRun?.status === 'completed'
+                ? 'bg-emerald'
+                : 'bg-text-muted'
           }`}
         />
 
@@ -136,7 +144,12 @@ export function PipelineDropdown() {
           stroke="currentColor"
           viewBox="0 0 24 24"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 9l-7 7-7-7"
+          />
         </svg>
       </button>
 
@@ -145,7 +158,9 @@ export function PipelineDropdown() {
         <div className="absolute right-0 top-full mt-1 w-72 bg-surface border border-border rounded-lg shadow-lg z-50 overflow-hidden">
           {/* Header */}
           <div className="px-3 py-2.5 border-b border-border bg-surface-elevated">
-            <span className="text-xs font-medium text-text-primary">Pipeline Status</span>
+            <span className="text-xs font-medium text-text-primary">
+              Pipeline Status
+            </span>
           </div>
 
           {/* Content */}
@@ -172,7 +187,9 @@ export function PipelineDropdown() {
                 {currentStep && (
                   <div className="flex items-center gap-2 text-xs">
                     {currentStep.emoji && <span>{currentStep.emoji}</span>}
-                    <span className="text-text-secondary">{currentStep.step_name}</span>
+                    <span className="text-text-secondary">
+                      {currentStep.step_name}
+                    </span>
                     <span className="text-text-muted font-mono ml-auto">
                       {formatElapsed(currentStep.elapsed_seconds)}
                     </span>

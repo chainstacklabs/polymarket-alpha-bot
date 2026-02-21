@@ -13,11 +13,18 @@ interface FavoriteButtonProps {
   size?: 'sm' | 'md'
 }
 
-export const FavoriteButton = memo(function FavoriteButton({ isFavorite, onToggle, size = 'sm' }: FavoriteButtonProps) {
-  const handleClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onToggle()
-  }, [onToggle])
+export const FavoriteButton = memo(function FavoriteButton({
+  isFavorite,
+  onToggle,
+  size = 'sm',
+}: FavoriteButtonProps) {
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onToggle()
+    },
+    [onToggle]
+  )
 
   const sizeClass = size === 'sm' ? 'w-4 h-4' : 'w-5 h-5'
 

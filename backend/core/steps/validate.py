@@ -20,6 +20,8 @@ Caching:
     pair_id is deterministic (hash of target+cover+positions).
 """
 
+import os
+from datetime import datetime
 from typing import Callable
 
 from loguru import logger
@@ -31,8 +33,6 @@ from core.utils import extract_json_from_response
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-
-import os
 
 # Pairs per LLM call (balances efficiency with context limits)
 BATCH_SIZE = 32
@@ -268,7 +268,6 @@ REJECTION_KEYWORDS = [
 # DEADLINE PRE-FILTERING
 # =============================================================================
 
-from datetime import datetime
 
 # Maximum days difference for "direct" prerequisite relationships
 # Prerequisite chains (held→called) require matching deadlines

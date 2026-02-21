@@ -10,11 +10,19 @@ interface PositionTableRowProps {
   onRefresh: () => void
 }
 
-function getStatusIcon(p: Position): { icon: string; color: string; border: string } {
+function getStatusIcon(p: Position): {
+  icon: string
+  color: string
+  border: string
+} {
   // Red: UNKNOWN status (CLOB failed)
   const hasUnknown =
-    (!p.target_clob_filled && !p.target_clob_order_id && p.target_unwanted_balance > 0.01) ||
-    (!p.cover_clob_filled && !p.cover_clob_order_id && p.cover_unwanted_balance > 0.01)
+    (!p.target_clob_filled &&
+      !p.target_clob_order_id &&
+      p.target_unwanted_balance > 0.01) ||
+    (!p.cover_clob_filled &&
+      !p.cover_clob_order_id &&
+      p.cover_unwanted_balance > 0.01)
 
   if (hasUnknown) {
     return { icon: '✗', color: 'text-rose', border: 'border-l-rose' }
@@ -49,7 +57,10 @@ function formatRelativeTime(isoString: string): string {
   return date.toLocaleDateString()
 }
 
-export function PositionTableRow({ position: p, onRefresh }: PositionTableRowProps) {
+export function PositionTableRow({
+  position: p,
+  onRefresh,
+}: PositionTableRowProps) {
   const [expanded, setExpanded] = useState(false)
   const status = getStatusIcon(p)
 
@@ -69,12 +80,19 @@ export function PositionTableRow({ position: p, onRefresh }: PositionTableRowPro
         {/* Position */}
         <td className="px-3 py-2.5 max-w-0">
           <div className="flex items-center gap-2 min-w-0">
-            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
-              p.target_position === 'YES' ? 'bg-emerald/15 text-emerald' : 'bg-rose/15 text-rose'
-            }`}>
+            <span
+              className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
+                p.target_position === 'YES'
+                  ? 'bg-emerald/15 text-emerald'
+                  : 'bg-rose/15 text-rose'
+              }`}
+            >
               {p.target_position}
             </span>
-            <span className="text-sm text-text-primary truncate" title={p.target_question}>
+            <span
+              className="text-sm text-text-primary truncate"
+              title={p.target_question}
+            >
               {p.target_question}
             </span>
           </div>
@@ -104,11 +122,16 @@ export function PositionTableRow({ position: p, onRefresh }: PositionTableRowPro
         {/* P&L */}
         <td className="px-3 py-2.5">
           <div>
-            <span className={`text-sm font-mono font-medium ${p.pnl >= 0 ? 'text-emerald' : 'text-rose'}`}>
+            <span
+              className={`text-sm font-mono font-medium ${p.pnl >= 0 ? 'text-emerald' : 'text-rose'}`}
+            >
               {p.pnl >= 0 ? '+' : ''}${p.pnl.toFixed(2)}
             </span>
-            <span className={`text-[10px] font-mono ml-1 ${p.pnl >= 0 ? 'text-emerald/70' : 'text-rose/70'}`}>
-              ({p.pnl_pct >= 0 ? '+' : ''}{p.pnl_pct.toFixed(0)}%)
+            <span
+              className={`text-[10px] font-mono ml-1 ${p.pnl >= 0 ? 'text-emerald/70' : 'text-rose/70'}`}
+            >
+              ({p.pnl_pct >= 0 ? '+' : ''}
+              {p.pnl_pct.toFixed(0)}%)
             </span>
           </div>
         </td>

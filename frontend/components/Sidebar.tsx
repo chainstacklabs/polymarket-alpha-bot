@@ -55,9 +55,10 @@ export function Sidebar() {
               href={item.href}
               className={`
                 block px-3 py-2 rounded text-sm transition-colors
-                ${isActive
-                  ? 'bg-surface-elevated text-text-primary border-l-2 border-cyan -ml-px pl-[11px]'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover'
+                ${
+                  isActive
+                    ? 'bg-surface-elevated text-text-primary border-l-2 border-cyan -ml-px pl-[11px]'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover'
                 }
               `}
             >

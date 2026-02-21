@@ -11,7 +11,13 @@ import { StatusIndicators } from '@/components/StatusIndicators'
 
 const InfoIcon = memo(function InfoIcon() {
   return (
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      className="w-4 h-4"
+    >
       <circle cx="8" cy="8" r="6.5" />
       <path d="M8 7v4" strokeLinecap="round" />
       <circle cx="8" cy="5" r="0.5" fill="currentColor" stroke="none" />
@@ -26,26 +32,49 @@ const PurchaseFlowHint = memo(function PurchaseFlowHint() {
         <InfoIcon />
       </span>
       <span className="purchase-flow-hint-tooltip">
-        <span className="purchase-flow-hint-title">How Position Entry Works</span>
+        <span className="purchase-flow-hint-title">
+          How Position Entry Works
+        </span>
         <span className="purchase-flow-hint-content">
           <span className="purchase-flow-hint-step">
             <span className="purchase-flow-hint-num">1</span>
-            <span><strong>Split USDC</strong> — Converts your USDC into conditional tokens for both YES and NO outcomes on each market.</span>
+            <span>
+              <strong>Split USDC</strong> — Converts your USDC into conditional
+              tokens for both YES and NO outcomes on each market.
+            </span>
           </span>
           <span className="purchase-flow-hint-step">
             <span className="purchase-flow-hint-num">2</span>
-            <span><strong>Sell Unwanted</strong> — Automatically sells the opposite side (e.g., sells NO if you want YES) via FOK order at 10% below market.</span>
+            <span>
+              <strong>Sell Unwanted</strong> — Automatically sells the opposite
+              side (e.g., sells NO if you want YES) via FOK order at 10% below
+              market.
+            </span>
           </span>
           <span className="purchase-flow-hint-step">
             <span className="purchase-flow-hint-num">3</span>
-            <span><strong>Position Active</strong> — Once orders fill, you hold your target + cover positions with guaranteed $1 payout.</span>
+            <span>
+              <strong>Position Active</strong> — Once orders fill, you hold your
+              target + cover positions with guaranteed $1 payout.
+            </span>
           </span>
         </span>
         <span className="purchase-flow-hint-labels">
-          <span className="purchase-flow-hint-label-title">Position States</span>
-          <span><strong style={{ color: 'rgb(251 191 36)' }}>Pending</strong> — FOK order failed (no liquidity), tokens held waiting for retry</span>
-          <span><strong style={{ color: 'rgb(52 211 153)' }}>Active</strong> — Fully filled, holding both sides</span>
-          <span><strong style={{ color: 'rgb(100 107 120)' }}>Complete</strong> — Exited or resolved</span>
+          <span className="purchase-flow-hint-label-title">
+            Position States
+          </span>
+          <span>
+            <strong style={{ color: 'rgb(251 191 36)' }}>Pending</strong> — FOK
+            order failed (no liquidity), tokens held waiting for retry
+          </span>
+          <span>
+            <strong style={{ color: 'rgb(52 211 153)' }}>Active</strong> — Fully
+            filled, holding both sides
+          </span>
+          <span>
+            <strong style={{ color: 'rgb(100 107 120)' }}>Complete</strong> —
+            Exited or resolved
+          </span>
         </span>
       </span>
     </span>
@@ -121,7 +150,11 @@ export default function PositionsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterState>('all')
-  const [stats, setStats] = useState({ count: 0, active_count: 0, total_pnl: 0 })
+  const [stats, setStats] = useState({
+    count: 0,
+    active_count: 0,
+    total_pnl: 0,
+  })
 
   const fetchPositions = useCallback(async () => {
     try {
@@ -151,20 +184,29 @@ export default function PositionsPage() {
   // Filter and sort
   const filtered = positions.filter((p) => {
     if (filter === 'all') return true
-    if (filter === 'active') return p.state === 'active' || p.state === 'pending' || p.state === 'partial'
+    if (filter === 'active')
+      return (
+        p.state === 'active' || p.state === 'pending' || p.state === 'partial'
+      )
     if (filter === 'pending') return p.state === 'pending'
     if (filter === 'complete') return p.state === 'complete'
     return true
   })
 
-  const sorted = [...filtered].sort((a, b) =>
-    new Date(b.entry_time).getTime() - new Date(a.entry_time).getTime()
+  const sorted = [...filtered].sort(
+    (a, b) =>
+      new Date(b.entry_time).getTime() - new Date(a.entry_time).getTime()
   )
 
   // Count issues
-  const issueCount = positions.filter(p =>
-    (!p.target_clob_filled && !p.target_clob_order_id && p.target_unwanted_balance > 0.01) ||
-    (!p.cover_clob_filled && !p.cover_clob_order_id && p.cover_unwanted_balance > 0.01)
+  const issueCount = positions.filter(
+    (p) =>
+      (!p.target_clob_filled &&
+        !p.target_clob_order_id &&
+        p.target_unwanted_balance > 0.01) ||
+      (!p.cover_clob_filled &&
+        !p.cover_clob_order_id &&
+        p.cover_unwanted_balance > 0.01)
   ).length
 
   return (
@@ -186,10 +228,14 @@ export default function PositionsPage() {
             <div className="w-px h-10 bg-border" />
 
             <div className="flex items-center gap-2">
-              <span className="text-2xl font-semibold font-mono text-cyan">{stats.count}</span>
+              <span className="text-2xl font-semibold font-mono text-cyan">
+                {stats.count}
+              </span>
               <div className="text-xs text-text-muted leading-tight">
                 <p>positions</p>
-                <p className="text-text-muted/70">{stats.active_count} active</p>
+                <p className="text-text-muted/70">
+                  {stats.active_count} active
+                </p>
               </div>
             </div>
 
@@ -197,7 +243,9 @@ export default function PositionsPage() {
               <>
                 <div className="w-px h-10 bg-border" />
                 <div className="flex items-center gap-2">
-                  <span className="text-2xl font-semibold font-mono text-rose">{issueCount}</span>
+                  <span className="text-2xl font-semibold font-mono text-rose">
+                    {issueCount}
+                  </span>
                   <div className="text-xs text-rose leading-tight">
                     <p>need</p>
                     <p>attention</p>
@@ -240,25 +288,37 @@ export default function PositionsPage() {
         <div className="flex-1 flex items-center justify-center">
           <div className="flex items-center gap-3">
             <div className="w-5 h-5 border-2 border-cyan border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm text-text-muted">Loading positions...</span>
+            <span className="text-sm text-text-muted">
+              Loading positions...
+            </span>
           </div>
         </div>
       ) : error ? (
         <div className="flex-1 flex flex-col items-center justify-center border border-border rounded-lg bg-surface">
           <p className="text-sm text-rose mb-2">{error}</p>
-          <button onClick={fetchPositions} className="text-sm text-cyan hover:underline">
+          <button
+            onClick={fetchPositions}
+            className="text-sm text-cyan hover:underline"
+          >
             Try again
           </button>
         </div>
       ) : positions.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center border border-border rounded-lg bg-surface">
           <p className="text-sm text-text-secondary mb-1">No positions yet</p>
-          <p className="text-xs text-text-muted">Buy a pair from Terminal to start</p>
+          <p className="text-xs text-text-muted">
+            Buy a pair from Terminal to start
+          </p>
         </div>
       ) : sorted.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center border border-border rounded-lg bg-surface">
-          <p className="text-sm text-text-secondary mb-1">No positions match filter</p>
-          <button onClick={() => setFilter('all')} className="text-xs text-cyan hover:underline">
+          <p className="text-sm text-text-secondary mb-1">
+            No positions match filter
+          </p>
+          <button
+            onClick={() => setFilter('all')}
+            className="text-xs text-cyan hover:underline"
+          >
             Show all
           </button>
         </div>

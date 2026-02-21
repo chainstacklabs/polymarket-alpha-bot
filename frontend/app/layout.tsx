@@ -18,7 +18,8 @@ const syne = Syne({
 
 export const metadata: Metadata = {
   title: 'Alphapoly - Polymarket Alpha Detection',
-  description: 'Real-time alpha opportunities from Polymarket prediction markets',
+  description:
+    'Real-time alpha opportunities from Polymarket prediction markets',
 }
 
 export default function RootLayout({

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx ruff format \"$CLAUDE_PROJECT_DIR/backend\" && uvx ruff check --fix \"$CLAUDE_PROJECT_DIR/backend\"",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint.py\"",
             "timeout": 30
           }
         ]

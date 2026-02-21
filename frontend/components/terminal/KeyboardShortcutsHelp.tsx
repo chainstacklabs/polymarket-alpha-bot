@@ -8,7 +8,10 @@ interface KeyboardShortcutsHelpProps {
   onClose: () => void
 }
 
-export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelpProps) {
+export function KeyboardShortcutsHelp({
+  isOpen,
+  onClose,
+}: KeyboardShortcutsHelpProps) {
   // Close on Escape
   useEffect(() => {
     if (!isOpen) return
@@ -37,13 +40,25 @@ export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelp
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface-elevated">
-          <h2 className="text-sm font-semibold text-text-primary">Keyboard Shortcuts</h2>
+          <h2 className="text-sm font-semibold text-text-primary">
+            Keyboard Shortcuts
+          </h2>
           <button
             onClick={onClose}
             className="text-text-muted hover:text-text-primary transition-colors"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -61,11 +76,15 @@ export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelp
                     key={idx}
                     className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-surface-elevated transition-colors"
                   >
-                    <span className="text-sm text-text-secondary">{shortcut.description}</span>
+                    <span className="text-sm text-text-secondary">
+                      {shortcut.description}
+                    </span>
                     <div className="flex items-center gap-1">
                       {shortcut.keys.map((key, keyIdx) => (
                         <span key={keyIdx} className="flex items-center gap-1">
-                          {keyIdx > 0 && <span className="text-text-muted text-xs">or</span>}
+                          {keyIdx > 0 && (
+                            <span className="text-text-muted text-xs">or</span>
+                          )}
                           <kbd className="px-1.5 py-0.5 text-xs font-mono bg-surface-elevated border border-border rounded text-text-primary">
                             {key}
                           </kbd>
@@ -82,7 +101,11 @@ export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelp
         {/* Footer */}
         <div className="px-4 py-3 border-t border-border bg-surface-elevated">
           <p className="text-[10px] text-text-muted text-center">
-            Press <kbd className="px-1 py-0.5 text-[10px] font-mono bg-surface border border-border rounded">Esc</kbd> to close
+            Press{' '}
+            <kbd className="px-1 py-0.5 text-[10px] font-mono bg-surface border border-border rounded">
+              Esc
+            </kbd>{' '}
+            to close
           </p>
         </div>
       </div>

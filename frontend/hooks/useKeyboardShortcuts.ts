@@ -33,7 +33,7 @@ export function useKeyboardShortcuts(
   actions: KeyboardShortcutActions,
   options: UseKeyboardShortcutsOptions = {}
 ) {
-  const { enabled = true, searchInputRef } = options
+  const { enabled = true } = options
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -118,18 +118,25 @@ export function useKeyboardShortcuts(
 // =============================================================================
 
 export const KEYBOARD_SHORTCUTS = [
-  { category: 'Navigation', shortcuts: [
-    { keys: ['j', '↓'], description: 'Move down' },
-    { keys: ['k', '↑'], description: 'Move up' },
-    { keys: ['Enter'], description: 'Open selected strategy' },
-    { keys: ['Esc'], description: 'Close modal / blur search' },
-  ]},
-  { category: 'Filters', shortcuts: [
-    { keys: ['p'], description: 'Toggle profitable only' },
-  ]},
-  { category: 'Actions', shortcuts: [
-    { keys: ['/'], description: 'Focus search' },
-    { keys: ['r'], description: 'Refresh data' },
-    { keys: ['?'], description: 'Show this help' },
-  ]},
+  {
+    category: 'Navigation',
+    shortcuts: [
+      { keys: ['j', '↓'], description: 'Move down' },
+      { keys: ['k', '↑'], description: 'Move up' },
+      { keys: ['Enter'], description: 'Open selected strategy' },
+      { keys: ['Esc'], description: 'Close modal / blur search' },
+    ],
+  },
+  {
+    category: 'Filters',
+    shortcuts: [{ keys: ['p'], description: 'Toggle profitable only' }],
+  },
+  {
+    category: 'Actions',
+    shortcuts: [
+      { keys: ['/'], description: 'Focus search' },
+      { keys: ['r'], description: 'Refresh data' },
+      { keys: ['?'], description: 'Show this help' },
+    ],
+  },
 ]

@@ -9,8 +9,13 @@ interface PositionExpandedDetailsProps {
   onRefresh: () => void
 }
 
-function getSideStatus(filled: boolean, orderId: string | null, unwantedBalance: number): { label: string; color: string } {
-  if (filled || unwantedBalance < 0.01) return { label: 'RECOVERED', color: 'text-emerald' }
+function getSideStatus(
+  filled: boolean,
+  orderId: string | null,
+  unwantedBalance: number
+): { label: string; color: string } {
+  if (filled || unwantedBalance < 0.01)
+    return { label: 'RECOVERED', color: 'text-emerald' }
   if (orderId) return { label: 'PENDING', color: 'text-amber' }
   return { label: 'NEEDS SELL', color: 'text-rose' }
 }
@@ -20,23 +25,40 @@ function formatTxHash(hash: string): string {
   return hash.startsWith('0x') ? hash : `0x${hash}`
 }
 
-export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpandedDetailsProps) {
+export function PositionExpandedDetails({
+  position: p,
+  onRefresh,
+}: PositionExpandedDetailsProps) {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const targetStatus = getSideStatus(p.target_clob_filled, p.target_clob_order_id, p.target_unwanted_balance)
-  const coverStatus = getSideStatus(p.cover_clob_filled, p.cover_clob_order_id, p.cover_unwanted_balance)
+  const targetStatus = getSideStatus(
+    p.target_clob_filled,
+    p.target_clob_order_id,
+    p.target_unwanted_balance
+  )
+  const coverStatus = getSideStatus(
+    p.cover_clob_filled,
+    p.cover_clob_order_id,
+    p.cover_unwanted_balance
+  )
 
-  const handleSell = async (side: 'target' | 'cover', tokenType: 'wanted' | 'unwanted') => {
+  const handleSell = async (
+    side: 'target' | 'cover',
+    tokenType: 'wanted' | 'unwanted'
+  ) => {
     setLoading(`${side}-${tokenType}`)
     setError(null)
     try {
-      const res = await fetch(`${getApiBaseUrl()}/positions/${p.position_id}/sell`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ side, token_type: tokenType }),
-      })
+      const res = await fetch(
+        `${getApiBaseUrl()}/positions/${p.position_id}/sell`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ side, token_type: tokenType }),
+        }
+      )
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Sell failed')
       if (!data.success) throw new Error(data.error || 'Order not filled')
@@ -52,11 +74,14 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
     setLoading(`merge-${side}`)
     setError(null)
     try {
-      const res = await fetch(`${getApiBaseUrl()}/positions/${p.position_id}/merge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ side }),
-      })
+      const res = await fetch(
+        `${getApiBaseUrl()}/positions/${p.position_id}/merge`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ side }),
+        }
+      )
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Merge failed')
       if (!data.success) throw new Error(data.error || 'Merge failed')
@@ -72,7 +97,9 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
     if (!confirm('Remove from list? Your tokens are NOT affected.')) return
     setDeleting(true)
     try {
-      await fetch(`${getApiBaseUrl()}/positions/${p.position_id}`, { method: 'DELETE' })
+      await fetch(`${getApiBaseUrl()}/positions/${p.position_id}`, {
+        method: 'DELETE',
+      })
       onRefresh()
     } catch (e) {
       console.error(e)
@@ -87,11 +114,13 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
 
   const targetCanSell = p.target_balance > 0.01 && !p.selling_target
   const targetCanSellUnwanted = p.target_unwanted_balance > 0.01
-  const targetCanMerge = Math.min(p.target_balance, p.target_unwanted_balance) > 0.01
+  const targetCanMerge =
+    Math.min(p.target_balance, p.target_unwanted_balance) > 0.01
 
   const coverCanSell = p.cover_balance > 0.01 && !p.selling_cover
   const coverCanSellUnwanted = p.cover_unwanted_balance > 0.01
-  const coverCanMerge = Math.min(p.cover_balance, p.cover_unwanted_balance) > 0.01
+  const coverCanMerge =
+    Math.min(p.cover_balance, p.cover_unwanted_balance) > 0.01
 
   return (
     <div className="bg-surface-elevated border-t border-border px-4 py-4">
@@ -104,13 +133,35 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
       <div className="grid grid-cols-2 gap-6">
         {/* Target */}
         <div>
-          <div className="text-[10px] text-text-muted uppercase tracking-wide mb-2">Target</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wide mb-2">
+            Target
+          </div>
           <p className="text-sm text-text-primary mb-1">{p.target_question}</p>
           <div className="text-xs text-text-muted space-y-0.5 mb-3">
-            <p>Position: <span className={p.target_position === 'YES' ? 'text-emerald' : 'text-rose'}>{p.target_position}</span></p>
-            <p>Balance: <span className="text-text-secondary">{p.target_balance.toFixed(2)} tokens</span></p>
-            <p>Price: ${p.target_entry_price.toFixed(3)} → ${p.target_current_price.toFixed(3)}</p>
-            <p>Status: <span className={targetStatus.color}>{targetStatus.label}</span></p>
+            <p>
+              Position:{' '}
+              <span
+                className={
+                  p.target_position === 'YES' ? 'text-emerald' : 'text-rose'
+                }
+              >
+                {p.target_position}
+              </span>
+            </p>
+            <p>
+              Balance:{' '}
+              <span className="text-text-secondary">
+                {p.target_balance.toFixed(2)} tokens
+              </span>
+            </p>
+            <p>
+              Price: ${p.target_entry_price.toFixed(3)} → $
+              {p.target_current_price.toFixed(3)}
+            </p>
+            <p>
+              Status:{' '}
+              <span className={targetStatus.color}>{targetStatus.label}</span>
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -120,8 +171,12 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
                 disabled={loading !== null || isSellingTarget}
                 className="px-2 py-1 text-xs bg-rose/15 text-rose hover:bg-rose/25 rounded border border-rose/30 disabled:opacity-50 flex items-center gap-1"
               >
-                {isSellingTarget && <span className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" />}
-                {isSellingTarget ? 'Selling...' : `Sell ${p.target_position} → ~$${(p.target_balance * p.target_current_price * 0.9).toFixed(2)}`}
+                {isSellingTarget && (
+                  <span className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" />
+                )}
+                {isSellingTarget
+                  ? 'Selling...'
+                  : `Sell ${p.target_position} → ~$${(p.target_balance * p.target_current_price * 0.9).toFixed(2)}`}
               </button>
             )}
             {targetCanSellUnwanted && (
@@ -139,7 +194,9 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
                 disabled={loading !== null}
                 className="px-2 py-1 text-xs bg-cyan/15 text-cyan hover:bg-cyan/25 rounded border border-cyan/30 disabled:opacity-50"
               >
-                {loading === 'merge-target' ? 'Merging...' : `Merge → $${Math.min(p.target_balance, p.target_unwanted_balance).toFixed(2)}`}
+                {loading === 'merge-target'
+                  ? 'Merging...'
+                  : `Merge → $${Math.min(p.target_balance, p.target_unwanted_balance).toFixed(2)}`}
               </button>
             )}
           </div>
@@ -147,13 +204,35 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
 
         {/* Cover */}
         <div>
-          <div className="text-[10px] text-text-muted uppercase tracking-wide mb-2">Cover</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wide mb-2">
+            Cover
+          </div>
           <p className="text-sm text-text-primary mb-1">{p.cover_question}</p>
           <div className="text-xs text-text-muted space-y-0.5 mb-3">
-            <p>Position: <span className={p.cover_position === 'YES' ? 'text-emerald' : 'text-rose'}>{p.cover_position}</span></p>
-            <p>Balance: <span className="text-text-secondary">{p.cover_balance.toFixed(2)} tokens</span></p>
-            <p>Price: ${p.cover_entry_price.toFixed(3)} → ${p.cover_current_price.toFixed(3)}</p>
-            <p>Status: <span className={coverStatus.color}>{coverStatus.label}</span></p>
+            <p>
+              Position:{' '}
+              <span
+                className={
+                  p.cover_position === 'YES' ? 'text-emerald' : 'text-rose'
+                }
+              >
+                {p.cover_position}
+              </span>
+            </p>
+            <p>
+              Balance:{' '}
+              <span className="text-text-secondary">
+                {p.cover_balance.toFixed(2)} tokens
+              </span>
+            </p>
+            <p>
+              Price: ${p.cover_entry_price.toFixed(3)} → $
+              {p.cover_current_price.toFixed(3)}
+            </p>
+            <p>
+              Status:{' '}
+              <span className={coverStatus.color}>{coverStatus.label}</span>
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -163,8 +242,12 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
                 disabled={loading !== null || isSellingCover}
                 className="px-2 py-1 text-xs bg-rose/15 text-rose hover:bg-rose/25 rounded border border-rose/30 disabled:opacity-50 flex items-center gap-1"
               >
-                {isSellingCover && <span className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" />}
-                {isSellingCover ? 'Selling...' : `Sell ${p.cover_position} → ~$${(p.cover_balance * p.cover_current_price * 0.9).toFixed(2)}`}
+                {isSellingCover && (
+                  <span className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" />
+                )}
+                {isSellingCover
+                  ? 'Selling...'
+                  : `Sell ${p.cover_position} → ~$${(p.cover_balance * p.cover_current_price * 0.9).toFixed(2)}`}
               </button>
             )}
             {coverCanSellUnwanted && (
@@ -182,7 +265,9 @@ export function PositionExpandedDetails({ position: p, onRefresh }: PositionExpa
                 disabled={loading !== null}
                 className="px-2 py-1 text-xs bg-cyan/15 text-cyan hover:bg-cyan/25 rounded border border-cyan/30 disabled:opacity-50"
               >
-                {loading === 'merge-cover' ? 'Merging...' : `Merge → $${Math.min(p.cover_balance, p.cover_unwanted_balance).toFixed(2)}`}
+                {loading === 'merge-cover'
+                  ? 'Merging...'
+                  : `Merge → $${Math.min(p.cover_balance, p.cover_unwanted_balance).toFixed(2)}`}
               </button>
             )}
           </div>

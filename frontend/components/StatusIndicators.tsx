@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { WalletDropdown } from '@/components/terminal/WalletDropdown'
 import { PipelineDropdown } from '@/components/terminal/PipelineDropdown'
 import { getApiBaseUrl } from '@/config/api-config'
@@ -13,34 +13,38 @@ interface StatusIndicatorsProps {
   connectionStatus?: 'connecting' | 'connected' | 'disconnected' | 'error'
 }
 
-export function StatusIndicators({ connected, connectionStatus }: StatusIndicatorsProps) {
+export function StatusIndicators({
+  connected,
+  connectionStatus,
+}: StatusIndicatorsProps) {
   const [lastRunTime, setLastRunTime] = useState<string | null>(null)
 
-  const fetchPipelineStatus = useCallback(async () => {
-    try {
-      const res = await fetch(`${getApiBaseUrl()}/pipeline/status`)
-      if (res.ok) {
-        const data = await res.json()
-        setLastRunTime(data?.production?.last_run?.completed_at || null)
-      }
-    } catch (error) {
-      console.debug('Failed to fetch pipeline status:', error)
-    }
-  }, [])
-
   useEffect(() => {
+    async function fetchPipelineStatus() {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/pipeline/status`)
+        if (res.ok) {
+          const data = await res.json()
+          setLastRunTime(data?.production?.last_run?.completed_at || null)
+        }
+      } catch (error) {
+        console.debug('Failed to fetch pipeline status:', error)
+      }
+    }
+
     fetchPipelineStatus()
     const interval = setInterval(fetchPipelineStatus, 30000)
     return () => clearInterval(interval)
-  }, [fetchPipelineStatus])
+  }, [])
 
   // Determine connection display
   const showConnection = connected !== undefined
-  const connectionText = connectionStatus === 'connecting'
-    ? 'Connecting...'
-    : connected
-      ? 'Live prices'
-      : 'Offline'
+  const connectionText =
+    connectionStatus === 'connecting'
+      ? 'Connecting...'
+      : connected
+        ? 'Live prices'
+        : 'Offline'
 
   return (
     <div className="flex items-center gap-3">

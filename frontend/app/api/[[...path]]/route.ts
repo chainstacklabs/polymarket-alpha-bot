@@ -29,16 +29,19 @@ async function proxyRequest(request: NextRequest, path: string[]) {
     const response = await fetch(url.toString(), {
       method: request.method,
       headers,
-      body: request.method !== 'GET' && request.method !== 'HEAD'
-        ? await request.text()
-        : undefined,
+      body:
+        request.method !== 'GET' && request.method !== 'HEAD'
+          ? await request.text()
+          : undefined,
     })
 
     // Forward response
     const responseHeaders = new Headers()
     response.headers.forEach((value, key) => {
       // Skip headers that Next.js handles
-      if (!['content-encoding', 'transfer-encoding'].includes(key.toLowerCase())) {
+      if (
+        !['content-encoding', 'transfer-encoding'].includes(key.toLowerCase())
+      ) {
         responseHeaders.set(key, value)
       }
     })
@@ -50,10 +53,7 @@ async function proxyRequest(request: NextRequest, path: string[]) {
     })
   } catch (error) {
     console.error('Proxy error:', error)
-    return NextResponse.json(
-      { error: 'Backend unavailable' },
-      { status: 502 }
-    )
+    return NextResponse.json({ error: 'Backend unavailable' }, { status: 502 })
   }
 }
 

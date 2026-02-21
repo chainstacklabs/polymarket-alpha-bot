@@ -51,7 +51,7 @@ html {
 body {
   color: rgb(var(--color-text-primary));
   background: rgb(var(--color-void));
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -159,30 +159,60 @@ body {
 }
 
 /* Staggered animation delays - faster */
-.stagger-1 { animation-delay: 0.03s; }
-.stagger-2 { animation-delay: 0.06s; }
-.stagger-3 { animation-delay: 0.09s; }
-.stagger-4 { animation-delay: 0.12s; }
-.stagger-5 { animation-delay: 0.15s; }
-.stagger-6 { animation-delay: 0.18s; }
+.stagger-1 {
+  animation-delay: 0.03s;
+}
+.stagger-2 {
+  animation-delay: 0.06s;
+}
+.stagger-3 {
+  animation-delay: 0.09s;
+}
+.stagger-4 {
+  animation-delay: 0.12s;
+}
+.stagger-5 {
+  animation-delay: 0.15s;
+}
+.stagger-6 {
+  animation-delay: 0.18s;
+}
 
 /* Price flash animations for real-time updates */
 @keyframes flash-up {
-  0% { background-color: transparent; }
-  20% { background-color: rgb(var(--color-emerald) / 0.25); }
-  100% { background-color: transparent; }
+  0% {
+    background-color: transparent;
+  }
+  20% {
+    background-color: rgb(var(--color-emerald) / 0.25);
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 
 @keyframes flash-down {
-  0% { background-color: transparent; }
-  20% { background-color: rgb(var(--color-rose) / 0.25); }
-  100% { background-color: transparent; }
+  0% {
+    background-color: transparent;
+  }
+  20% {
+    background-color: rgb(var(--color-rose) / 0.25);
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 
 @keyframes flash {
-  0% { background-color: transparent; }
-  20% { background-color: rgb(var(--color-cyan) / 0.2); }
-  100% { background-color: transparent; }
+  0% {
+    background-color: transparent;
+  }
+  20% {
+    background-color: rgb(var(--color-cyan) / 0.2);
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 
 .animate-flash-up {
@@ -218,8 +248,8 @@ a:focus-visible {
 /* --------------------------------------------------------------------------
    Form Elements
    -------------------------------------------------------------------------- */
-input[type="text"],
-input[type="search"] {
+input[type='text'],
+input[type='search'] {
   background: rgb(var(--color-surface-elevated));
   border: 1px solid rgb(var(--color-border));
   color: rgb(var(--color-text-primary));
@@ -228,8 +258,8 @@ input[type="search"] {
   transition: border-color 0.15s ease;
 }
 
-input[type="text"]:focus,
-input[type="search"]:focus {
+input[type='text']:focus,
+input[type='search']:focus {
   border-color: rgb(var(--color-cyan) / 0.5);
 }
 

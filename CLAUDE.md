@@ -38,7 +38,8 @@ make export-seed    # Export current state as seed
 make import-seed    # Import seed data (resets DB)
 
 # Quality
-make lint           # Lint + format all code
+make lint           # Auto-fix: ruff (backend) + prettier + eslint --fix (frontend)
+cd frontend && npm run typecheck  # TypeScript type check (report only, no auto-fix)
 make clean          # Remove build artifacts
 ```
 

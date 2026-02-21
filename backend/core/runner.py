@@ -20,12 +20,14 @@ Usage:
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 
 from loguru import logger
 
 from core.models import close_all_llm_clients
 from core.state import export_live_data, load_state
+from core.step_tracker import StepTracker
 from core.steps.expand import expand_all_to_pairs, expand_to_pairs
 from core.steps.fetch import fetch_events
 from core.steps.groups import build_groups, extract_markets_from_groups
@@ -36,8 +38,6 @@ from core.steps.validate import validate_pairs
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-
-import os
 
 # LLM model for implications (cheaper, good enough for relationship extraction)
 IMPLICATIONS_LLM_MODEL = os.getenv("IMPLICATIONS_MODEL")
@@ -53,8 +53,6 @@ if not VALIDATION_LLM_MODEL:
 # =============================================================================
 # MAIN RUNNER
 # =============================================================================
-
-from core.step_tracker import StepTracker
 
 
 async def run_async(

@@ -6,7 +6,15 @@ import { useWallet } from '@/hooks/useWallet'
 type View = 'status' | 'unlock' | 'generate' | 'import'
 
 export function WalletDropdown() {
-  const { status, loading, unlock, lock, generate, importKey, approveContracts } = useWallet()
+  const {
+    status,
+    loading,
+    unlock,
+    lock,
+    generate,
+    importKey,
+    approveContracts,
+  } = useWallet()
   const [isOpen, setIsOpen] = useState(false)
   const [view, setView] = useState<View>('status')
   const [password, setPassword] = useState('')
@@ -19,7 +27,10 @@ export function WalletDropdown() {
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false)
         resetForm()
       }
@@ -135,8 +146,8 @@ export function WalletDropdown() {
           isUnlocked
             ? 'bg-emerald/10 border-emerald/30 text-emerald'
             : hasWallet
-            ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
-            : 'bg-surface-elevated border-border text-text-secondary hover:text-text-primary hover:border-text-muted'
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+              : 'bg-surface-elevated border-border text-text-secondary hover:text-text-primary hover:border-text-muted'
         }`}
       >
         {/* Status indicator */}
@@ -145,10 +156,10 @@ export function WalletDropdown() {
             loading
               ? 'bg-text-muted animate-pulse'
               : isUnlocked
-              ? 'bg-emerald'
-              : hasWallet
-              ? 'bg-amber-500'
-              : 'bg-text-muted'
+                ? 'bg-emerald'
+                : hasWallet
+                  ? 'bg-amber-500'
+                  : 'bg-text-muted'
           }`}
         />
 
@@ -156,10 +167,10 @@ export function WalletDropdown() {
           {loading
             ? 'Loading...'
             : isUnlocked
-            ? truncatedAddress
-            : hasWallet
-            ? 'Locked'
-            : 'No Wallet'}
+              ? truncatedAddress
+              : hasWallet
+                ? 'Locked'
+                : 'No Wallet'}
         </span>
 
         {/* Balance when unlocked */}
@@ -176,7 +187,12 @@ export function WalletDropdown() {
           stroke="currentColor"
           viewBox="0 0 24 24"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 9l-7 7-7-7"
+          />
         </svg>
       </button>
 
@@ -186,7 +202,9 @@ export function WalletDropdown() {
           {/* Header */}
           <div className="px-3 py-2.5 border-b border-border bg-surface-elevated">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-text-primary">Wallet</span>
+              <span className="text-xs font-medium text-text-primary">
+                Wallet
+              </span>
               {isUnlocked && (
                 <button
                   onClick={handleLock}
@@ -228,7 +246,9 @@ export function WalletDropdown() {
             {view === 'generate' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-text-primary">Generate New Wallet</span>
+                  <span className="text-xs font-medium text-text-primary">
+                    Generate New Wallet
+                  </span>
                   <button
                     onClick={resetForm}
                     className="text-[10px] text-text-muted hover:text-text-primary"
@@ -260,7 +280,9 @@ export function WalletDropdown() {
             {view === 'import' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-text-primary">Import Private Key</span>
+                  <span className="text-xs font-medium text-text-primary">
+                    Import Private Key
+                  </span>
                   <button
                     onClick={resetForm}
                     className="text-[10px] text-text-muted hover:text-text-primary"
@@ -300,13 +322,27 @@ export function WalletDropdown() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2 py-2">
                   <div className="w-8 h-8 bg-amber-500/20 rounded-full flex items-center justify-center">
-                    <svg className="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    <svg
+                      className="w-4 h-4 text-amber-500"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                      />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-text-primary">Wallet Locked</p>
-                    <p className="text-[10px] text-text-muted font-mono">{truncatedAddress}</p>
+                    <p className="text-xs font-medium text-text-primary">
+                      Wallet Locked
+                    </p>
+                    <p className="text-[10px] text-text-muted font-mono">
+                      {truncatedAddress}
+                    </p>
                   </div>
                 </div>
                 <input
@@ -340,11 +376,25 @@ export function WalletDropdown() {
                     className="flex items-center gap-1 text-xs font-mono text-text-primary hover:text-cyan transition-colors"
                   >
                     {truncatedAddress}
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg
+                      className="w-3 h-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
                       {copied ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M5 13l4 4L19 7"
+                        />
                       ) : (
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                        />
                       )}
                     </svg>
                   </button>
@@ -354,11 +404,15 @@ export function WalletDropdown() {
                 <div className="bg-surface-elevated rounded-lg p-2.5 space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-text-muted">USDC.e</span>
-                    <span className="font-mono text-text-primary">${(status?.balances?.usdc_e ?? 0).toFixed(2)}</span>
+                    <span className="font-mono text-text-primary">
+                      ${(status?.balances?.usdc_e ?? 0).toFixed(2)}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-text-muted">POL (gas)</span>
-                    <span className="font-mono text-text-primary">{(status?.balances?.pol ?? 0).toFixed(4)}</span>
+                    <span className="font-mono text-text-primary">
+                      {(status?.balances?.pol ?? 0).toFixed(4)}
+                    </span>
                   </div>
                 </div>
 
@@ -367,8 +421,18 @@ export function WalletDropdown() {
                   <span className="text-text-muted">Contract approvals</span>
                   {status?.approvals_set ? (
                     <span className="text-emerald flex items-center gap-1">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      <svg
+                        className="w-3 h-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M5 13l4 4L19 7"
+                        />
                       </svg>
                       Set
                     </span>

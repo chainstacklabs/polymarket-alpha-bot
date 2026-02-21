@@ -3,16 +3,26 @@
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
 
-load_dotenv()  # Load .env file
+load_dotenv()  # Load .env before any modules that read env vars at import time
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
+from core.market_poller import market_poller
 from server import __version__
 from server.price_aggregation import price_aggregation
-from server.routers import data, pipeline, prices, wallet, trading
-from core.market_poller import market_poller
+from server.routers import (
+    data,
+    pipeline,
+    portfolio_prices,
+    positions,
+    position_actions,
+    prices,
+    wallet,
+    trading,
+)
 
 
 @asynccontextmanager
@@ -55,13 +65,11 @@ app.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
 app.include_router(trading.router, prefix="/trading", tags=["trading"])
 
 # Positions tracking
-from server.routers import positions, position_actions
 
 app.include_router(positions.router, prefix="/positions", tags=["positions"])
 app.include_router(position_actions.router, prefix="/positions", tags=["positions"])
 
 # Portfolio real-time updates
-from server.routers import portfolio_prices
 
 app.include_router(portfolio_prices.router, prefix="/portfolios", tags=["portfolios"])
 

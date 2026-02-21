@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 
 const STORAGE_KEY = 'alphapoly:favorites'
 
@@ -9,20 +9,18 @@ export interface FavoriteEntry {
 }
 
 export function useFavorites() {
-  const [favorites, setFavorites] = useState<Map<string, FavoriteEntry>>(new Map())
-
-  // Load from localStorage on mount
-  useEffect(() => {
+  const [favorites, setFavorites] = useState<Map<string, FavoriteEntry>>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         const parsed = JSON.parse(stored) as FavoriteEntry[]
-        setFavorites(new Map(parsed.map((f) => [f.pair_id, f])))
+        return new Map(parsed.map((f) => [f.pair_id, f]))
       }
     } catch (e) {
       console.debug('Failed to load favorites:', e)
     }
-  }, [])
+    return new Map()
+  })
 
   // Persist to localStorage
   const persist = useCallback((newFavorites: Map<string, FavoriteEntry>) => {

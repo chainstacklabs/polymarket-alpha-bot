@@ -32,7 +32,9 @@ app.prepare().then(() => {
 
     // Skip WebSocket paths - they should only be handled by upgrade event
     if (parsedUrl.pathname?.startsWith('/ws')) {
-      console.log(`HTTP request to WS path (should be upgrade): ${parsedUrl.pathname}`)
+      console.log(
+        `HTTP request to WS path (should be upgrade): ${parsedUrl.pathname}`
+      )
       res.writeHead(426, { 'Content-Type': 'text/plain' })
       res.end('Upgrade Required')
       return

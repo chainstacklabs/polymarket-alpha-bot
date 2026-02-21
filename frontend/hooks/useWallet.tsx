@@ -1,6 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, createContext, useContext, ReactNode } from 'react'
+import {
+  useState,
+  useEffect,
+  useCallback,
+  createContext,
+  useContext,
+  ReactNode,
+} from 'react'
 import { getApiBaseUrl } from '@/config/api-config'
 
 interface WalletBalances {
@@ -57,56 +64,69 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval)
   }, [refresh])
 
-  const generate = useCallback(async (password: string): Promise<string> => {
-    const res = await fetch(`${apiBase}/wallet/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.detail || 'Failed to generate wallet')
-    }
-    const data = await res.json()
-    await refresh()
-    return data.address
-  }, [apiBase, refresh])
+  const generate = useCallback(
+    async (password: string): Promise<string> => {
+      const res = await fetch(`${apiBase}/wallet/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Failed to generate wallet')
+      }
+      const data = await res.json()
+      await refresh()
+      return data.address
+    },
+    [apiBase, refresh]
+  )
 
-  const importKey = useCallback(async (privateKey: string, password: string): Promise<string> => {
-    const res = await fetch(`${apiBase}/wallet/import`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ private_key: privateKey, password }),
-    })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.detail || 'Failed to import wallet')
-    }
-    const data = await res.json()
-    await refresh()
-    return data.address
-  }, [apiBase, refresh])
+  const importKey = useCallback(
+    async (privateKey: string, password: string): Promise<string> => {
+      const res = await fetch(`${apiBase}/wallet/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ private_key: privateKey, password }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Failed to import wallet')
+      }
+      const data = await res.json()
+      await refresh()
+      return data.address
+    },
+    [apiBase, refresh]
+  )
 
-  const unlock = useCallback(async (password: string): Promise<void> => {
-    const res = await fetch(`${apiBase}/wallet/unlock`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.detail || 'Invalid password')
-    }
-    const data = await res.json()
-    // Optimistic update - show unlocked immediately, refresh balances in background
-    setStatus(prev => prev ? { ...prev, unlocked: true, address: data.address } : null)
-    refresh()
-  }, [apiBase, refresh])
+  const unlock = useCallback(
+    async (password: string): Promise<void> => {
+      const res = await fetch(`${apiBase}/wallet/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Invalid password')
+      }
+      const data = await res.json()
+      // Optimistic update - show unlocked immediately, refresh balances in background
+      setStatus((prev) =>
+        prev ? { ...prev, unlocked: true, address: data.address } : null
+      )
+      refresh()
+    },
+    [apiBase, refresh]
+  )
 
   const lock = useCallback(async (): Promise<void> => {
     await fetch(`${apiBase}/wallet/lock`, { method: 'POST' })
     // Optimistic update - don't wait for slow RPC calls in refresh()
-    setStatus(prev => prev ? { ...prev, unlocked: false, balances: null } : null)
+    setStatus((prev) =>
+      prev ? { ...prev, unlocked: false, balances: null } : null
+    )
   }, [apiBase])
 
   const approveContracts = useCallback(async (): Promise<void> => {
@@ -121,17 +141,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [apiBase, refresh])
 
   return (
-    <WalletContext.Provider value={{
-      status,
-      loading,
-      error,
-      refresh,
-      generate,
-      importKey,
-      unlock,
-      lock,
-      approveContracts,
-    }}>
+    <WalletContext.Provider
+      value={{
+        status,
+        loading,
+        error,
+        refresh,
+        generate,
+        importKey,
+        unlock,
+        lock,
+        approveContracts,
+      }}
+    >
       {children}
     </WalletContext.Provider>
   )

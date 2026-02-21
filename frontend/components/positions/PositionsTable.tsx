@@ -11,7 +11,10 @@ interface PositionsTableProps {
 
 export function PositionsTable({ positions, onRefresh }: PositionsTableProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const [scrollState, setScrollState] = useState({ atTop: true, atBottom: true })
+  const [scrollState, setScrollState] = useState({
+    atTop: true,
+    atBottom: true,
+  })
 
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current

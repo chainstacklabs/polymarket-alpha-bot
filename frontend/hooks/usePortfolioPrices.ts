@@ -1,6 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, startTransition } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  startTransition,
+} from 'react'
 import type { Portfolio } from '@/types/portfolio'
 
 // Re-export for consumers that import from this file
@@ -49,8 +55,8 @@ import { getPortfolioWsUrl, getApiBaseUrl } from '@/config/api-config'
 const getWsUrl = () => getPortfolioWsUrl()
 const RECONNECT_DELAY = 5000
 const CHANGE_FLASH_DURATION = 2000
-const POLLING_INTERVAL = 3000  // Fallback polling interval when WS fails
-const WS_TIMEOUT = 5000  // Time to wait for WS before falling back to polling
+const POLLING_INTERVAL = 3000 // Fallback polling interval when WS fails
+const WS_TIMEOUT = 5000 // Time to wait for WS before falling back to polling
 
 // =============================================================================
 // HOOK
@@ -63,17 +69,19 @@ export function usePortfolioPrices(
   const [summary, setSummary] = useState<PortfolioSummary | null>(null)
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [changedIds, setChangedIds] = useState<Set<string>>(new Set())
-  const [priceChanges, setPriceChanges] = useState<Map<string, PriceChange>>(new Map())
+  const [priceChanges, setPriceChanges] = useState<Map<string, PriceChange>>(
+    new Map()
+  )
 
   const wsRef = useRef<WebSocket | null>(null)
   const filtersRef = useRef<FilterState>(initialFilters)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
-  const wsTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)  // Timeout for WS connection
+  const wsTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined) // Timeout for WS connection
   const pollingIntervalRef = useRef<NodeJS.Timeout | undefined>(undefined)
   const portfolioMapRef = useRef<Map<string, Portfolio>>(new Map())
-  const mountedRef = useRef(true)  // Track if component is mounted
-  const wsFailedRef = useRef(false)  // Track if WS has failed (use polling instead)
-  const statusRef = useRef<ConnectionStatus>(status)  // Ref for stable callback identity
+  const mountedRef = useRef(true) // Track if component is mounted
+  const wsFailedRef = useRef(false) // Track if WS has failed (use polling instead)
+  const statusRef = useRef<ConnectionStatus>(status) // Ref for stable callback identity
 
   // Keep statusRef in sync with status state
   useEffect(() => {
@@ -97,11 +105,13 @@ export function usePortfolioPrices(
 
       const data = await res.json()
       // API returns { data: { portfolios: [...] }, ... }
-      const fetchedPortfolios = (data.data?.portfolios || data.portfolios || []) as Portfolio[]
+      const fetchedPortfolios = (data.data?.portfolios ||
+        data.portfolios ||
+        []) as Portfolio[]
 
       // Update state
       portfolioMapRef.current = new Map(
-        fetchedPortfolios.map(p => [p.pair_id, p])
+        fetchedPortfolios.map((p) => [p.pair_id, p])
       )
       setPortfolios(fetchedPortfolios)
       if (data.summary) setSummary(data.summary)
@@ -113,14 +123,14 @@ export function usePortfolioPrices(
     } catch (e) {
       console.error('REST fetch failed:', e)
     }
-  }, [])  // No dependencies - uses refs for stable identity
+  }, []) // No dependencies - uses refs for stable identity
 
   // Start polling when WebSocket fails
   const startPolling = useCallback(() => {
-    if (pollingIntervalRef.current) return  // Already polling
+    if (pollingIntervalRef.current) return // Already polling
 
     console.log('Starting REST polling fallback')
-    fetchViaRest()  // Initial fetch
+    fetchViaRest() // Initial fetch
     pollingIntervalRef.current = setInterval(fetchViaRest, POLLING_INTERVAL)
   }, [fetchViaRest])
 
@@ -140,7 +150,7 @@ export function usePortfolioPrices(
 
       // Wrap in startTransition since flash effects are non-urgent
       startTransition(() => {
-        setPriceChanges(prev => {
+        setPriceChanges((prev) => {
           const filtered = new Map<string, PriceChange>()
           prev.forEach((change, id) => {
             if (now - change.timestamp < CHANGE_FLASH_DURATION) {
@@ -151,10 +161,12 @@ export function usePortfolioPrices(
           return filtered.size !== prev.size ? filtered : prev
         })
 
-        setChangedIds(prev => {
+        setChangedIds((prev) => {
           if (prev.size === 0) return prev
           // Only keep IDs that still have active price changes
-          const stillActive = new Set([...prev].filter(id => activeIds.has(id)))
+          const stillActive = new Set(
+            [...prev].filter((id) => activeIds.has(id))
+          )
           return stillActive.size !== prev.size ? stillActive : prev
         })
       })
@@ -170,8 +182,10 @@ export function usePortfolioPrices(
     }
 
     // Already connected or connecting - don't create duplicate connections
-    if (wsRef.current?.readyState === WebSocket.OPEN ||
-        wsRef.current?.readyState === WebSocket.CONNECTING) {
+    if (
+      wsRef.current?.readyState === WebSocket.OPEN ||
+      wsRef.current?.readyState === WebSocket.CONNECTING
+    ) {
       return
     }
 
@@ -198,15 +212,17 @@ export function usePortfolioPrices(
         }
         setStatus('connected')
         wsFailedRef.current = false
-        stopPolling()  // Stop polling if WS connects
+        stopPolling() // Stop polling if WS connects
 
         // Send initial filters immediately so server uses correct filters for 'initial' message
         const filters = filtersRef.current
-        ws.send(JSON.stringify({
-          type: 'filter',
-          max_tier: filters.maxTier,
-          profitable_only: filters.profitableOnly,
-        }))
+        ws.send(
+          JSON.stringify({
+            type: 'filter',
+            max_tier: filters.maxTier,
+            profitable_only: filters.profitableOnly,
+          })
+        )
       }
 
       ws.onmessage = (event) => {
@@ -222,7 +238,7 @@ export function usePortfolioPrices(
               // Initial load of portfolios
               const initialPortfolios = data.portfolios as Portfolio[]
               portfolioMapRef.current = new Map(
-                initialPortfolios.map(p => [p.pair_id, p])
+                initialPortfolios.map((p) => [p.pair_id, p])
               )
               setPortfolios(initialPortfolios)
               setSummary(data.summary)
@@ -240,7 +256,7 @@ export function usePortfolioPrices(
 
               // Remove portfolios that no longer match filters
               if (removed.length > 0) {
-                removed.forEach(id => portfolioMapRef.current.delete(id))
+                removed.forEach((id) => portfolioMapRef.current.delete(id))
               }
 
               if (changed.length > 0 || removed.length > 0) {
@@ -248,7 +264,7 @@ export function usePortfolioPrices(
                 const newChangedIds = new Set<string>()
                 const newPriceChanges = new Map<string, PriceChange>()
 
-                changed.forEach(updated => {
+                changed.forEach((updated) => {
                   const old = portfolioMapRef.current.get(updated.pair_id)
                   if (old) {
                     // Determine price direction
@@ -276,8 +292,10 @@ export function usePortfolioPrices(
 
                 // Flash effects are non-urgent visual updates
                 startTransition(() => {
-                  setChangedIds(prev => new Set([...prev, ...newChangedIds]))
-                  setPriceChanges(prev => new Map([...prev, ...newPriceChanges]))
+                  setChangedIds((prev) => new Set([...prev, ...newChangedIds]))
+                  setPriceChanges(
+                    (prev) => new Map([...prev, ...newPriceChanges])
+                  )
                 })
               }
               break
@@ -286,7 +304,7 @@ export function usePortfolioPrices(
               // Filter change acknowledged, replace portfolio list
               const filteredPortfolios = data.portfolios as Portfolio[]
               portfolioMapRef.current = new Map(
-                filteredPortfolios.map(p => [p.pair_id, p])
+                filteredPortfolios.map((p) => [p.pair_id, p])
               )
               setPortfolios(filteredPortfolios)
               break
@@ -295,7 +313,7 @@ export function usePortfolioPrices(
               // Server signaling data was reset/changed, replace all portfolios
               const reloadedPortfolios = data.portfolios as Portfolio[]
               portfolioMapRef.current = new Map(
-                reloadedPortfolios.map(p => [p.pair_id, p])
+                reloadedPortfolios.map((p) => [p.pair_id, p])
               )
               setPortfolios(reloadedPortfolios)
               setSummary(data.summary)
@@ -322,7 +340,7 @@ export function usePortfolioPrices(
 
         // If WS has failed before, use polling instead of reconnecting
         if (wsFailedRef.current) {
-          setStatus('connected')  // Show as connected (via polling)
+          setStatus('connected') // Show as connected (via polling)
           startPolling()
           return
         }
@@ -344,9 +362,11 @@ export function usePortfolioPrices(
           return
         }
 
-        console.error('Portfolio WebSocket error - falling back to REST polling')
+        console.error(
+          'Portfolio WebSocket error - falling back to REST polling'
+        )
         wsFailedRef.current = true
-        startPolling()  // Start REST polling as fallback
+        startPolling() // Start REST polling as fallback
         ws.close()
       }
       // Set a timeout - if WS doesn't connect in time, fall back to polling
@@ -356,17 +376,23 @@ export function usePortfolioPrices(
       }
       wsTimeoutRef.current = setTimeout(() => {
         // Only trigger if this is still the current WebSocket and component is mounted
-        if (wsRef.current === ws && mountedRef.current && ws.readyState !== WebSocket.OPEN && !wsFailedRef.current) {
-          console.log('WebSocket connection timeout - falling back to REST polling')
+        if (
+          wsRef.current === ws &&
+          mountedRef.current &&
+          ws.readyState !== WebSocket.OPEN &&
+          !wsFailedRef.current
+        ) {
+          console.log(
+            'WebSocket connection timeout - falling back to REST polling'
+          )
           wsFailedRef.current = true
           startPolling()
         }
       }, WS_TIMEOUT)
-
     } catch (e) {
       console.error('Failed to connect WebSocket:', e)
       wsFailedRef.current = true
-      startPolling()  // Fall back to polling
+      startPolling() // Fall back to polling
     }
   }, [startPolling, stopPolling])
 
@@ -401,21 +427,26 @@ export function usePortfolioPrices(
   // Send filter updates to server
   // Only fetch via REST if WebSocket is not connected, otherwise use WS
   // This prevents double portfolio replacement (REST + filter_ack)
-  const updateFilters = useCallback((filters: FilterState) => {
-    filtersRef.current = filters
+  const updateFilters = useCallback(
+    (filters: FilterState) => {
+      filtersRef.current = filters
 
-    // If WebSocket is connected, use it (will get filter_ack with portfolios)
-    // Otherwise fall back to REST
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'filter',
-        max_tier: filters.maxTier,
-        profitable_only: filters.profitableOnly,
-      }))
-    } else {
-      fetchViaRest()
-    }
-  }, [fetchViaRest])
+      // If WebSocket is connected, use it (will get filter_ack with portfolios)
+      // Otherwise fall back to REST
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'filter',
+            max_tier: filters.maxTier,
+            profitable_only: filters.profitableOnly,
+          })
+        )
+      } else {
+        fetchViaRest()
+      }
+    },
+    [fetchViaRest]
+  )
 
   // Manual reconnect
   const reconnect = useCallback(() => {

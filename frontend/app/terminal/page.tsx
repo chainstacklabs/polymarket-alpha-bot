@@ -1,12 +1,18 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef, useMemo, useDeferredValue } from 'react'
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  useMemo,
+  useDeferredValue,
+} from 'react'
 import { usePortfolioPrices, Portfolio } from '@/hooks/usePortfolioPrices'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useFavorites } from '@/hooks/useFavorites'
 import { PortfolioModal } from '@/components/PortfolioModal'
 import { KeyboardShortcutsHelp } from '@/components/terminal/KeyboardShortcutsHelp'
-import { densityStyles } from '@/components/terminal/DensityToggle'
 import { PortfolioTable } from '@/components/terminal/PortfolioTable'
 import { StatusIndicators } from '@/components/StatusIndicators'
 import { getApiBaseUrl } from '@/config/api-config'
@@ -18,6 +24,22 @@ import { getApiBaseUrl } from '@/config/api-config'
 interface PortfolioStats {
   total: number
   profitable: number
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+async function loadPortfolioStats(
+  apiBase: string
+): Promise<PortfolioStats | null> {
+  const res = await fetch(`${apiBase}/data/portfolios?limit=1&max_tier=1`)
+  if (!res.ok) return null
+  const data = await res.json()
+  return {
+    total: data.meta?.count || data.total_count || 0,
+    profitable: data.meta?.profitable_count || data.profitable_count || 0,
+  }
 }
 
 // =============================================================================
@@ -33,7 +55,9 @@ export default function TerminalPage() {
 
   // Local UI state
   const [profitableOnly, setProfitableOnly] = useState(false)
-  const [selectedPortfolio, setSelectedPortfolio] = useState<Portfolio | null>(null)
+  const [selectedPortfolio, setSelectedPortfolio] = useState<Portfolio | null>(
+    null
+  )
   const [filter, setFilter] = useState('')
   // Defer filter value to avoid blocking UI during expensive sort/filter operations
   const deferredFilter = useDeferredValue(filter)
@@ -46,8 +70,12 @@ export default function TerminalPage() {
   const density = 'comfortable' as const
 
   // Favorites
-  const { favoriteSet, toggleFavorite, count: favoriteCount, clearAll: clearFavorites } = useFavorites()
-
+  const {
+    favoriteSet,
+    toggleFavorite,
+    count: favoriteCount,
+    clearAll: clearFavorites,
+  } = useFavorites()
 
   // Refs
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -66,29 +94,31 @@ export default function TerminalPage() {
     profitableOnly,
   })
 
-  // Fetch global stats on mount
+  // Manual refresh for keyboard shortcut (r key)
   const fetchData = useCallback(async () => {
     try {
-      const apiBase = getApiBaseUrl()
-      const statsRes = await fetch(`${apiBase}/data/portfolios?limit=1&max_tier=1`)
-
-      if (statsRes.ok) {
-        const data = await statsRes.json()
-        setStats({
-          total: data.meta?.count || data.total_count || 0,
-          profitable: data.meta?.profitable_count || data.profitable_count || 0,
-        })
-      }
+      const result = await loadPortfolioStats(getApiBaseUrl())
+      if (result) setStats(result)
     } catch (error) {
       console.debug('Fetch error:', error)
     }
   }, [])
 
+  // Polling on mount — function defined inside effect to satisfy React rules
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 30000)
+    async function pollStats() {
+      try {
+        const result = await loadPortfolioStats(getApiBaseUrl())
+        if (result) setStats(result)
+      } catch (error) {
+        console.debug('Fetch error:', error)
+      }
+    }
+
+    pollStats()
+    const interval = setInterval(pollStats, 30000)
     return () => clearInterval(interval)
-  }, [fetchData])
+  }, [])
 
   // Track if this is the initial mount to avoid duplicate fetch
   // (WebSocket already sends 'initial' with default filters on connect)
@@ -143,8 +173,12 @@ export default function TerminalPage() {
 
     // Separate favorites and non-favorites, sort each, then combine
     // Favorites always appear at the top, maintaining sort order within each group
-    const favorites = filtered.filter((p) => favoriteSet.has(p.pair_id)).sort(sortFn)
-    const nonFavorites = filtered.filter((p) => !favoriteSet.has(p.pair_id)).sort(sortFn)
+    const favorites = filtered
+      .filter((p) => favoriteSet.has(p.pair_id))
+      .sort(sortFn)
+    const nonFavorites = filtered
+      .filter((p) => !favoriteSet.has(p.pair_id))
+      .sort(sortFn)
 
     return [...favorites, ...nonFavorites]
   }, [portfolios, deferredFilter, favoriteSet])
@@ -154,26 +188,29 @@ export default function TerminalPage() {
     return sortedPortfolios.filter((p) => favoriteSet.has(p.pair_id)).length
   }, [sortedPortfolios, favoriteSet])
 
-  // Reset selection when list changes
-  useEffect(() => {
-    if (selectedIndex >= sortedPortfolios.length) {
-      setSelectedIndex(sortedPortfolios.length - 1)
-    }
-  }, [sortedPortfolios.length, selectedIndex])
-
+  // Clamp selectedIndex to valid range (computed during render, not in an effect)
+  const effectiveSelectedIndex =
+    sortedPortfolios.length === 0
+      ? -1
+      : Math.min(selectedIndex, sortedPortfolios.length - 1)
 
   // Keyboard shortcuts
   useKeyboardShortcuts(
     {
       onNavigateDown: () => {
-        setSelectedIndex((prev) => Math.min(prev + 1, sortedPortfolios.length - 1))
+        setSelectedIndex((prev) =>
+          Math.min(prev + 1, sortedPortfolios.length - 1)
+        )
       },
       onNavigateUp: () => {
         setSelectedIndex((prev) => Math.max(prev - 1, 0))
       },
       onSelect: () => {
-        if (selectedIndex >= 0 && selectedIndex < sortedPortfolios.length) {
-          setSelectedPortfolio(sortedPortfolios[selectedIndex])
+        if (
+          effectiveSelectedIndex >= 0 &&
+          effectiveSelectedIndex < sortedPortfolios.length
+        ) {
+          setSelectedPortfolio(sortedPortfolios[effectiveSelectedIndex])
         }
       },
       onClose: () => {
@@ -200,7 +237,7 @@ export default function TerminalPage() {
     }
     // Fall back to REST stats
     return stats.total || summary?.total || 0
-  }, [connected, summary?.by_tier?.tier_1, summary?.total, stats.total])
+  }, [connected, summary, stats.total])
 
   const profitableCount = useMemo(() => {
     // Count profitable tier 1 portfolios from current data
@@ -211,14 +248,20 @@ export default function TerminalPage() {
       // when profitableOnly=true, portfolios only contains profitable ones
       if (!profitableOnly) {
         // Full list - count profitable directly
-        return portfolios.filter(p => p.expected_profit > 0.001).length
+        return portfolios.filter((p) => p.expected_profit > 0.001).length
       }
       // If profitableOnly is true, we need the total profitable count
       // Use REST stats as fallback since we don't have the full list
       return stats.profitable || portfolios.length
     }
     return stats.profitable || summary?.profitable_count || 0
-  }, [connected, portfolios, profitableOnly, stats.profitable, summary?.profitable_count])
+  }, [
+    connected,
+    portfolios,
+    profitableOnly,
+    stats.profitable,
+    summary?.profitable_count,
+  ])
 
   return (
     <>
@@ -229,7 +272,9 @@ export default function TerminalPage() {
             {/* Left: Title + key metrics */}
             <div className="flex items-center gap-6">
               <div>
-                <h1 className="text-lg font-semibold text-text-primary">Terminal</h1>
+                <h1 className="text-lg font-semibold text-text-primary">
+                  Terminal
+                </h1>
                 <p className="text-[10px] text-text-muted">
                   Unified trading workspace
                 </p>
@@ -238,13 +283,16 @@ export default function TerminalPage() {
               <div className="w-px h-10 bg-border" />
 
               <div className="flex items-center gap-2">
-                <span className="text-2xl font-semibold font-mono text-cyan">{totalCount}</span>
+                <span className="text-2xl font-semibold font-mono text-cyan">
+                  {totalCount}
+                </span>
                 <div className="text-xs text-text-muted leading-tight">
                   <p>strategies</p>
-                  <p className="text-text-muted/70">{profitableCount} profitable</p>
+                  <p className="text-text-muted/70">
+                    {profitableCount} profitable
+                  </p>
                 </div>
               </div>
-
             </div>
 
             {/* Right: Status indicators */}
@@ -254,7 +302,10 @@ export default function TerminalPage() {
 
         {/* Filters Row */}
         <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2 cursor-pointer" title="Press p to toggle">
+          <label
+            className="flex items-center gap-2 cursor-pointer"
+            title="Press p to toggle"
+          >
             <input
               type="checkbox"
               checked={profitableOnly}
@@ -268,7 +319,11 @@ export default function TerminalPage() {
           {favoriteCount > 0 && (
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1 text-xs text-amber">
-                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                >
                   <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                 </svg>
                 {favoriteCount} watching
@@ -304,11 +359,15 @@ export default function TerminalPage() {
         {/* Portfolio Table */}
         {status === 'connecting' && portfolios.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
-            <span className="text-sm text-text-muted">Connecting to live prices...</span>
+            <span className="text-sm text-text-muted">
+              Connecting to live prices...
+            </span>
           </div>
         ) : portfolios.length === 0 && stats.total === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center border border-border rounded-lg bg-surface">
-            <p className="text-sm text-text-secondary mb-1">No strategies found yet</p>
+            <p className="text-sm text-text-secondary mb-1">
+              No strategies found yet
+            </p>
             <p className="text-xs text-text-muted mb-4">
               Run the pipeline to discover hedging opportunities
             </p>
@@ -317,7 +376,7 @@ export default function TerminalPage() {
           <PortfolioTable
             portfolios={sortedPortfolios}
             density={density}
-            selectedIndex={selectedIndex}
+            selectedIndex={effectiveSelectedIndex}
             changedIds={changedIds}
             priceChanges={priceChanges}
             pinnedCount={pinnedCount}
@@ -334,11 +393,17 @@ export default function TerminalPage() {
 
       {/* Portfolio Detail Modal */}
       {selectedPortfolio && (
-        <PortfolioModal portfolio={selectedPortfolio} onClose={() => setSelectedPortfolio(null)} />
+        <PortfolioModal
+          portfolio={selectedPortfolio}
+          onClose={() => setSelectedPortfolio(null)}
+        />
       )}
 
       {/* Keyboard Shortcuts Help Modal */}
-      <KeyboardShortcutsHelp isOpen={showHelp} onClose={() => setShowHelp(false)} />
+      <KeyboardShortcutsHelp
+        isOpen={showHelp}
+        onClose={() => setShowHelp(false)}
+      />
     </>
   )
 }
