@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Auto-lint hook: ruff for Python files, prettier + eslint for TypeScript/CSS files."""
+"""Auto-lint hook: ruff for Python files, prettier + eslint for TypeScript/CSS files.
+
+Captures output and exits non-zero on unfixable errors so Claude can see and fix them.
+"""
+
 import json
 import os
 import subprocess
@@ -11,15 +15,32 @@ proj = os.environ.get("CLAUDE_PROJECT_DIR", "")
 backend = os.path.join(proj, "backend")
 frontend = os.path.join(proj, "frontend")
 
+exit_code = 0
+
 if file_path.startswith(backend) and file_path.endswith(".py"):
     subprocess.run(["uvx", "ruff", "format", backend])
-    subprocess.run(["uvx", "ruff", "check", "--fix", backend])
+    result = subprocess.run(
+        ["uvx", "ruff", "check", "--fix", backend], capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(result.stdout, end="")
+        print(result.stderr, end="", file=sys.stderr)
+        exit_code = result.returncode
+
 elif file_path.startswith(frontend) and file_path.endswith(
     (".ts", ".tsx", ".js", ".jsx", ".css", ".json")
 ):
-    # Prettier handles formatting; ESLint handles React/Next.js rules
     subprocess.run(["node_modules/.bin/prettier", "--write", file_path], cwd=frontend)
     if file_path.endswith((".ts", ".tsx", ".js", ".jsx")):
-        subprocess.run(
-            ["node_modules/.bin/eslint", "--fix", file_path], cwd=frontend
+        result = subprocess.run(
+            ["node_modules/.bin/eslint", "--fix", file_path],
+            capture_output=True,
+            text=True,
+            cwd=frontend,
         )
+        if result.returncode != 0:
+            print(result.stdout, end="")
+            print(result.stderr, end="", file=sys.stderr)
+            exit_code = result.returncode
+
+sys.exit(exit_code)
