@@ -1,6 +1,6 @@
 ---
 name: alphapoly-feature
-description: Use when adding a new feature to the alphapoly codebase - guides through exploration and implementation following project conventions
+description: Use when adding a new feature, endpoint, pipeline step, or UI page to the alphapoly codebase
 ---
 
 # Alphapoly Feature Development
