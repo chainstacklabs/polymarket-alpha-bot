@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint.py\"",
+            "command": "uv run python \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint.py\"",
             "timeout": 30
           }
         ]

@@ -23,7 +23,7 @@ if file_path.startswith(backend) and file_path.endswith(".py"):
         ["uvx", "ruff", "check", "--fix", backend], capture_output=True, text=True
     )
     if result.returncode != 0:
-        print(result.stdout, end="")
+        print(result.stdout, end="", file=sys.stderr)
         print(result.stderr, end="", file=sys.stderr)
         exit_code = 2  # Exit 2 feeds stderr back to Claude as an error message
 
@@ -39,7 +39,7 @@ elif file_path.startswith(frontend) and file_path.endswith(
             cwd=frontend,
         )
         if result.returncode != 0:
-            print(result.stdout, end="")
+            print(result.stdout, end="", file=sys.stderr)
             print(result.stderr, end="", file=sys.stderr)
             exit_code = 2  # Exit 2 feeds stderr back to Claude as an error message
 
