@@ -6,7 +6,7 @@
 ```
 GET /wallet/status
 ```
-Response: `{ "unlocked": true, "address": "0x...", "balances": { "usdc_e": 150.0 } }`
+Response: `{ "exists": true, "unlocked": true, "address": "0x...", "balances": { "usdc_e": 150.0, "pol": 0.8 }, "approvals_set": true }`
 
 ### Unlock
 ```

@@ -1,6 +1,6 @@
 ---
 name: Entering an Alphapoly Position
-description: Executes a covered pair trade (target + cover) on Polymarket with estimate, confirmation, and position recording. Use when entering a new position from a detected portfolio opportunity.
+description: Executes a covered pair trade (target + cover) on Polymarket with estimate, confirmation, and position recording. Use when entering a new position from a detected portfolio opportunity. Also use when the user says "buy", "trade", "open a position", "place an order", "enter", or wants to act on any portfolio opportunity.
 ---
 
 # Entering an Alphapoly Position
@@ -27,8 +27,10 @@ For full request/response schemas, see [api-reference.md](api-reference.md).
 
 ## Safety Rules
 
-- Always run `/trading/buy-pair/estimate` before `/trading/buy-pair` — never skip
-- Never execute without explicit user confirmation
-- Never proceed if `sufficient_balance: false`
+These trades involve real USDC on Polygon — transactions are irreversible once submitted on-chain. The estimate step is the only chance to catch problems before money moves.
+
+- Always run `/trading/buy-pair/estimate` before `/trading/buy-pair` — the estimate reveals actual costs, slippage, and balance issues before committing funds
+- Never execute without explicit user confirmation — the user needs to see the estimate and agree to the cost
+- Never proceed if `sufficient_balance: false` — the transaction will fail on-chain and may leave partial state
 - If `warnings` are non-empty after execution, surface them — the user may hold unwanted tokens that need selling via `GET /positions`
 - `skip_clob_sell: true` only when the user explicitly requests it

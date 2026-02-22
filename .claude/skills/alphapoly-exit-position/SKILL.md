@@ -1,6 +1,6 @@
 ---
 name: Exiting an Alphapoly Position
-description: Sells or merges tokens from an open alphapoly position via CLOB or on-chain merge. Use when exiting, cleaning up, or managing an open position.
+description: Sells or merges tokens from an open alphapoly position via CLOB or on-chain merge. Use when exiting, cleaning up, or managing an open position. Also use when the user says "sell", "close position", "cash out", "redeem", "exit", "clear tokens", or wants to get out of a trade.
 ---
 
 # Exiting an Alphapoly Position
@@ -23,8 +23,9 @@ description: Sells or merges tokens from an open alphapoly position via CLOB or 
 | Market resolved, hold both outcomes | Merge |
 | State is `pending` | Retry |
 
-4. **Execute** — see quick reference below
-5. **Verify** — re-fetch position; full exit shows `state: "complete"`
+4. **Confirm** — require explicit user approval before executing any sell or merge
+5. **Execute** — see quick reference below
+6. **Verify** — re-fetch position; full exit shows `state: "complete"`
 
 ## Quick Reference
 
@@ -69,3 +70,12 @@ POST /positions/{id}/merge   # {"side":"cover"}
 ```
 
 For full response schemas and error codes, see [api-reference.md](api-reference.md).
+
+## Safety Rules
+
+These operations involve real tokens on Polygon — sells are irreversible once the CLOB order fills, and merges burn tokens permanently.
+
+- Always list positions (`GET /positions`) before acting — never guess a position_id
+- Never execute a sell or merge without explicit user confirmation
+- After any sell/merge, re-fetch the position to verify the new state
+- If a sell returns `filled: false`, surface it — the user still holds the tokens
