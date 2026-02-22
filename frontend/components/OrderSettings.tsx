@@ -136,7 +136,7 @@ export const OrderSettings = memo(function OrderSettings() {
                   <span className="text-amber text-[10px]">High</span>
                 )}
               </div>
-              <div className="flex gap-1 mt-1.5">
+              <div className="grid grid-cols-3 gap-1 mt-1.5">
                 {SLIPPAGE_PRESETS.map(pct => (
                   <button
                     key={pct}
@@ -157,10 +157,10 @@ export const OrderSettings = memo(function OrderSettings() {
                   onChange={e => setCustomSlippage(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleCustomSlippage()}
                   onBlur={handleCustomSlippage}
-                  placeholder="..."
+                  placeholder="Custom"
                   min="10"
                   max="50"
-                  className="w-12 px-1.5 py-1 bg-transparent border border-border rounded text-[11px] font-mono text-text-secondary placeholder:text-text-muted/40 focus:outline-none focus:border-cyan/50"
+                  className="px-1.5 py-1 bg-transparent border border-border rounded text-[11px] font-mono text-text-secondary placeholder:text-text-muted/40 focus:outline-none focus:border-cyan/50"
                 />
               </div>
             </div>
