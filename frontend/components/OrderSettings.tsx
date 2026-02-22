@@ -29,7 +29,11 @@ function saveOrderSettings(settings: OrderSettingsValues) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
 }
 
-export const OrderSettings = memo(function OrderSettings() {
+export const OrderSettings = memo(function OrderSettings({
+  dropUp = false,
+}: {
+  dropUp?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [settings, setSettings] =
     useState<OrderSettingsValues>(getOrderSettings)
@@ -116,7 +120,9 @@ export const OrderSettings = memo(function OrderSettings() {
 
       {/* Dropdown panel — absolute positioned like WalletDropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-64 bg-surface border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+        <div
+          className={`absolute right-0 w-64 bg-surface border border-border rounded-lg shadow-lg z-50 overflow-hidden ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+        >
           {/* Header */}
           <div className="px-3 py-2 border-b border-border bg-surface-elevated">
             <span className="text-xs font-medium text-text-primary">

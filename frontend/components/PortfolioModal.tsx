@@ -545,7 +545,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                     </span>
                   </div>
 
-                  <OrderSettings />
+                  <OrderSettings dropUp />
 
                   {error && <p className="text-rose text-xs">{error}</p>}
 
