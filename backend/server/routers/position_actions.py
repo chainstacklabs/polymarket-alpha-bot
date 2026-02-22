@@ -38,7 +38,6 @@ class SellTokenRequest(BaseModel):
 
     side: Literal["target", "cover"]
     token_type: Literal["wanted", "unwanted"]
-    order_type: str = "FAK"
     slippage: float = 10
 
 
@@ -73,7 +72,6 @@ class MergeTokensResponse(BaseModel):
 class RetryPendingRequest(BaseModel):
     """Request for retry pending sells."""
 
-    order_type: str = "FAK"
     slippage: float = 10
 
 
@@ -115,7 +113,6 @@ async def sell_position_tokens(position_id: str, req: SellTokenRequest):
             position_id=position_id,
             side=req.side,
             token_type=req.token_type,
-            order_type=req.order_type,
             slippage=req.slippage,
         )
 
@@ -200,9 +197,7 @@ async def retry_pending_sells(
         raise HTTPException(status_code=401, detail="Unlock wallet first")
 
     try:
-        result = await manager.retry_pending_sells(
-            position_id, order_type=req.order_type, slippage=req.slippage
-        )
+        result = await manager.retry_pending_sells(position_id, slippage=req.slippage)
 
         if result.get("message") == "Position not found":
             raise HTTPException(status_code=404, detail="Position not found")

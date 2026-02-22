@@ -103,65 +103,6 @@ class PositionManager:
             resp.raise_for_status()
             return resp.json()
 
-    def _sell_via_clob(
-        self,
-        token_id: str,
-        amount: float,
-        price: float,
-        order_type: str = "FAK",
-        slippage: float = 10,
-    ) -> tuple[Optional[str], bool, Optional[str]]:
-        """Sell tokens via CLOB market order. Returns (order_id, filled, error).
-
-        Args:
-            token_id: Token to sell.
-            amount: Number of tokens.
-            price: Current market price.
-            order_type: Order type - FAK, FOK, or GTC.
-            slippage: Slippage percentage (10-50).
-        """
-        client = self._get_clob_client()
-        if not client:
-            return None, False, "CLOB client initialization failed"
-
-        try:
-            from py_clob_client.clob_types import OrderArgs, OrderType
-            from py_clob_client.order_builder.constants import SELL
-
-            # Clamp slippage to 10-50%
-            slippage_pct = max(10, min(50, slippage))
-            sell_price = round(max(price * (1 - slippage_pct / 100), 0.01), 2)
-
-            order_type_map = {
-                "FAK": OrderType.FAK,
-                "FOK": OrderType.FOK,
-                "GTC": OrderType.GTC,
-            }
-            ot = order_type_map.get(order_type, OrderType.FAK)
-
-            order = client.create_order(
-                OrderArgs(
-                    token_id=token_id,
-                    price=sell_price,
-                    size=amount,
-                    side=SELL,
-                )
-            )
-            result = client.post_order(order, ot)
-            order_id = result.get("orderID", str(result)[:40])
-            logger.info(
-                f"CLOB {order_type} order executed (slippage={slippage_pct}%): {order_id}"
-            )
-            return order_id, True, None
-        except Exception as e:
-            error_msg = str(e)
-            if "403" in error_msg and (
-                "blocked" in error_msg.lower() or "restricted" in error_msg.lower()
-            ):
-                error_msg = "Trading restricted in your region — enable proxy"
-            logger.error(f"CLOB sell error: {error_msg}")
-            return None, False, error_msg
-
     def _merge_tokens(
         self,
         condition_id: str,
@@ -218,7 +159,6 @@ class PositionManager:
         position_id: str,
         side: str,  # "target" or "cover"
         token_type: str,  # "wanted" or "unwanted"
-        order_type: str = "FAK",
         slippage: float = 10,
     ) -> SellResult:
         """Sell tokens from a position via CLOB."""
@@ -274,12 +214,27 @@ class PositionManager:
             )
 
         # Execute sell
-        order_id, filled, error = self._sell_via_clob(
-            token_id, balance, price, order_type=order_type, slippage=slippage
+        client = self._get_clob_client()
+        if not client:
+            return SellResult(
+                success=False,
+                token_id=token_id,
+                amount=balance,
+                order_id=None,
+                filled=False,
+                recovered_value=0,
+                error="CLOB client initialization failed",
+            )
+
+        from core.trading.clob import sell_via_clob
+
+        order_id, filled, error = sell_via_clob(
+            client, token_id, balance, price, slippage=slippage
         )
 
-        # Calculate recovered value (approximate)
-        sell_price = round(max(price * (1 - slippage / 100), 0.01), 2)
+        # Calculate recovered value (approximate) — apply same clamping as sell
+        slippage_pct = max(10, min(50, slippage))
+        sell_price = round(max(price * (1 - slippage_pct / 100), 0.01), 2)
         recovered = balance * sell_price if filled else 0
 
         # Update storage if selling unwanted tokens
@@ -376,9 +331,7 @@ class PositionManager:
             error=None,
         )
 
-    async def retry_pending_sells(
-        self, position_id: str, order_type: str = "FAK", slippage: float = 10
-    ) -> dict:
+    async def retry_pending_sells(self, position_id: str, slippage: float = 10) -> dict:
         """Retry selling unwanted tokens for pending positions."""
         position = self.service.get_position(position_id)
         if not position:
@@ -398,7 +351,6 @@ class PositionManager:
                 position_id,
                 "target",
                 "unwanted",
-                order_type=order_type,
                 slippage=slippage,
             )
             results["target_result"] = {
@@ -422,7 +374,6 @@ class PositionManager:
                 position_id,
                 "cover",
                 "unwanted",
-                order_type=order_type,
                 slippage=slippage,
             )
             results["cover_result"] = {

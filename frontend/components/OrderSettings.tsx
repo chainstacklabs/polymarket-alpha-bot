@@ -3,19 +3,13 @@
 import { useState, useEffect, useCallback, useRef, memo } from 'react'
 
 export interface OrderSettingsValues {
-  orderType: 'FAK' | 'FOK' | 'GTC'
   slippage: number
 }
 
 const STORAGE_KEY = 'clob-order-settings'
 const SLIPPAGE_PRESETS = [10, 20, 30, 40, 50]
-const ORDER_TYPES = [
-  { value: 'FAK' as const, label: 'FAK', hint: 'Fill available, cancel rest' },
-  { value: 'FOK' as const, label: 'FOK', hint: 'All or nothing' },
-  { value: 'GTC' as const, label: 'GTC', hint: 'Rest on book until filled' },
-]
 
-const DEFAULT_SETTINGS: OrderSettingsValues = { orderType: 'FAK', slippage: 10 }
+const DEFAULT_SETTINGS: OrderSettingsValues = { slippage: 10 }
 
 export function getOrderSettings(): OrderSettingsValues {
   if (typeof window === 'undefined') return DEFAULT_SETTINGS
@@ -24,7 +18,6 @@ export function getOrderSettings(): OrderSettingsValues {
     if (!stored) return DEFAULT_SETTINGS
     const parsed = JSON.parse(stored)
     return {
-      orderType: ['FAK', 'FOK', 'GTC'].includes(parsed.orderType) ? parsed.orderType : 'FAK',
       slippage: Math.max(10, Math.min(50, Number(parsed.slippage) || 10)),
     }
   } catch {
@@ -38,18 +31,18 @@ function saveOrderSettings(settings: OrderSettingsValues) {
 
 export const OrderSettings = memo(function OrderSettings() {
   const [open, setOpen] = useState(false)
-  const [settings, setSettings] = useState<OrderSettingsValues>(DEFAULT_SETTINGS)
+  const [settings, setSettings] =
+    useState<OrderSettingsValues>(getOrderSettings)
   const [customSlippage, setCustomSlippage] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    setSettings(getOrderSettings())
-  }, [])
 
   // Close on outside click
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setOpen(false)
       }
     }
@@ -58,7 +51,7 @@ export const OrderSettings = memo(function OrderSettings() {
   }, [open])
 
   const update = useCallback((patch: Partial<OrderSettingsValues>) => {
-    setSettings(prev => {
+    setSettings((prev) => {
       const next = { ...prev, ...patch }
       saveOrderSettings(next)
       return next
@@ -77,7 +70,7 @@ export const OrderSettings = memo(function OrderSettings() {
     <div className="relative" ref={dropdownRef}>
       {/* Trigger button — styled like WalletDropdown */}
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen((o) => !o)}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-colors text-xs ${
           open
             ? 'bg-cyan/10 border-cyan/30 text-cyan'
@@ -85,15 +78,39 @@ export const OrderSettings = memo(function OrderSettings() {
         }`}
         type="button"
       >
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        <svg
+          className="w-3 h-3"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+          />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+          />
         </svg>
-        <span className="font-mono font-medium">{settings.orderType}</span>
-        <span className="text-text-muted/40">·</span>
+        <span className="font-mono font-medium text-text-muted/60">Market</span>
+        <span className="text-text-muted/40">&middot;</span>
         <span className="font-mono font-medium">{settings.slippage}%</span>
-        <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        <svg
+          className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 9l-7 7-7-7"
+          />
         </svg>
       </button>
 
@@ -102,42 +119,34 @@ export const OrderSettings = memo(function OrderSettings() {
         <div className="absolute right-0 top-full mt-1 w-64 bg-surface border border-border rounded-lg shadow-lg z-50 overflow-hidden">
           {/* Header */}
           <div className="px-3 py-2 border-b border-border bg-surface-elevated">
-            <span className="text-xs font-medium text-text-primary">Order Settings</span>
+            <span className="text-xs font-medium text-text-primary">
+              Order Settings
+            </span>
           </div>
 
           <div className="p-3 space-y-3">
-            {/* Order Type */}
+            {/* Order Type — read-only */}
             <div>
-              <span className="text-text-muted text-[10px] uppercase tracking-wide">Order Type</span>
-              <div className="flex gap-1 mt-1.5">
-                {ORDER_TYPES.map(ot => (
-                  <button
-                    key={ot.value}
-                    onClick={() => update({ orderType: ot.value })}
-                    className={`px-2.5 py-1 rounded text-[11px] font-mono border transition-colors ${
-                      settings.orderType === ot.value
-                        ? 'bg-cyan/15 text-cyan border-cyan/30'
-                        : 'bg-transparent text-text-muted border-border hover:border-text-muted/30'
-                    }`}
-                    title={ot.hint}
-                    type="button"
-                  >
-                    {ot.label}
-                  </button>
-                ))}
+              <span className="text-text-muted text-[10px] uppercase tracking-wide">
+                Order Type
+              </span>
+              <div className="mt-1.5 px-2.5 py-1 rounded text-[11px] font-mono border border-border text-text-secondary bg-surface-elevated/50 w-fit">
+                Market (FAK)
               </div>
             </div>
 
             {/* Slippage */}
             <div>
               <div className="flex items-center gap-1.5">
-                <span className="text-text-muted text-[10px] uppercase tracking-wide">Slippage</span>
+                <span className="text-text-muted text-[10px] uppercase tracking-wide">
+                  Slippage
+                </span>
                 {settings.slippage > 20 && (
                   <span className="text-amber text-[10px]">High</span>
                 )}
               </div>
               <div className="grid grid-cols-3 gap-1 mt-1.5">
-                {SLIPPAGE_PRESETS.map(pct => (
+                {SLIPPAGE_PRESETS.map((pct) => (
                   <button
                     key={pct}
                     onClick={() => update({ slippage: pct })}
@@ -154,8 +163,8 @@ export const OrderSettings = memo(function OrderSettings() {
                 <input
                   type="number"
                   value={customSlippage}
-                  onChange={e => setCustomSlippage(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleCustomSlippage()}
+                  onChange={(e) => setCustomSlippage(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCustomSlippage()}
                   onBlur={handleCustomSlippage}
                   placeholder="Custom"
                   min="10"
