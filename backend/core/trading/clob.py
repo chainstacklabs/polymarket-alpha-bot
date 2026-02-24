@@ -49,7 +49,7 @@ def sell_via_clob(
         logger.info(f"CLOB market sell (slippage {slippage_pct}%): {order_id}")
 
         # FAK orders fill immediately — check actual matched size
-        filled_size = _get_filled_size(client, order_id, amount)
+        filled_size = _get_filled_size(client, order_id)
         if filled_size < amount:
             logger.warning(
                 f"FAK partial fill: {filled_size:.4f}/{amount:.4f} for {order_id}"
@@ -66,7 +66,7 @@ def sell_via_clob(
         return None, 0.0, error_msg
 
 
-def _get_filled_size(client, order_id: str, original_amount: float) -> float:
+def _get_filled_size(client, order_id: str) -> float:
     """Query order fill status. Returns matched token amount."""
     try:
         time.sleep(1)  # Brief wait for settlement
@@ -79,6 +79,6 @@ def _get_filled_size(client, order_id: str, original_amount: float) -> float:
         return size_matched
     except Exception as e:
         logger.warning(f"Could not fetch order status for {order_id}: {e}")
-        # If we can't check, assume the post succeeded fully (old behavior)
-        # — better to overestimate than silently drop a successful trade
-        return original_amount
+        # Don't assume a fill we can't verify — balance queries will
+        # show the real token state on next position refresh
+        return 0.0
