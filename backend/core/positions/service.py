@@ -383,7 +383,7 @@ class PositionService:
             for side in ("target", "cover"):
                 ctf_key = f"{side}_ctf_token_ids"
                 tx_key = f"{side}_split_tx"
-                if entry.get(ctf_key) or not entry.get(tx_key):
+                if self._parse_ctf_ids(entry.get(ctf_key, "")) or not entry.get(tx_key):
                     continue
                 # Parse TX receipt for actual CTF token IDs
                 try:
@@ -426,7 +426,9 @@ class PositionService:
                     "target_ctf_token_ids",
                     "cover_ctf_token_ids",
                 ):
-                    if updated.get(key) and not pos.get(key):
+                    if self._parse_ctf_ids(
+                        updated.get(key, "")
+                    ) and not self._parse_ctf_ids(pos.get(key, "")):
                         pos[key] = updated[key]
         self.storage.save_all(stored)
         return stored
