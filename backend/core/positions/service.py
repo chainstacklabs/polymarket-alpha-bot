@@ -241,7 +241,7 @@ class PositionService:
         return ("", "")
 
     @staticmethod
-    def _parse_ctf_ids(raw: str) -> list[str]:
+    def _parse_ctf_ids(raw: Optional[str]) -> list[str]:
         """Parse stored CTF token IDs JSON. Returns [YES_id, NO_id] or empty list.
 
         Requires exactly 2 IDs matching the splitPosition partition [1, 2].

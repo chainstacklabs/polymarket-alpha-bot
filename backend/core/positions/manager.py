@@ -343,6 +343,8 @@ class PositionManager:
                 result.merge_tx = merge.tx_hash
                 result.recovered = merge.merged_amount
                 logger.info(f"Exit {side}: merged {merge.merged_amount:.2f} → USDC.e")
+                # Invalidate cache so sell steps see post-merge balances
+                self.service.invalidate_cache()
             else:
                 result.error = f"Merge failed: {merge.error}"
                 return result

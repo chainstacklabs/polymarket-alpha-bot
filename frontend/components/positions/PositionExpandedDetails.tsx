@@ -1,8 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { getApiBaseUrl } from '@/config/api-config'
-import { getOrderSettings } from '@/components/OrderSettings'
+import {
+  getOrderSettings,
+  subscribeSettings,
+  getSettingsSnapshot,
+  getSettingsServerSnapshot,
+} from '@/components/OrderSettings'
 import type { Position } from '@/app/positions/page'
 
 interface PositionExpandedDetailsProps {
@@ -80,7 +85,12 @@ export function PositionExpandedDetails({
     p.cover_unwanted_balance
   )
 
-  const settings = getOrderSettings()
+  const rawSettings = useSyncExternalStore(
+    subscribeSettings,
+    getSettingsSnapshot,
+    getSettingsServerSnapshot
+  )
+  const settings = rawSettings ? getOrderSettings() : { slippage: 10 }
 
   const targetEst = estimateSideExit(
     p.target_balance,

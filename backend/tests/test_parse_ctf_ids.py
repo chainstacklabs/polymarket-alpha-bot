@@ -11,8 +11,8 @@ class TestParseCTFIds:
     def test_empty_string(self):
         assert PositionService._parse_ctf_ids("") == []
 
-    def test_none_like(self):
-        assert PositionService._parse_ctf_ids("") == []
+    def test_none_input(self):
+        assert PositionService._parse_ctf_ids(None) == []
 
     def test_empty_json_array(self):
         """The '[]' bug — must not treat as valid."""

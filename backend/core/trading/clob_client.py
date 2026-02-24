@@ -23,10 +23,12 @@ def get_clob_client(wallet: WalletManager) -> Optional[object]:
         logger.info(f"Using proxy: {proxy[:30]}...")
         clob_helpers._http_client = httpx.Client(http2=True, proxy=proxy, timeout=30.0)
 
-    private_key = wallet.get_unlocked_key()
-    address = wallet.address
-
     try:
+        private_key = wallet.get_unlocked_key()
+        address = wallet.address
+        if not address:
+            logger.error("Wallet address is not set")
+            return None
         client = ClobClient(
             "https://clob.polymarket.com",
             key=private_key,

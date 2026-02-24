@@ -40,14 +40,14 @@ function saveOrderSettings(settings: OrderSettingsValues) {
 
 // External store for useSyncExternalStore
 const settingsListeners = new Set<() => void>()
-function subscribeSettings(callback: () => void) {
+export function subscribeSettings(callback: () => void) {
   settingsListeners.add(callback)
   return () => settingsListeners.delete(callback)
 }
-function getSettingsSnapshot() {
+export function getSettingsSnapshot() {
   return localStorage.getItem(STORAGE_KEY) || ''
 }
-function getSettingsServerSnapshot() {
+export function getSettingsServerSnapshot() {
   return ''
 }
 
