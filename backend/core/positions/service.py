@@ -1,5 +1,6 @@
 """Position service - enrich positions with live balances and prices."""
 
+import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -225,8 +226,6 @@ class PositionService:
 
         # Fallback to HTTP call if not in resolver
         try:
-            import json
-
             with httpx.Client(timeout=10.0) as client:
                 resp = client.get(
                     f"https://gamma-api.polymarket.com/markets/{market_id}"
@@ -240,6 +239,24 @@ class PositionService:
             logger.error(f"Failed to fetch token IDs for market {market_id}: {e}")
 
         return ("", "")
+
+    @staticmethod
+    def _parse_ctf_ids(raw: Optional[str]) -> list[str]:
+        """Parse stored CTF token IDs JSON. Returns [YES_id, NO_id] or empty list.
+
+        Requires exactly 2 IDs matching the splitPosition partition [1, 2].
+        """
+        if not raw:
+            return []
+        try:
+            ids = json.loads(raw)
+            if not isinstance(ids, list) or len(ids) != 2:
+                if isinstance(ids, list) and len(ids) > 2:
+                    logger.warning(f"Unexpected CTF token ID count: {len(ids)}")
+                return []
+            return ids
+        except (ValueError, TypeError):
+            return []
 
     def _get_unwanted_token_id(self, market_id: str, wanted_position: str) -> str:
         """Get the unwanted token ID (opposite of what we wanted)."""
@@ -361,33 +378,128 @@ class PositionService:
         """Invalidate the positions cache (call after mutations)."""
         self._positions_cache_time = 0
 
+    def _backfill_ctf_ids(self, entries: list[dict]) -> None:
+        """Backfill missing CTF token IDs by parsing split TX receipts."""
+
+        from core.trading.executor import TradingExecutor
+
+        needs_save = False
+        for entry in entries:
+            for side in ("target", "cover"):
+                ctf_key = f"{side}_ctf_token_ids"
+                tx_key = f"{side}_split_tx"
+                if self._parse_ctf_ids(entry.get(ctf_key, "")) or not entry.get(tx_key):
+                    continue
+                # Parse TX receipt for actual CTF token IDs
+                try:
+                    tx_hash = entry[tx_key]
+                    if not tx_hash.startswith("0x"):
+                        tx_hash = f"0x{tx_hash}"
+                    w3 = self._get_web3()
+                    receipt = w3.eth.get_transaction_receipt(tx_hash)
+                    if receipt is None:
+                        logger.warning(f"No receipt for TX {tx_hash}")
+                        continue
+                    ids = TradingExecutor.parse_ctf_token_ids_from_receipt(
+                        receipt, CONTRACTS["CTF"]
+                    )
+                    if ids:
+                        entry[ctf_key] = json.dumps(ids)
+                        needs_save = True
+                        logger.info(
+                            f"Backfilled {ctf_key} for {entry['position_id']}: {ids}"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to backfill {ctf_key}: {e}")
+
+        if needs_save:
+            self._merge_backfill(entries)
+
+    def _merge_backfill(self, enriched_entries: list[dict]) -> list[dict]:
+        """Merge backfilled CTF IDs into stored positions."""
+        stored = self.storage.load_all()
+        backfill_map = {
+            e["position_id"]: e for e in enriched_entries if e.get("position_id")
+        }
+        for pos in stored:
+            updated = backfill_map.get(pos.get("position_id"))
+            if updated:
+                for key in (
+                    "target_ctf_token_ids",
+                    "cover_ctf_token_ids",
+                ):
+                    if self._parse_ctf_ids(
+                        updated.get(key, "")
+                    ) and not self._parse_ctf_ids(pos.get(key, "")):
+                        pos[key] = updated[key]
+        self.storage.save_all(stored)
+        return stored
+
     def _enrich_positions(self, entries: list[dict]) -> list[LivePosition]:
         """Enrich multiple positions with live data using batched queries."""
         if not entries:
             return []
+
+        # Backfill any missing CTF token IDs from TX receipts (one-time per position)
+        self._backfill_ctf_ids(entries)
 
         # Collect all token IDs we need to query
         token_ids = []
         token_id_map = []  # Track which position/field each token belongs to
 
         for i, entry in enumerate(entries):
+            # Resolve token IDs: prefer on-chain CTF IDs over CLOB IDs
+            # CTF IDs from split TX are [YES, NO] matching partition [1, 2]
+            target_ctf = self._parse_ctf_ids(entry.get("target_ctf_token_ids", ""))
+            cover_ctf = self._parse_ctf_ids(entry.get("cover_ctf_token_ids", ""))
+
             # Wanted tokens
-            token_ids.append(entry["target_token_id"])
+            if target_ctf:
+                target_wanted_id = (
+                    target_ctf[0]
+                    if entry["target_position"] == "YES"
+                    else target_ctf[1]
+                )
+            else:
+                target_wanted_id = entry["target_token_id"]
+            token_ids.append(target_wanted_id)
             token_id_map.append((i, "target_wanted"))
 
-            token_ids.append(entry["cover_token_id"])
+            if cover_ctf:
+                cover_wanted_id = (
+                    cover_ctf[0] if entry["cover_position"] == "YES" else cover_ctf[1]
+                )
+            else:
+                cover_wanted_id = entry["cover_token_id"]
+            token_ids.append(cover_wanted_id)
             token_id_map.append((i, "cover_wanted"))
 
             # Unwanted tokens
-            target_unwanted_id = self._get_unwanted_token_id(
-                entry["target_market_id"], entry["target_position"]
-            )
+            if target_ctf:
+                target_unwanted_id = (
+                    target_ctf[1]
+                    if entry["target_position"] == "YES"
+                    else target_ctf[0]
+                )
+            else:
+                target_unwanted_id = entry.get(
+                    "target_unwanted_token_id", ""
+                ) or self._get_unwanted_token_id(
+                    entry["target_market_id"], entry["target_position"]
+                )
             token_ids.append(target_unwanted_id)
             token_id_map.append((i, "target_unwanted"))
 
-            cover_unwanted_id = self._get_unwanted_token_id(
-                entry["cover_market_id"], entry["cover_position"]
-            )
+            if cover_ctf:
+                cover_unwanted_id = (
+                    cover_ctf[1] if entry["cover_position"] == "YES" else cover_ctf[0]
+                )
+            else:
+                cover_unwanted_id = entry.get(
+                    "cover_unwanted_token_id", ""
+                ) or self._get_unwanted_token_id(
+                    entry["cover_market_id"], entry["cover_position"]
+                )
             token_ids.append(cover_unwanted_id)
             token_id_map.append((i, "cover_unwanted"))
 

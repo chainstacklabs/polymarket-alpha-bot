@@ -1,7 +1,6 @@
 """Execute on-chain trades: split + CLOB sell."""
 
 import json
-import os
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -38,6 +37,10 @@ class TradeResult:
     # Market info captured during trade (for position recording)
     question: str = ""
     wanted_token_id: str = ""
+    unwanted_token_id: str = ""
+    ctf_token_ids: Optional[list[str]] = (
+        None  # Actual on-chain CTF token IDs from split
+    )
     entry_price: float = 0.0
 
 
@@ -82,46 +85,35 @@ class TradingExecutor:
             no_price=float(prices[1]) if len(prices) > 1 else 0.5,
         )
 
-    def _get_clob_client(self):
-        """Initialize CLOB client with optional proxy support."""
+    @staticmethod
+    def parse_ctf_token_ids_from_receipt(receipt: dict, ctf_address: str) -> list[str]:
+        """Extract minted CTF token IDs from a split TX receipt's TransferBatch event."""
         try:
-            from py_clob_client.client import ClobClient
-            import py_clob_client.http_helpers.helpers as clob_helpers
-        except ImportError:
-            logger.error("py-clob-client not installed")
-            return None
+            from eth_abi import decode as abi_decode
 
-        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-        if proxy:
-            logger.info(f"Using proxy: {proxy[:30]}...")
-            clob_helpers._http_client = httpx.Client(
-                http2=True, proxy=proxy, timeout=30.0
+            ctf_lower = ctf_address.lower()
+            # TransferBatch topic: keccak256("TransferBatch(address,address,address,uint256[],uint256[])")
+            batch_topic = (
+                "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb"
             )
 
-        private_key = self.wallet.get_unlocked_key()
-        address = self.wallet.address
-
-        try:
-            client = ClobClient(
-                "https://clob.polymarket.com",
-                key=private_key,
-                chain_id=137,
-                signature_type=0,
-                funder=address,
-            )
-            creds = client.create_or_derive_api_creds()
-            client.set_api_creds(creds)
-            return client
+            for log in receipt.get("logs", []):
+                if (
+                    log["address"].lower() == ctf_lower
+                    and log["topics"][0].hex() == batch_topic[2:]
+                ):
+                    ids, _ = abi_decode(["uint256[]", "uint256[]"], log["data"])
+                    return [str(tid) for tid in ids]
         except Exception as e:
-            logger.error(f"CLOB API error: {e}")
-            return None
+            logger.warning(f"Failed to parse CTF token IDs from receipt: {e}")
+        return []
 
     def _split_position(
         self,
         condition_id: str,
         amount_usd: float,
-    ) -> str:
-        """Split USDC into YES + NO tokens. Returns tx hash."""
+    ) -> tuple[str, list[str]]:
+        """Split USDC into YES + NO tokens. Returns (tx_hash, [ctf_token_ids])."""
         w3 = self._get_web3()
         address = Web3.to_checksum_address(self.wallet.address)
         account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
@@ -160,47 +152,10 @@ class TradingExecutor:
         if receipt["status"] != 1:
             raise ValueError(f"Split failed: {tx_hash.hex()}")
 
-        return tx_hash.hex()
+        ctf_token_ids = self.parse_ctf_token_ids_from_receipt(receipt, CONTRACTS["CTF"])
+        logger.info(f"Split minted CTF tokens: {ctf_token_ids}")
 
-    def _sell_via_clob(
-        self,
-        token_id: str,
-        amount: float,
-        price: float,
-    ) -> tuple[Optional[str], bool, Optional[str]]:
-        """Sell tokens via CLOB using IOC market order. Returns (order_id, filled, error_message)."""
-        client = self._get_clob_client()
-        if not client:
-            return None, False, "CLOB client initialization failed"
-
-        try:
-            from py_clob_client.clob_types import OrderArgs, OrderType
-            from py_clob_client.order_builder.constants import SELL
-
-            # IOC (Immediate-or-Cancel): fills whatever liquidity is available, cancels rest
-            # 40% slippage below market price
-            sell_price = round(max(price * 0.60, 0.01), 2)
-
-            order = client.create_order(
-                OrderArgs(
-                    token_id=token_id,
-                    price=sell_price,
-                    size=amount,
-                    side=SELL,
-                )
-            )
-            result = client.post_order(order, OrderType.FAK)
-            order_id = result.get("orderID", str(result)[:40])
-            logger.info(f"CLOB FAK order executed: {order_id}")
-            return order_id, True, None
-        except Exception as e:
-            error_msg = str(e)
-            if "403" in error_msg and (
-                "blocked" in error_msg.lower() or "restricted" in error_msg.lower()
-            ):
-                error_msg = "Trading restricted in your region — enable proxy"
-            logger.error(f"CLOB sell error: {error_msg}")
-            return None, False, error_msg
+        return tx_hash.hex(), ctf_token_ids
 
     async def buy_single_position(
         self,
@@ -208,6 +163,7 @@ class TradingExecutor:
         position: str,  # "YES" or "NO"
         amount: float,
         skip_clob_sell: bool = False,
+        slippage: float = 10,
     ) -> TradeResult:
         """Buy a single position on a market."""
         position = position.upper()
@@ -234,7 +190,7 @@ class TradingExecutor:
 
         # Split position
         try:
-            split_tx = self._split_position(market.condition_id, amount)
+            split_tx, ctf_token_ids = self._split_position(market.condition_id, amount)
         except Exception as e:
             return TradeResult(
                 success=False,
@@ -255,15 +211,29 @@ class TradingExecutor:
         clob_error = None
 
         if not skip_clob_sell and unwanted_token:
-            clob_order_id, clob_filled, clob_error = self._sell_via_clob(
-                unwanted_token,
-                amount,
-                unwanted_price,
-            )
+            from core.trading.clob_client import get_clob_client
 
-        # Determine wanted token info for position recording
+            client = get_clob_client(self.wallet)
+            if client:
+                from core.trading.clob import sell_via_clob
+
+                clob_order_id, clob_filled_size, clob_error = sell_via_clob(
+                    client,
+                    unwanted_token,
+                    amount,
+                    unwanted_price,
+                    slippage=slippage,
+                )
+                clob_filled = clob_filled_size > 0
+            else:
+                clob_error = "CLOB client initialization failed"
+
+        # Determine wanted/unwanted token info for position recording
         wanted_token_id = (
             market.yes_token_id if position == "YES" else (market.no_token_id or "")
+        )
+        unwanted_token_id = (
+            (market.no_token_id or "") if position == "YES" else market.yes_token_id
         )
         entry_price = market.yes_price if position == "YES" else market.no_price
 
@@ -278,6 +248,8 @@ class TradingExecutor:
             error=clob_error,  # CLOB error if sell failed
             question=market.question,
             wanted_token_id=wanted_token_id,
+            unwanted_token_id=unwanted_token_id,
+            ctf_token_ids=ctf_token_ids,
             entry_price=entry_price,
         )
 
@@ -290,6 +262,7 @@ class TradingExecutor:
         cover_position: str,
         amount_per_position: float,
         skip_clob_sell: bool = False,
+        slippage: float = 10,
     ) -> BuyPairResult:
         """Buy both positions in a portfolio pair."""
 
@@ -312,6 +285,7 @@ class TradingExecutor:
             target_position,
             amount_per_position,
             skip_clob_sell,
+            slippage=slippage,
         )
 
         # Buy cover position
@@ -321,6 +295,7 @@ class TradingExecutor:
             cover_position,
             amount_per_position,
             skip_clob_sell,
+            slippage=slippage,
         )
 
         # Get final balances

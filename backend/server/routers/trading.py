@@ -1,9 +1,10 @@
 """Trading API endpoints."""
 
+import json
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from loguru import logger
 
 from server.routers.wallet import get_wallet_manager
@@ -28,6 +29,7 @@ class BuyPairRequest(BaseModel):
     cover_group_slug: str = ""
     amount_per_position: float
     skip_clob_sell: bool = False
+    slippage: float = Field(default=10, ge=10, le=50)
 
 
 class TradeResultModel(BaseModel):
@@ -84,6 +86,7 @@ async def buy_pair(req: BuyPairRequest):
             cover_position=req.cover_position,
             amount_per_position=req.amount_per_position,
             skip_clob_sell=req.skip_clob_sell,
+            slippage=req.slippage,
         )
 
         # Collect warnings for CLOB failures
@@ -136,6 +139,10 @@ async def buy_pair(req: BuyPairRequest):
                     cover_question=result.cover.question,
                     cover_entry_price=result.cover.entry_price,
                     cover_split_tx=result.cover.split_tx or "",
+                    target_unwanted_token_id=result.target.unwanted_token_id,
+                    cover_unwanted_token_id=result.cover.unwanted_token_id,
+                    target_ctf_token_ids=json.dumps(result.target.ctf_token_ids or []),
+                    cover_ctf_token_ids=json.dumps(result.cover.ctf_token_ids or []),
                     target_group_slug=req.target_group_slug,
                     cover_group_slug=req.cover_group_slug,
                     target_clob_order_id=result.target.clob_order_id,

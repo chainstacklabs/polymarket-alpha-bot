@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { WalletDropdown } from '@/components/terminal/WalletDropdown'
 import { PipelineDropdown } from '@/components/terminal/PipelineDropdown'
+import { OrderSettings } from '@/components/OrderSettings'
 import { getApiBaseUrl } from '@/config/api-config'
 import { formatTime } from '@/utils/format-time'
 
@@ -68,6 +69,9 @@ export function StatusIndicators({
           <span className="text-xs text-text-muted">{connectionText}</span>
         </div>
       )}
+
+      {/* Order settings */}
+      <OrderSettings />
 
       {/* Wallet dropdown */}
       <WalletDropdown />

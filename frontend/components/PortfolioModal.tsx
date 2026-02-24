@@ -5,6 +5,7 @@ import { getCoverageBg } from '@/config/tier-config'
 import { useWallet } from '@/hooks/useWallet'
 import { getApiBaseUrl } from '@/config/api-config'
 import type { Portfolio } from '@/types/portfolio'
+import { getOrderSettings, OrderSettings } from '@/components/OrderSettings'
 
 type BuyStep =
   | 'idle'
@@ -190,6 +191,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
     setExecutionStep('Splitting target position...')
 
     try {
+      const settings = getOrderSettings()
       const res = await fetch(`${apiBase}/trading/buy-pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -203,6 +205,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
           cover_group_slug: p.cover_group_slug || '',
           amount_per_position: amountNum,
           skip_clob_sell: false,
+          slippage: settings.slippage,
         }),
       })
 
@@ -423,7 +426,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
               <HintIcon
                 title="How it works"
                 beginner="Splits USDC into outcome tokens on-chain (blockchain tx), then sells unwanted sides via CLOB (off-chain, no gas)."
-                pro="2 on-chain splitPosition txs → 2 off-chain FOK market orders on Polymarket CLOB."
+                pro="2 on-chain splitPosition txs → 2 off-chain CLOB market orders on Polymarket."
               />
             </button>
           )}
@@ -541,6 +544,8 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                       ${(status?.balances?.usdc_e || 0).toFixed(2)} USDC.e
                     </span>
                   </div>
+
+                  <OrderSettings dropUp />
 
                   {error && <p className="text-rose text-xs">{error}</p>}
 

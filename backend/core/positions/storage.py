@@ -48,6 +48,10 @@ class PositionEntry:
     # Optional fields with defaults
     target_group_slug: str = ""
     cover_group_slug: str = ""
+    target_unwanted_token_id: str = ""
+    cover_unwanted_token_id: str = ""
+    target_ctf_token_ids: str = ""  # JSON array of actual on-chain CTF token IDs
+    cover_ctf_token_ids: str = ""  # JSON array of actual on-chain CTF token IDs
     target_clob_order_id: Optional[str] = None
     cover_clob_order_id: Optional[str] = None
     target_clob_filled: bool = False

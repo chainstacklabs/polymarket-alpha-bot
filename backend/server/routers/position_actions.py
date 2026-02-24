@@ -3,7 +3,7 @@
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from loguru import logger
 
 from server.routers.wallet import get_wallet_manager
@@ -38,6 +38,7 @@ class SellTokenRequest(BaseModel):
 
     side: Literal["target", "cover"]
     token_type: Literal["wanted", "unwanted"]
+    slippage: float = Field(default=10, ge=10, le=50)
 
 
 class SellTokenResponse(BaseModel):
@@ -68,12 +69,45 @@ class MergeTokensResponse(BaseModel):
     error: Optional[str] = None
 
 
+class RetryPendingRequest(BaseModel):
+    """Request for retry pending sells."""
+
+    slippage: float = Field(default=10, ge=10, le=50)
+
+
 class RetryPendingResponse(BaseModel):
     """Response from retry pending sells operation."""
 
     success: bool
     target_result: Optional[SellTokenResponse] = None
     cover_result: Optional[SellTokenResponse] = None
+    message: str
+
+
+class ExitRequest(BaseModel):
+    """Request to exit an entire position."""
+
+    slippage: float = Field(default=10, ge=10, le=50)
+
+
+class SideExitResponse(BaseModel):
+    """Result of exiting one side."""
+
+    merged: float = 0.0
+    merge_tx: Optional[str] = None
+    sold_wanted: float = 0.0
+    sold_unwanted: float = 0.0
+    recovered: float = 0.0
+    error: Optional[str] = None
+
+
+class ExitResponse(BaseModel):
+    """Response from exit operation."""
+
+    success: bool
+    target: SideExitResponse
+    cover: SideExitResponse
+    total_recovered: float
     message: str
 
 
@@ -90,7 +124,7 @@ async def sell_position_tokens(position_id: str, req: SellTokenRequest):
     - side: "target" or "cover" market
     - token_type: "wanted" (your position) or "unwanted" (to be recovered)
 
-    Uses IOC (Immediate-or-Cancel) market order at aggressive price for instant execution.
+    Uses FAK (Fill-Available, Kill-rest) market order at aggressive price for instant execution.
     """
     manager = get_manager()
     storage = get_storage()
@@ -106,6 +140,7 @@ async def sell_position_tokens(position_id: str, req: SellTokenRequest):
             position_id=position_id,
             side=req.side,
             token_type=req.token_type,
+            slippage=req.slippage,
         )
 
         if not result.success and result.error == "Position not found":
@@ -174,12 +209,14 @@ async def merge_position_tokens(position_id: str, req: MergeTokensRequest):
 
 
 @router.post("/{position_id}/retry", response_model=RetryPendingResponse)
-async def retry_pending_sells(position_id: str):
+async def retry_pending_sells(
+    position_id: str, req: RetryPendingRequest = RetryPendingRequest()
+):
     """
     Retry selling unwanted tokens for positions in pending state.
 
     Checks both target and cover sides for unwanted token balances
-    and attempts to sell them via CLOB FOK orders.
+    and attempts to sell them via CLOB orders.
     """
     manager = get_manager()
 
@@ -187,7 +224,7 @@ async def retry_pending_sells(position_id: str):
         raise HTTPException(status_code=401, detail="Unlock wallet first")
 
     try:
-        result = await manager.retry_pending_sells(position_id)
+        result = await manager.retry_pending_sells(position_id, slippage=req.slippage)
 
         if result.get("message") == "Position not found":
             raise HTTPException(status_code=404, detail="Position not found")
@@ -232,4 +269,57 @@ async def retry_pending_sells(position_id: str):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Retry pending sells failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{position_id}/exit", response_model=ExitResponse)
+async def exit_position(position_id: str, req: ExitRequest = ExitRequest()):
+    """
+    Exit entire position: merge YES+NO tokens to USDC.e where possible,
+    sell excess via CLOB as fallback.
+
+    Per side: merge min(wanted, unwanted) on-chain, then sell any remaining
+    tokens via CLOB. Merge is guaranteed (on-chain), CLOB sell may fail
+    if IP-restricted.
+    """
+    manager = get_manager()
+
+    if not manager.wallet.is_unlocked:
+        raise HTTPException(status_code=401, detail="Unlock wallet first")
+
+    try:
+        result = await manager.exit_position(position_id, slippage=req.slippage)
+
+        if result.message == "Position not found":
+            raise HTTPException(status_code=404, detail="Position not found")
+
+        get_service().invalidate_cache()
+
+        return ExitResponse(
+            success=result.success,
+            target=SideExitResponse(
+                merged=result.target.merged,
+                merge_tx=result.target.merge_tx,
+                sold_wanted=result.target.sold_wanted,
+                sold_unwanted=result.target.sold_unwanted,
+                recovered=result.target.recovered,
+                error=result.target.error,
+            ),
+            cover=SideExitResponse(
+                merged=result.cover.merged,
+                merge_tx=result.cover.merge_tx,
+                sold_wanted=result.cover.sold_wanted,
+                sold_unwanted=result.cover.sold_unwanted,
+                recovered=result.cover.recovered,
+                error=result.cover.error,
+            ),
+            total_recovered=result.total_recovered,
+            message=result.message,
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Exit position failed")
         raise HTTPException(status_code=500, detail=str(e))

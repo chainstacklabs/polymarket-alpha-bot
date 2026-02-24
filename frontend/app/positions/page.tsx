@@ -47,8 +47,8 @@ const PurchaseFlowHint = memo(function PurchaseFlowHint() {
             <span className="purchase-flow-hint-num">2</span>
             <span>
               <strong>Sell Unwanted</strong> — Automatically sells the opposite
-              side (e.g., sells NO if you want YES) via FOK order at 10% below
-              market.
+              side (e.g., sells NO if you want YES) via CLOB order at configured
+              slippage.
             </span>
           </span>
           <span className="purchase-flow-hint-step">
@@ -64,8 +64,8 @@ const PurchaseFlowHint = memo(function PurchaseFlowHint() {
             Position States
           </span>
           <span>
-            <strong style={{ color: 'rgb(251 191 36)' }}>Pending</strong> — FOK
-            order failed (no liquidity), tokens held waiting for retry
+            <strong style={{ color: 'rgb(251 191 36)' }}>Pending</strong> —
+            Order failed (no liquidity), tokens held waiting for retry
           </span>
           <span>
             <strong style={{ color: 'rgb(52 211 153)' }}>Active</strong> — Fully
