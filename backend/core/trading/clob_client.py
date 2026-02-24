@@ -20,7 +20,15 @@ def get_clob_client(wallet: WalletManager) -> Optional[object]:
 
     proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
     if proxy:
-        logger.info(f"Using proxy: {proxy[:30]}...")
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(proxy)
+        safe = (
+            f"{parts.scheme}://{parts.hostname}:{parts.port}"
+            if parts.port
+            else f"{parts.scheme}://{parts.hostname}"
+        )
+        logger.info(f"Using proxy: {safe}")
         clob_helpers._http_client = httpx.Client(http2=True, proxy=proxy, timeout=30.0)
 
     try:
