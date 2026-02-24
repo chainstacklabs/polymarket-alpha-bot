@@ -15,10 +15,14 @@ function getSideStatus(
   orderId: string | null,
   unwantedBalance: number
 ): { label: string; color: string } {
-  if (filled || unwantedBalance < 0.01)
-    return { label: 'RECOVERED', color: 'text-emerald' }
-  if (orderId) return { label: 'PENDING', color: 'text-amber' }
-  return { label: 'NEEDS SELL', color: 'text-rose' }
+  // On-chain balance is the source of truth
+  if (unwantedBalance >= 0.01) {
+    if (orderId && !filled) return { label: 'PENDING', color: 'text-amber' }
+    return { label: 'NEEDS SELL', color: 'text-rose' }
+  }
+  // Balance < 0.01: recovered if sell happened, otherwise suspect resolution failure
+  if (!orderId && !filled) return { label: 'NEEDS SELL', color: 'text-rose' }
+  return { label: 'RECOVERED', color: 'text-emerald' }
 }
 
 function formatTxHash(hash: string): string {
@@ -99,6 +103,30 @@ export function PositionExpandedDetails({
     }
   }
 
+  const handleRetry = async () => {
+    setLoading('retry')
+    setError(null)
+    try {
+      const settings = getOrderSettings()
+      const res = await fetch(
+        `${getApiBaseUrl()}/positions/${p.position_id}/retry`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slippage: settings.slippage }),
+        }
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Retry failed')
+      if (!data.success) throw new Error(data.message || 'Retry failed')
+      onRefresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setLoading(null)
+    }
+  }
+
   const handleDelete = async () => {
     if (!confirm('Remove from list? Your tokens are NOT affected.')) return
     setDeleting(true)
@@ -127,6 +155,13 @@ export function PositionExpandedDetails({
   const coverCanSellUnwanted = p.cover_unwanted_balance > 0.01
   const coverCanMerge =
     Math.min(p.cover_balance, p.cover_unwanted_balance) > 0.01
+
+  // Show retry when CLOB never executed on either side (tokens likely still held)
+  const needsRetry =
+    (!p.target_clob_order_id &&
+      !p.target_clob_filled &&
+      !targetCanSellUnwanted) ||
+    (!p.cover_clob_order_id && !p.cover_clob_filled && !coverCanSellUnwanted)
 
   return (
     <div className="bg-surface-elevated border-t border-border px-4 py-4">
@@ -283,6 +318,22 @@ export function PositionExpandedDetails({
           </div>
         </div>
       </div>
+
+      {/* Retry banner */}
+      {needsRetry && (
+        <div className="mt-3 p-2 bg-amber/10 border border-amber/25 rounded flex items-center justify-between">
+          <span className="text-xs text-amber">
+            Unwanted tokens were not sold during entry
+          </span>
+          <button
+            onClick={handleRetry}
+            disabled={loading !== null}
+            className="px-3 py-1 text-xs bg-amber/15 text-amber hover:bg-amber/25 rounded border border-amber/30 disabled:opacity-50"
+          >
+            {loading === 'retry' ? 'Retrying...' : 'Retry sell unwanted'}
+          </button>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="mt-4 pt-3 border-t border-border flex items-center justify-between text-xs text-text-muted">

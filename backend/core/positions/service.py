@@ -378,14 +378,18 @@ class PositionService:
             token_ids.append(entry["cover_token_id"])
             token_id_map.append((i, "cover_wanted"))
 
-            # Unwanted tokens
-            target_unwanted_id = self._get_unwanted_token_id(
+            # Unwanted tokens — prefer stored IDs, fall back to runtime derivation
+            target_unwanted_id = entry.get(
+                "target_unwanted_token_id", ""
+            ) or self._get_unwanted_token_id(
                 entry["target_market_id"], entry["target_position"]
             )
             token_ids.append(target_unwanted_id)
             token_id_map.append((i, "target_unwanted"))
 
-            cover_unwanted_id = self._get_unwanted_token_id(
+            cover_unwanted_id = entry.get(
+                "cover_unwanted_token_id", ""
+            ) or self._get_unwanted_token_id(
                 entry["cover_market_id"], entry["cover_position"]
             )
             token_ids.append(cover_unwanted_id)

@@ -15,16 +15,14 @@ function getStatusIcon(p: Position): {
   color: string
   border: string
 } {
-  // Red: UNKNOWN status (CLOB failed)
-  const hasUnknown =
-    (!p.target_clob_filled &&
-      !p.target_clob_order_id &&
-      p.target_unwanted_balance > 0.01) ||
-    (!p.cover_clob_filled &&
-      !p.cover_clob_order_id &&
-      p.cover_unwanted_balance > 0.01)
+  // Red: unwanted tokens still held, or CLOB sell never executed
+  const hasUnwanted =
+    p.target_unwanted_balance > 0.01 || p.cover_unwanted_balance > 0.01
+  const clobNeverRan =
+    (!p.target_clob_order_id && !p.target_clob_filled) ||
+    (!p.cover_clob_order_id && !p.cover_clob_filled)
 
-  if (hasUnknown) {
+  if (hasUnwanted || clobNeverRan) {
     return { icon: '✗', color: 'text-rose', border: 'border-l-rose' }
   }
 

@@ -48,6 +48,8 @@ class PositionEntry:
     # Optional fields with defaults
     target_group_slug: str = ""
     cover_group_slug: str = ""
+    target_unwanted_token_id: str = ""
+    cover_unwanted_token_id: str = ""
     target_clob_order_id: Optional[str] = None
     cover_clob_order_id: Optional[str] = None
     target_clob_filled: bool = False

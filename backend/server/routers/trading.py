@@ -138,6 +138,8 @@ async def buy_pair(req: BuyPairRequest):
                     cover_question=result.cover.question,
                     cover_entry_price=result.cover.entry_price,
                     cover_split_tx=result.cover.split_tx or "",
+                    target_unwanted_token_id=result.target.unwanted_token_id,
+                    cover_unwanted_token_id=result.cover.unwanted_token_id,
                     target_group_slug=req.target_group_slug,
                     cover_group_slug=req.cover_group_slug,
                     target_clob_order_id=result.target.clob_order_id,

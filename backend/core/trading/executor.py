@@ -38,6 +38,7 @@ class TradeResult:
     # Market info captured during trade (for position recording)
     question: str = ""
     wanted_token_id: str = ""
+    unwanted_token_id: str = ""
     entry_price: float = 0.0
 
 
@@ -230,9 +231,12 @@ class TradingExecutor:
             else:
                 clob_error = "CLOB client initialization failed"
 
-        # Determine wanted token info for position recording
+        # Determine wanted/unwanted token info for position recording
         wanted_token_id = (
             market.yes_token_id if position == "YES" else (market.no_token_id or "")
+        )
+        unwanted_token_id = (
+            (market.no_token_id or "") if position == "YES" else market.yes_token_id
         )
         entry_price = market.yes_price if position == "YES" else market.no_price
 
@@ -247,6 +251,7 @@ class TradingExecutor:
             error=clob_error,  # CLOB error if sell failed
             question=market.question,
             wanted_token_id=wanted_token_id,
+            unwanted_token_id=unwanted_token_id,
             entry_price=entry_price,
         )
 
