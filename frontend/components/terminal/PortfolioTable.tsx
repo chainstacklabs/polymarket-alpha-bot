@@ -294,7 +294,7 @@ export function PortfolioTable({
 
               return (
                 <div
-                  key={p.pair_id}
+                  key={`${p.pair_id}-${index}`}
                   data-index={index}
                   ref={rowVirtualizer.measureElement}
                   className={`
