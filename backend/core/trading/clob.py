@@ -1,5 +1,6 @@
 """Shared CLOB market sell — FAK order with slippage protection."""
 
+import time
 from typing import Optional
 
 from loguru import logger
@@ -11,11 +12,13 @@ def sell_via_clob(
     amount: float,
     price: float,
     slippage: float = 10,
-) -> tuple[Optional[str], bool, Optional[str]]:
-    """Sell tokens via CLOB market order. Returns (order_id, filled, error).
+) -> tuple[Optional[str], float, Optional[str]]:
+    """Sell tokens via CLOB market order. Returns (order_id, filled_size, error).
 
     Always uses FAK (fill available, cancel rest) — partial fills are acceptable
     when selling unwanted tokens. The price acts as a worst-price cap.
+
+    filled_size is the actual number of tokens matched (0.0 if nothing filled).
 
     Args:
         client: Initialized ClobClient instance.
@@ -44,7 +47,15 @@ def sell_via_clob(
         result = client.post_order(order, OrderType.FAK)
         order_id = result.get("orderID", str(result)[:40])
         logger.info(f"CLOB market sell (slippage {slippage_pct}%): {order_id}")
-        return order_id, True, None
+
+        # FAK orders fill immediately — check actual matched size
+        filled_size = _get_filled_size(client, order_id, amount)
+        if filled_size < amount:
+            logger.warning(
+                f"FAK partial fill: {filled_size:.4f}/{amount:.4f} for {order_id}"
+            )
+
+        return order_id, filled_size, None
     except Exception as e:
         error_msg = str(e)
         if "403" in error_msg and (
@@ -52,4 +63,22 @@ def sell_via_clob(
         ):
             error_msg = "Trading restricted in your region — enable proxy"
         logger.error(f"CLOB sell error: {error_msg}")
-        return None, False, error_msg
+        return None, 0.0, error_msg
+
+
+def _get_filled_size(client, order_id: str, original_amount: float) -> float:
+    """Query order fill status. Returns matched token amount."""
+    try:
+        time.sleep(1)  # Brief wait for settlement
+        order = client.get_order(order_id)
+        size_matched = float(order.get("size_matched", 0))
+        logger.info(
+            f"Order {order_id}: size_matched={size_matched}, "
+            f"original_size={order.get('original_size')}"
+        )
+        return size_matched
+    except Exception as e:
+        logger.warning(f"Could not fetch order status for {order_id}: {e}")
+        # If we can't check, assume the post succeeded fully (old behavior)
+        # — better to overestimate than silently drop a successful trade
+        return original_amount

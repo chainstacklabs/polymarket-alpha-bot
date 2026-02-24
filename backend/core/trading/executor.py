@@ -39,6 +39,7 @@ class TradeResult:
     question: str = ""
     wanted_token_id: str = ""
     unwanted_token_id: str = ""
+    ctf_token_ids: list[str] = None  # type: ignore[assignment]  # Actual on-chain CTF token IDs from split
     entry_price: float = 0.0
 
 
@@ -117,12 +118,35 @@ class TradingExecutor:
             logger.error(f"CLOB API error: {e}")
             return None
 
+    @staticmethod
+    def parse_ctf_token_ids_from_receipt(receipt: dict, ctf_address: str) -> list[str]:
+        """Extract minted CTF token IDs from a split TX receipt's TransferBatch event."""
+        try:
+            from eth_abi import decode as abi_decode
+
+            ctf_lower = ctf_address.lower()
+            # TransferBatch topic: keccak256("TransferBatch(address,address,address,uint256[],uint256[])")
+            batch_topic = (
+                "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb"
+            )
+
+            for log in receipt.get("logs", []):
+                if (
+                    log["address"].lower() == ctf_lower
+                    and log["topics"][0].hex() == batch_topic[2:]
+                ):
+                    ids, _ = abi_decode(["uint256[]", "uint256[]"], log["data"])
+                    return [str(tid) for tid in ids]
+        except Exception as e:
+            logger.warning(f"Failed to parse CTF token IDs from receipt: {e}")
+        return []
+
     def _split_position(
         self,
         condition_id: str,
         amount_usd: float,
-    ) -> str:
-        """Split USDC into YES + NO tokens. Returns tx hash."""
+    ) -> tuple[str, list[str]]:
+        """Split USDC into YES + NO tokens. Returns (tx_hash, [ctf_token_ids])."""
         w3 = self._get_web3()
         address = Web3.to_checksum_address(self.wallet.address)
         account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
@@ -161,7 +185,10 @@ class TradingExecutor:
         if receipt["status"] != 1:
             raise ValueError(f"Split failed: {tx_hash.hex()}")
 
-        return tx_hash.hex()
+        ctf_token_ids = self.parse_ctf_token_ids_from_receipt(receipt, CONTRACTS["CTF"])
+        logger.info(f"Split minted CTF tokens: {ctf_token_ids}")
+
+        return tx_hash.hex(), ctf_token_ids
 
     async def buy_single_position(
         self,
@@ -196,7 +223,7 @@ class TradingExecutor:
 
         # Split position
         try:
-            split_tx = self._split_position(market.condition_id, amount)
+            split_tx, ctf_token_ids = self._split_position(market.condition_id, amount)
         except Exception as e:
             return TradeResult(
                 success=False,
@@ -221,13 +248,14 @@ class TradingExecutor:
             if client:
                 from core.trading.clob import sell_via_clob
 
-                clob_order_id, clob_filled, clob_error = sell_via_clob(
+                clob_order_id, clob_filled_size, clob_error = sell_via_clob(
                     client,
                     unwanted_token,
                     amount,
                     unwanted_price,
                     slippage=slippage,
                 )
+                clob_filled = clob_filled_size > 0
             else:
                 clob_error = "CLOB client initialization failed"
 
@@ -252,6 +280,7 @@ class TradingExecutor:
             question=market.question,
             wanted_token_id=wanted_token_id,
             unwanted_token_id=unwanted_token_id,
+            ctf_token_ids=ctf_token_ids,
             entry_price=entry_price,
         )
 

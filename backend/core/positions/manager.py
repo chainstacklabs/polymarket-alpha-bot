@@ -38,6 +38,29 @@ class MergeResult:
     error: Optional[str] = None
 
 
+@dataclass
+class SideExitResult:
+    """Result of exiting one side of a position."""
+
+    merged: float = 0.0  # Tokens merged back to USDC.e
+    merge_tx: Optional[str] = None
+    sold_wanted: float = 0.0  # Wanted tokens sold via CLOB
+    sold_unwanted: float = 0.0  # Unwanted tokens sold via CLOB
+    recovered: float = 0.0  # Estimated total USDC.e recovered
+    error: Optional[str] = None
+
+
+@dataclass
+class ExitResult:
+    """Result of exiting an entire position."""
+
+    success: bool
+    target: SideExitResult
+    cover: SideExitResult
+    total_recovered: float
+    message: str
+
+
 class PositionManager:
     """Manages position mutation operations (sell, merge)."""
 
@@ -228,14 +251,16 @@ class PositionManager:
 
         from core.trading.clob import sell_via_clob
 
-        order_id, filled, error = sell_via_clob(
+        order_id, filled_size, error = sell_via_clob(
             client, token_id, balance, price, slippage=slippage
         )
 
-        # Calculate recovered value (approximate) — apply same clamping as sell
+        filled = filled_size > 0
+
+        # Calculate recovered value from actual fill, not requested amount
         slippage_pct = max(10, min(50, slippage))
         sell_price = round(max(price * (1 - slippage_pct / 100), 0.01), 2)
-        recovered = balance * sell_price if filled else 0
+        recovered = filled_size * sell_price
 
         # Update storage if selling unwanted tokens
         if filled and token_type == "unwanted":
@@ -244,7 +269,7 @@ class PositionManager:
         return SellResult(
             success=filled,
             token_id=token_id,
-            amount=balance,
+            amount=filled_size,
             order_id=order_id,
             filled=filled,
             recovered_value=round(recovered, 2),
@@ -329,6 +354,131 @@ class PositionManager:
             merged_amount=round(mergeable, 4),
             tx_hash=tx_hash,
             error=None,
+        )
+
+    async def _exit_side(
+        self,
+        position_id: str,
+        side: str,
+        wanted_balance: float,
+        unwanted_balance: float,
+        slippage: float,
+    ) -> SideExitResult:
+        """Exit one side: merge if possible, then sell excess via CLOB."""
+        result = SideExitResult()
+        THRESHOLD = 0.01
+        mergeable = min(wanted_balance, unwanted_balance)
+
+        # Step 1: Merge YES+NO → USDC.e (on-chain, no CLOB needed)
+        if mergeable >= THRESHOLD:
+            merge = await self.merge_position_tokens(position_id, side)
+            if merge.success:
+                result.merged = merge.merged_amount
+                result.merge_tx = merge.tx_hash
+                result.recovered = merge.merged_amount
+                logger.info(f"Exit {side}: merged {merge.merged_amount:.2f} → USDC.e")
+            else:
+                result.error = f"Merge failed: {merge.error}"
+                return result
+
+        # Step 2: Sell excess wanted tokens via CLOB
+        excess_wanted = wanted_balance - mergeable
+        if excess_wanted >= THRESHOLD:
+            sell = await self.sell_position_tokens(
+                position_id, side, "wanted", slippage=slippage
+            )
+            if sell.success:
+                result.sold_wanted = sell.amount
+                result.recovered += sell.recovered_value
+            else:
+                # Non-fatal: merge already recovered what it could
+                if result.error:
+                    result.error += f"; Sell wanted failed: {sell.error}"
+                else:
+                    result.error = f"Sell wanted failed: {sell.error}"
+
+        # Step 3: Sell excess unwanted tokens via CLOB
+        excess_unwanted = unwanted_balance - mergeable
+        if excess_unwanted >= THRESHOLD:
+            sell = await self.sell_position_tokens(
+                position_id, side, "unwanted", slippage=slippage
+            )
+            if sell.success:
+                result.sold_unwanted = sell.amount
+                result.recovered += sell.recovered_value
+            else:
+                if result.error:
+                    result.error += f"; Sell unwanted failed: {sell.error}"
+                else:
+                    result.error = f"Sell unwanted failed: {sell.error}"
+
+        return result
+
+    async def exit_position(self, position_id: str, slippage: float = 10) -> ExitResult:
+        """Exit entire position: merge where possible, sell excess via CLOB."""
+        position = self.service.get_position(position_id)
+        if not position:
+            return ExitResult(
+                success=False,
+                target=SideExitResult(),
+                cover=SideExitResult(),
+                total_recovered=0,
+                message="Position not found",
+            )
+
+        target_result = await self._exit_side(
+            position_id,
+            "target",
+            position.target_balance,
+            position.target_unwanted_balance,
+            slippage,
+        )
+
+        # Invalidate cache between sides so cover gets fresh balances
+        self.service.invalidate_cache()
+
+        cover_result = await self._exit_side(
+            position_id,
+            "cover",
+            position.cover_balance,
+            position.cover_unwanted_balance,
+            slippage,
+        )
+
+        total = round(target_result.recovered + cover_result.recovered, 4)
+        any_success = target_result.recovered > 0 or cover_result.recovered > 0
+
+        messages = []
+        if target_result.merged > 0:
+            messages.append(f"Target: merged ${target_result.merged:.2f}")
+        if target_result.sold_wanted > 0:
+            messages.append(f"Target: sold {target_result.sold_wanted:.1f} tokens")
+        if cover_result.merged > 0:
+            messages.append(f"Cover: merged ${cover_result.merged:.2f}")
+        if cover_result.sold_wanted > 0:
+            messages.append(f"Cover: sold {cover_result.sold_wanted:.1f} tokens")
+
+        errors = []
+        if target_result.error:
+            errors.append(f"Target: {target_result.error}")
+        if cover_result.error:
+            errors.append(f"Cover: {cover_result.error}")
+
+        if not messages and not errors:
+            msg = "Nothing to exit (no token balances)"
+        elif errors:
+            msg = "; ".join(messages + errors)
+        else:
+            msg = "; ".join(messages)
+
+        self.service.invalidate_cache()
+
+        return ExitResult(
+            success=any_success,
+            target=target_result,
+            cover=cover_result,
+            total_recovered=total,
+            message=msg,
         )
 
     async def retry_pending_sells(self, position_id: str, slippage: float = 10) -> dict:
