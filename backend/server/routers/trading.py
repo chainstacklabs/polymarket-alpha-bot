@@ -1,5 +1,6 @@
 """Trading API endpoints."""
 
+import json
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -140,6 +141,8 @@ async def buy_pair(req: BuyPairRequest):
                     cover_split_tx=result.cover.split_tx or "",
                     target_unwanted_token_id=result.target.unwanted_token_id,
                     cover_unwanted_token_id=result.cover.unwanted_token_id,
+                    target_ctf_token_ids=json.dumps(result.target.ctf_token_ids or []),
+                    cover_ctf_token_ids=json.dumps(result.cover.ctf_token_ids or []),
                     target_group_slug=req.target_group_slug,
                     cover_group_slug=req.cover_group_slug,
                     target_clob_order_id=result.target.clob_order_id,

@@ -1,6 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, memo } from 'react'
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useSyncExternalStore,
+  memo,
+} from 'react'
 
 export interface OrderSettingsValues {
   slippage: number
@@ -27,6 +34,21 @@ export function getOrderSettings(): OrderSettingsValues {
 
 function saveOrderSettings(settings: OrderSettingsValues) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+  // Notify subscribers so useSyncExternalStore picks up the change
+  settingsListeners.forEach((l) => l())
+}
+
+// External store for useSyncExternalStore
+const settingsListeners = new Set<() => void>()
+function subscribeSettings(callback: () => void) {
+  settingsListeners.add(callback)
+  return () => settingsListeners.delete(callback)
+}
+function getSettingsSnapshot() {
+  return localStorage.getItem(STORAGE_KEY) || ''
+}
+function getSettingsServerSnapshot() {
+  return ''
 }
 
 export const OrderSettings = memo(function OrderSettings({
@@ -35,8 +57,14 @@ export const OrderSettings = memo(function OrderSettings({
   dropUp?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const [settings, setSettings] =
-    useState<OrderSettingsValues>(getOrderSettings)
+  const rawSettings = useSyncExternalStore(
+    subscribeSettings,
+    getSettingsSnapshot,
+    getSettingsServerSnapshot
+  )
+  const settings: OrderSettingsValues = rawSettings
+    ? getOrderSettings()
+    : DEFAULT_SETTINGS
   const [customSlippage, setCustomSlippage] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -55,11 +83,8 @@ export const OrderSettings = memo(function OrderSettings({
   }, [open])
 
   const update = useCallback((patch: Partial<OrderSettingsValues>) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...patch }
-      saveOrderSettings(next)
-      return next
-    })
+    const next = { ...getOrderSettings(), ...patch }
+    saveOrderSettings(next)
   }, [])
 
   const handleCustomSlippage = useCallback(() => {

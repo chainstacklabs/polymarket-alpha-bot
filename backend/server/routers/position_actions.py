@@ -84,6 +84,33 @@ class RetryPendingResponse(BaseModel):
     message: str
 
 
+class ExitRequest(BaseModel):
+    """Request to exit an entire position."""
+
+    slippage: float = 10
+
+
+class SideExitResponse(BaseModel):
+    """Result of exiting one side."""
+
+    merged: float = 0.0
+    merge_tx: Optional[str] = None
+    sold_wanted: float = 0.0
+    sold_unwanted: float = 0.0
+    recovered: float = 0.0
+    error: Optional[str] = None
+
+
+class ExitResponse(BaseModel):
+    """Response from exit operation."""
+
+    success: bool
+    target: SideExitResponse
+    cover: SideExitResponse
+    total_recovered: float
+    message: str
+
+
 # =============================================================================
 # ENDPOINTS
 # =============================================================================
@@ -242,4 +269,57 @@ async def retry_pending_sells(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Retry pending sells failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{position_id}/exit", response_model=ExitResponse)
+async def exit_position(position_id: str, req: ExitRequest = ExitRequest()):
+    """
+    Exit entire position: merge YES+NO tokens to USDC.e where possible,
+    sell excess via CLOB as fallback.
+
+    Per side: merge min(wanted, unwanted) on-chain, then sell any remaining
+    tokens via CLOB. Merge is guaranteed (on-chain), CLOB sell may fail
+    if IP-restricted.
+    """
+    manager = get_manager()
+
+    if not manager.wallet.is_unlocked:
+        raise HTTPException(status_code=401, detail="Unlock wallet first")
+
+    try:
+        result = await manager.exit_position(position_id, slippage=req.slippage)
+
+        if result.message == "Position not found":
+            raise HTTPException(status_code=404, detail="Position not found")
+
+        get_service().invalidate_cache()
+
+        return ExitResponse(
+            success=result.success,
+            target=SideExitResponse(
+                merged=result.target.merged,
+                merge_tx=result.target.merge_tx,
+                sold_wanted=result.target.sold_wanted,
+                sold_unwanted=result.target.sold_unwanted,
+                recovered=result.target.recovered,
+                error=result.target.error,
+            ),
+            cover=SideExitResponse(
+                merged=result.cover.merged,
+                merge_tx=result.cover.merge_tx,
+                sold_wanted=result.cover.sold_wanted,
+                sold_unwanted=result.cover.sold_unwanted,
+                recovered=result.cover.recovered,
+                error=result.cover.error,
+            ),
+            total_recovered=result.total_recovered,
+            message=result.message,
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Exit position failed")
         raise HTTPException(status_code=500, detail=str(e))
