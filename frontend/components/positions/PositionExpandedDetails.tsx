@@ -10,6 +10,12 @@ interface PositionExpandedDetailsProps {
   onRefresh: () => void
 }
 
+interface ExitResult {
+  success: boolean
+  message: string
+  total: number
+}
+
 function getSideStatus(
   filled: boolean,
   orderId: string | null,
@@ -59,11 +65,7 @@ export function PositionExpandedDetails({
   onRefresh,
 }: PositionExpandedDetailsProps) {
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{
-    success: boolean
-    message: string
-    total: number
-  } | null>(null)
+  const [result, setResult] = useState<ExitResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 

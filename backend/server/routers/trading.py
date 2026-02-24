@@ -4,7 +4,7 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from loguru import logger
 
 from server.routers.wallet import get_wallet_manager
@@ -29,7 +29,7 @@ class BuyPairRequest(BaseModel):
     cover_group_slug: str = ""
     amount_per_position: float
     skip_clob_sell: bool = False
-    slippage: float = 10
+    slippage: float = Field(default=10, ge=10, le=50)
 
 
 class TradeResultModel(BaseModel):

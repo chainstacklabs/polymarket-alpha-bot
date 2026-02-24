@@ -3,7 +3,7 @@
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from loguru import logger
 
 from server.routers.wallet import get_wallet_manager
@@ -38,7 +38,7 @@ class SellTokenRequest(BaseModel):
 
     side: Literal["target", "cover"]
     token_type: Literal["wanted", "unwanted"]
-    slippage: float = 10
+    slippage: float = Field(default=10, ge=10, le=50)
 
 
 class SellTokenResponse(BaseModel):
@@ -72,7 +72,7 @@ class MergeTokensResponse(BaseModel):
 class RetryPendingRequest(BaseModel):
     """Request for retry pending sells."""
 
-    slippage: float = 10
+    slippage: float = Field(default=10, ge=10, le=50)
 
 
 class RetryPendingResponse(BaseModel):
@@ -87,7 +87,7 @@ class RetryPendingResponse(BaseModel):
 class ExitRequest(BaseModel):
     """Request to exit an entire position."""
 
-    slippage: float = 10
+    slippage: float = Field(default=10, ge=10, le=50)
 
 
 class SideExitResponse(BaseModel):
@@ -124,7 +124,7 @@ async def sell_position_tokens(position_id: str, req: SellTokenRequest):
     - side: "target" or "cover" market
     - token_type: "wanted" (your position) or "unwanted" (to be recovered)
 
-    Uses IOC (Immediate-or-Cancel) market order at aggressive price for instant execution.
+    Uses FAK (Fill-Available, Kill-rest) market order at aggressive price for instant execution.
     """
     manager = get_manager()
     storage = get_storage()

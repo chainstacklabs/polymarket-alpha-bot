@@ -6,6 +6,12 @@ from typing import Optional
 from loguru import logger
 
 
+def compute_sell_price(price: float, slippage: float) -> float:
+    """Compute worst-case sell price with slippage. Matches CLOB order logic."""
+    slippage_pct = max(10, min(50, slippage))
+    return round(max(price * (1 - slippage_pct / 100), 0.01), 2)
+
+
 def sell_via_clob(
     client,
     token_id: str,
@@ -27,13 +33,16 @@ def sell_via_clob(
         price: Current market price.
         slippage: Slippage percentage (clamped to 10-50%).
     """
+    if amount <= 0 or price <= 0:
+        msg = f"Invalid sell params: amount={amount}, price={price}"
+        logger.error(msg)
+        return None, 0.0, msg
+
     try:
         from py_clob_client.clob_types import MarketOrderArgs, OrderType
         from py_clob_client.order_builder.constants import SELL
 
-        # Clamp slippage to 10-50%
-        slippage_pct = max(10, min(50, slippage))
-        sell_price = round(max(price * (1 - slippage_pct / 100), 0.01), 2)
+        sell_price = compute_sell_price(price, slippage)
 
         order = client.create_market_order(
             MarketOrderArgs(
@@ -45,8 +54,14 @@ def sell_via_clob(
             )
         )
         result = client.post_order(order, OrderType.FAK)
+
+        if result.get("success") is False:
+            error_msg = result.get("errorMsg") or "Order rejected by CLOB"
+            logger.error(f"CLOB post_order failed: {error_msg}")
+            return None, 0.0, error_msg
+
         order_id = result.get("orderID", str(result)[:40])
-        logger.info(f"CLOB market sell (slippage {slippage_pct}%): {order_id}")
+        logger.info(f"CLOB market sell (price={sell_price}): {order_id}")
 
         # FAK orders fill immediately — check actual matched size
         filled_size = _get_filled_size(client, order_id)

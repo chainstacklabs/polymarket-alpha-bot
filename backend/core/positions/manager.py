@@ -1,6 +1,5 @@
 """Position manager - mutate positions via sell/merge operations."""
 
-import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -82,40 +81,6 @@ class PositionManager:
                 Web3.HTTPProvider(self.wallet.rpc_url, request_kwargs={"timeout": 60})
             )
         return self._w3
-
-    def _get_clob_client(self):
-        """Initialize CLOB client with optional proxy support."""
-        try:
-            from py_clob_client.client import ClobClient
-            import py_clob_client.http_helpers.helpers as clob_helpers
-        except ImportError:
-            logger.error("py-clob-client not installed")
-            return None
-
-        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-        if proxy:
-            logger.info(f"Using proxy: {proxy[:30]}...")
-            clob_helpers._http_client = httpx.Client(
-                http2=True, proxy=proxy, timeout=30.0
-            )
-
-        private_key = self.wallet.get_unlocked_key()
-        address = self.wallet.address
-
-        try:
-            client = ClobClient(
-                "https://clob.polymarket.com",
-                key=private_key,
-                chain_id=137,
-                signature_type=0,
-                funder=address,
-            )
-            creds = client.create_or_derive_api_creds()
-            client.set_api_creds(creds)
-            return client
-        except Exception as e:
-            logger.error(f"CLOB API error: {e}")
-            return None
 
     async def _get_market_info(self, market_id: str) -> dict:
         """Fetch market info from Polymarket API."""
@@ -237,7 +202,9 @@ class PositionManager:
             )
 
         # Execute sell
-        client = self._get_clob_client()
+        from core.trading.clob_client import get_clob_client
+
+        client = get_clob_client(self.wallet)
         if not client:
             return SellResult(
                 success=False,
@@ -249,7 +216,7 @@ class PositionManager:
                 error="CLOB client initialization failed",
             )
 
-        from core.trading.clob import sell_via_clob
+        from core.trading.clob import sell_via_clob, compute_sell_price
 
         order_id, filled_size, error = sell_via_clob(
             client, token_id, balance, price, slippage=slippage
@@ -258,8 +225,7 @@ class PositionManager:
         filled = filled_size > 0
 
         # Calculate recovered value from actual fill, not requested amount
-        slippage_pct = max(10, min(50, slippage))
-        sell_price = round(max(price * (1 - slippage_pct / 100), 0.01), 2)
+        sell_price = compute_sell_price(price, slippage)
         recovered = filled_size * sell_price
 
         # Update storage if selling unwanted tokens

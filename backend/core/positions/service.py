@@ -1,5 +1,6 @@
 """Position service - enrich positions with live balances and prices."""
 
+import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -225,8 +226,6 @@ class PositionService:
 
         # Fallback to HTTP call if not in resolver
         try:
-            import json
-
             with httpx.Client(timeout=10.0) as client:
                 resp = client.get(
                     f"https://gamma-api.polymarket.com/markets/{market_id}"
@@ -243,14 +242,19 @@ class PositionService:
 
     @staticmethod
     def _parse_ctf_ids(raw: str) -> list[str]:
-        """Parse stored CTF token IDs JSON. Returns list of 2+ IDs or empty list."""
+        """Parse stored CTF token IDs JSON. Returns [YES_id, NO_id] or empty list.
+
+        Requires exactly 2 IDs matching the splitPosition partition [1, 2].
+        """
         if not raw:
             return []
         try:
-            import json
-
             ids = json.loads(raw)
-            return ids if isinstance(ids, list) and len(ids) >= 2 else []
+            if not isinstance(ids, list) or len(ids) != 2:
+                if isinstance(ids, list) and len(ids) > 2:
+                    logger.warning(f"Unexpected CTF token ID count: {len(ids)}")
+                return []
+            return ids
         except (ValueError, TypeError):
             return []
 
@@ -376,7 +380,8 @@ class PositionService:
 
     def _backfill_ctf_ids(self, entries: list[dict]) -> None:
         """Backfill missing CTF token IDs by parsing split TX receipts."""
-        import json
+
+        from core.trading.executor import TradingExecutor
 
         needs_save = False
         for entry in entries:
@@ -387,13 +392,14 @@ class PositionService:
                     continue
                 # Parse TX receipt for actual CTF token IDs
                 try:
-                    from core.trading.executor import TradingExecutor
-
                     tx_hash = entry[tx_key]
                     if not tx_hash.startswith("0x"):
                         tx_hash = f"0x{tx_hash}"
                     w3 = self._get_web3()
                     receipt = w3.eth.get_transaction_receipt(tx_hash)
+                    if receipt is None:
+                        logger.warning(f"No receipt for TX {tx_hash}")
+                        continue
                     ids = TradingExecutor.parse_ctf_token_ids_from_receipt(
                         receipt, CONTRACTS["CTF"]
                     )
@@ -407,11 +413,7 @@ class PositionService:
                     logger.warning(f"Failed to backfill {ctf_key}: {e}")
 
         if needs_save:
-            self.storage.save_all(
-                [e for e in self.storage.load_all()]
-                if not entries
-                else self._merge_backfill(entries)
-            )
+            self._merge_backfill(entries)
 
     def _merge_backfill(self, enriched_entries: list[dict]) -> list[dict]:
         """Merge backfilled CTF IDs into stored positions."""

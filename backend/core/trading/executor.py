@@ -1,7 +1,6 @@
 """Execute on-chain trades: split + CLOB sell."""
 
 import json
-import os
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -39,7 +38,9 @@ class TradeResult:
     question: str = ""
     wanted_token_id: str = ""
     unwanted_token_id: str = ""
-    ctf_token_ids: list[str] = None  # type: ignore[assignment]  # Actual on-chain CTF token IDs from split
+    ctf_token_ids: Optional[list[str]] = (
+        None  # Actual on-chain CTF token IDs from split
+    )
     entry_price: float = 0.0
 
 
@@ -83,40 +84,6 @@ class TradingExecutor:
             yes_price=float(prices[0]) if prices else 0.5,
             no_price=float(prices[1]) if len(prices) > 1 else 0.5,
         )
-
-    def _get_clob_client(self):
-        """Initialize CLOB client with optional proxy support."""
-        try:
-            from py_clob_client.client import ClobClient
-            import py_clob_client.http_helpers.helpers as clob_helpers
-        except ImportError:
-            logger.error("py-clob-client not installed")
-            return None
-
-        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-        if proxy:
-            logger.info(f"Using proxy: {proxy[:30]}...")
-            clob_helpers._http_client = httpx.Client(
-                http2=True, proxy=proxy, timeout=30.0
-            )
-
-        private_key = self.wallet.get_unlocked_key()
-        address = self.wallet.address
-
-        try:
-            client = ClobClient(
-                "https://clob.polymarket.com",
-                key=private_key,
-                chain_id=137,
-                signature_type=0,
-                funder=address,
-            )
-            creds = client.create_or_derive_api_creds()
-            client.set_api_creds(creds)
-            return client
-        except Exception as e:
-            logger.error(f"CLOB API error: {e}")
-            return None
 
     @staticmethod
     def parse_ctf_token_ids_from_receipt(receipt: dict, ctf_address: str) -> list[str]:
@@ -244,7 +211,9 @@ class TradingExecutor:
         clob_error = None
 
         if not skip_clob_sell and unwanted_token:
-            client = self._get_clob_client()
+            from core.trading.clob_client import get_clob_client
+
+            client = get_clob_client(self.wallet)
             if client:
                 from core.trading.clob import sell_via_clob
 

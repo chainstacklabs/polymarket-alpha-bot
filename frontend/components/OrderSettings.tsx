@@ -51,11 +51,13 @@ function getSettingsServerSnapshot() {
   return ''
 }
 
+interface OrderSettingsProps {
+  dropUp?: boolean
+}
+
 export const OrderSettings = memo(function OrderSettings({
   dropUp = false,
-}: {
-  dropUp?: boolean
-}) {
+}: OrderSettingsProps) {
   const [open, setOpen] = useState(false)
   const rawSettings = useSyncExternalStore(
     subscribeSettings,
@@ -66,6 +68,7 @@ export const OrderSettings = memo(function OrderSettings({
     ? getOrderSettings()
     : DEFAULT_SETTINGS
   const [customSlippage, setCustomSlippage] = useState('')
+  const [slippageError, setSlippageError] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   // Close on outside click
@@ -89,10 +92,13 @@ export const OrderSettings = memo(function OrderSettings({
 
   const handleCustomSlippage = useCallback(() => {
     const val = parseInt(customSlippage, 10)
-    if (val >= 10 && val <= 50) {
-      update({ slippage: val })
-      setCustomSlippage('')
+    if (isNaN(val) || val < 10 || val > 50) {
+      setSlippageError('10-50%')
+      return
     }
+    setSlippageError('')
+    update({ slippage: val })
+    setCustomSlippage('')
   }, [customSlippage, update])
 
   return (
@@ -194,15 +200,21 @@ export const OrderSettings = memo(function OrderSettings({
                 <input
                   type="number"
                   value={customSlippage}
-                  onChange={(e) => setCustomSlippage(e.target.value)}
+                  onChange={(e) => {
+                    setCustomSlippage(e.target.value)
+                    setSlippageError('')
+                  }}
                   onKeyDown={(e) => e.key === 'Enter' && handleCustomSlippage()}
                   onBlur={handleCustomSlippage}
                   placeholder="Custom"
                   min="10"
                   max="50"
-                  className="px-1.5 py-1 bg-transparent border border-border rounded text-[11px] font-mono text-text-secondary placeholder:text-text-muted/40 focus:outline-none focus:border-cyan/50"
+                  className={`px-1.5 py-1 bg-transparent border rounded text-[11px] font-mono text-text-secondary placeholder:text-text-muted/40 focus:outline-none ${slippageError ? 'border-rose/50' : 'border-border focus:border-cyan/50'}`}
                 />
               </div>
+              {slippageError && (
+                <p className="text-[10px] text-rose mt-0.5">{slippageError}</p>
+              )}
             </div>
           </div>
         </div>
