@@ -91,6 +91,26 @@ For EACH relationship, you MUST:
 2. If you can imagine ANY such scenario (even unlikely), DO NOT INCLUDE IT
 3. Only include if the scenario is LOGICALLY IMPOSSIBLE
 
+## BRACKET ALIGNMENT (REQUIRED for each relationship)
+
+Each event has multiple sub-markets (brackets). You must specify how the implication maps across brackets.
+
+RULE: Look at the group type shown in square brackets (e.g. [candidate group], [timeframe group]).
+
+- "match": ONLY for [candidate group] ↔ [candidate group] where both groups share the SAME people/entities.
+  The implication applies per-person: "Cepeda wins 1st round → Cepeda wins election", NOT "Cepeda → Dávila".
+  Example: "Colombia 1st round" [candidate] and "Colombia Election" [candidate] — same candidates → "match"
+
+- "all": For EVERYTHING ELSE. This includes:
+  • [timeframe group] ↔ [timeframe group] — dates are NOT entities to match, each date combo needs evaluation
+  • [timeframe group] ↔ [candidate group] — different bracket types
+  • [threshold group] ↔ anything — different bracket types
+  • [candidate group] ↔ [candidate group] where groups have DIFFERENT people — no shared entities to match
+  Example: "Capture Lyman by [dates]" and "Capture Donetsk by [dates]" → "all" (dates are deadlines, not entities)
+  Example: "Fed Chair nominee" [candidate] and "Fed Chair confirmed by" [timeframe] → "all"
+
+When in doubt, use "all". Using "match" incorrectly on timeframe groups will DISCARD valid pairs.
+
 ## OUTPUT FORMAT (JSON only):
 ```json
 {{
@@ -98,14 +118,16 @@ For EACH relationship, you MUST:
     {{
       "group_title": "exact title from list",
       "explanation": "why other=YES makes target=YES logically certain",
-      "counterexample_attempt": "I tried to imagine [scenario] but it's impossible because [reason]"
+      "counterexample_attempt": "I tried to imagine [scenario] but it's impossible because [reason]",
+      "bracket_alignment": "match or all"
     }}
   ],
   "implies": [
     {{
       "group_title": "exact title from list",
       "explanation": "why target=YES makes other=YES logically certain",
-      "counterexample_attempt": "I tried to imagine [scenario] but it's impossible because [reason]"
+      "counterexample_attempt": "I tried to imagine [scenario] but it's impossible because [reason]",
+      "bracket_alignment": "match or all"
     }}
   ]
 }}
@@ -118,6 +140,37 @@ For EACH relationship, you MUST:
 4. Political/social predictions are almost NEVER necessary (humans are unpredictable)
 5. When in doubt, LEAVE IT OUT
 """
+
+
+# =============================================================================
+# PROMPT HELPERS
+# =============================================================================
+
+
+def format_group_for_prompt(group: dict, max_brackets: int = 8) -> str:
+    """Format group with structure info for the implication prompt."""
+    title = group["title"]
+    partition = group.get("partition_type", "unknown")
+    markets = group.get("markets", [])
+    brackets = [m.get("bracket_label", "?") for m in markets if m.get("bracket_label")]
+
+    if not brackets:
+        return f'"{title}"'
+
+    label = {
+        "candidate": "options",
+        "timeframe": "deadlines",
+        "threshold": "ranges",
+    }.get(partition, "options")
+
+    if len(brackets) <= max_brackets:
+        bracket_str = ", ".join(brackets)
+    else:
+        bracket_str = (
+            ", ".join(brackets[:max_brackets]) + f", ... ({len(brackets)} total)"
+        )
+
+    return f'"{title}" [{partition} group, {len(brackets)} {label}: {bracket_str}]'
 
 
 # =============================================================================
@@ -190,6 +243,7 @@ def derive_covers(
                 "relationship_type": "necessary",
                 "probability": NECESSARY_PROBABILITY,
                 "counterexample_attempt": item.get("counterexample_attempt", ""),
+                "bracket_alignment": item.get("bracket_alignment", "all"),
             }
         )
 
@@ -213,6 +267,7 @@ def derive_covers(
                 "relationship_type": "necessary",
                 "probability": prob,
                 "counterexample_attempt": item.get("counterexample_attempt", ""),
+                "bracket_alignment": item.get("bracket_alignment", "all"),
             }
         )
 
@@ -257,9 +312,9 @@ async def extract_implications(
         # Return cached implications
         return state.get_all_implications()
 
-    # Build context for prompt (all group titles)
+    # Build context for prompt (all groups with structure info)
     group_titles_text = "\n".join(
-        f"{i}. {g['title']}" for i, g in enumerate(all_groups, 1)
+        f"{i}. {format_group_for_prompt(g)}" for i, g in enumerate(all_groups, 1)
     )
 
     # Build lookup tables for matching
@@ -390,9 +445,9 @@ async def extract_implications_batch(
         f"({len(groups) - len(groups_to_process)} cached)"
     )
 
-    # Build context
+    # Build context (enriched with group structure)
     group_titles_text = "\n".join(
-        f"{i}. {g['title']}" for i, g in enumerate(all_groups, 1)
+        f"{i}. {format_group_for_prompt(g)}" for i, g in enumerate(all_groups, 1)
     )
     groups_by_title = {g["title"]: g for g in all_groups}
     groups_by_title_lower = {g["title"].lower().strip(): g for g in all_groups}

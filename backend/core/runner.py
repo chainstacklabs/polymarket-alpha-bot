@@ -247,14 +247,23 @@ async def run_async(
         # STEP 7: Build portfolios
         # =====================================================================
         with tracker.step(7, "Build Portfolios"):
-            if not validated_pairs:
-                portfolios = []
-                portfolio_summary = {"total_portfolios": 0, "by_tier": {}}
-            else:
+            if validated_pairs:
+                # New valid pairs found — rebuild portfolios from all pairs
+                # (build_and_save_portfolios replaces all existing portfolios)
                 portfolios, portfolio_summary = build_and_save_portfolios(
                     validated_pairs=validated_pairs,
                     state=state,
                 )
+            elif not full:
+                # Incremental run with no new valid pairs — keep existing
+                portfolios = state.get_portfolios()
+                portfolio_summary = {
+                    "total_portfolios": len(portfolios),
+                    "by_tier": {},
+                }
+            else:
+                portfolios = []
+                portfolio_summary = {"total_portfolios": 0, "by_tier": {}}
 
             tier_counts = portfolio_summary.get("by_tier", {})
             tier_str = ", ".join(

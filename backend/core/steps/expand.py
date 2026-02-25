@@ -23,6 +23,8 @@ Note:
 """
 
 import hashlib
+import re
+import unicodedata
 from typing import Literal
 
 from loguru import logger
@@ -76,6 +78,31 @@ def is_mutually_exclusive_group(group: dict) -> bool:
     max_same_date = max(resolution_dates.values()) if resolution_dates else 0
 
     return max_same_date > 1
+
+
+# =============================================================================
+# BRACKET ALIGNMENT
+# =============================================================================
+
+
+def normalize_bracket(bracket: str | None) -> str:
+    """Normalize bracket label for matching: strip accents, parentheticals, lowercase."""
+    if not bracket:
+        return ""
+    # Strip accents
+    nfkd = unicodedata.normalize("NFKD", bracket)
+    text = "".join(c for c in nfkd if not unicodedata.combining(c))
+    # Strip parenthetical suffixes: (DC), (IND), (HC), etc.
+    text = re.sub(r"\s*\([^)]*\)\s*$", "", text)
+    return text.lower().strip()
+
+
+def brackets_match(a: str | None, b: str | None) -> bool:
+    """Check if two bracket labels refer to the same entity."""
+    na, nb = normalize_bracket(a), normalize_bracket(b)
+    if not na or not nb:
+        return False
+    return na == nb or na in nb or nb in na
 
 
 # =============================================================================
@@ -182,6 +209,7 @@ def expand_implication_to_pairs(
         )
 
     pairs = []
+    bracket_filtered = 0
 
     target_group_slug = target_group.get("slug", "")
 
@@ -197,6 +225,17 @@ def expand_implication_to_pairs(
         # Expand YES covers (for target_YES position)
         for cover_info in yes_covering_groups:
             cover_markets = get_cover_markets(cover_info, groups_by_id, target_group_id)
+
+            # Filter by bracket alignment
+            if cover_info.get("bracket_alignment") == "match":
+                pre_filter = len(cover_markets)
+                cover_markets = [
+                    cm
+                    for cm in cover_markets
+                    if brackets_match(target_bracket, cm["bracket_label"])
+                ]
+                bracket_filtered += pre_filter - len(cover_markets)
+
             for cm in cover_markets:
                 pair_id = generate_pair_id(
                     target_market_id, "YES", cm["market_id"], cm["cover_position"]
@@ -239,6 +278,17 @@ def expand_implication_to_pairs(
                 cover_markets = get_cover_markets(
                     cover_info, groups_by_id, target_group_id
                 )
+
+                # Filter by bracket alignment
+                if cover_info.get("bracket_alignment") == "match":
+                    pre_filter = len(cover_markets)
+                    cover_markets = [
+                        cm
+                        for cm in cover_markets
+                        if brackets_match(target_bracket, cm["bracket_label"])
+                    ]
+                    bracket_filtered += pre_filter - len(cover_markets)
+
                 for cm in cover_markets:
                     pair_id = generate_pair_id(
                         target_market_id, "NO", cm["market_id"], cm["cover_position"]
@@ -272,6 +322,12 @@ def expand_implication_to_pairs(
                             "relationship_type": cm["relationship_type"],
                         }
                     )
+
+    if bracket_filtered:
+        logger.info(
+            f"  Bracket alignment filtered {bracket_filtered} cross-entity pairs "
+            f"for {target_title[:60]}"
+        )
 
     return pairs
 
