@@ -84,6 +84,12 @@ This repo is configured for [Claude Code](https://docs.anthropic.com/en/docs/cla
 
 Hooks and skills are Claude Code-specific. `CLAUDE.md` is also read by [GitHub Copilot in VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-a-claudemd-file) (opt-in via `chat.useClaudeMdFile`).
 
+## Experiments
+
+| Folder | Description |
+|--------|-------------|
+| [`experiments/onchain-otc/`](experiments/onchain-otc/) | On-chain OTC trading without the CLOB — split/merge, P2P transfers, atomic escrow, NegRisk conversions, and intent-based settlement on an Anvil fork of Polygon |
+
 ---
 
 **Disclaimer:** This software is provided as-is for educational and research purposes only. It is not financial advice. Trading prediction markets involves risk—you may lose money. Use at your own discretion.
