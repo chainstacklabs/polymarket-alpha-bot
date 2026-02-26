@@ -883,7 +883,7 @@ Intents don't eliminate the counterparty — they replace a **single trusted ope
 
 ## File Layout
 
-```
+```text
 experiments/onchain-otc/
 ├── README.md             # This file — findings, gotchas, educational notes
 ├── anvil.sh              # Start forked chain

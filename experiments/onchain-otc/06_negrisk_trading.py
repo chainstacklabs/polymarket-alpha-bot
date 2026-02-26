@@ -102,9 +102,14 @@ def fetch_negrisk_event() -> dict:
                     "no_id": int(tokens[1]),
                     "yes_price": float(prices[0]),
                 })
+            if len(parsed) < 3:
+                continue
+            market_id = markets[0].get("negRiskMarketID", "")
+            if not market_id:
+                continue
             return {
                 "title": e.get("title", "?"),
-                "neg_risk_market_id": markets[0].get("negRiskMarketID", ""),
+                "neg_risk_market_id": market_id,
                 "markets": parsed,
             }
     raise RuntimeError("No suitable NegRisk event found")
@@ -118,7 +123,9 @@ def snapshot(w3) -> str:
 
 def revert(w3, snap_id: str):
     """Revert to a snapshot."""
-    w3.provider.make_request("evm_revert", [snap_id])
+    result = w3.provider.make_request("evm_revert", [snap_id])
+    if not result.get("result"):
+        raise RuntimeError(f"Failed to revert snapshot {snap_id}")
 
 
 def cond_bytes(condition_id: str) -> bytes:
@@ -392,7 +399,7 @@ def main():
         log.info("\n   Alice: %d YES[0], %d NO[0] — pure YES exposure!", yes_0, no_0)
         log.info("   Total gas: %d (~$%.4f at 30 gwei)", s4_gas_total, s4_gas_total * 30e9 / 1e18 * 0.5)
     else:
-        log.info("   Convert reverted — falling back to split-all approach")
+        log.info("   Convert reverted — skipping scenario (no fallback implemented)")
 
     revert(w3, base_snap)
     base_snap = snapshot(w3)

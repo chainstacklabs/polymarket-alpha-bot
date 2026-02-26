@@ -223,9 +223,12 @@ def main():
     log.info("  Time advanced 60s past deadline")
 
     try:
-        escrow.functions.fillOffer(expiry_offer_id).transact({"from": bob, "gas": 200_000})
-        # Check receipt status since we used explicit gas
-        log.info("  Expired fill: tx submitted (checking receipt...)")
+        tx = escrow.functions.fillOffer(expiry_offer_id).transact({"from": bob, "gas": 200_000})
+        receipt = w3.eth.wait_for_transaction_receipt(tx)
+        if receipt["status"] == 0:
+            log.info("  Expired fill: Reverted as expected")
+        else:
+            log.error("  Expired fill: UNEXPECTEDLY SUCCEEDED")
     except (ContractLogicError, Web3RPCError):
         log.info("  Expired fill: Reverted as expected")
 
@@ -255,8 +258,12 @@ def main():
     w3.eth.wait_for_transaction_receipt(tx)
 
     try:
-        escrow.functions.fillOffer(restricted_offer_id).transact({"from": charlie, "gas": 200_000})
-        log.info("  Charlie fill: tx submitted — checking if it actually reverted on-chain...")
+        tx = escrow.functions.fillOffer(restricted_offer_id).transact({"from": charlie, "gas": 200_000})
+        receipt = w3.eth.wait_for_transaction_receipt(tx)
+        if receipt["status"] == 0:
+            log.info("  Charlie rejected as expected (reverted on-chain)")
+        else:
+            log.error("  Charlie fill: UNEXPECTEDLY SUCCEEDED")
     except (ContractLogicError, Web3RPCError):
         log.info("  Charlie rejected as expected")
 
@@ -283,8 +290,12 @@ def main():
     log.info("  First fill: OK")
 
     try:
-        escrow.functions.fillOffer(double_offer_id).transact({"from": bob, "gas": 200_000})
-        log.info("  Double fill: tx submitted (should revert on-chain)")
+        tx = escrow.functions.fillOffer(double_offer_id).transact({"from": bob, "gas": 200_000})
+        receipt = w3.eth.wait_for_transaction_receipt(tx)
+        if receipt["status"] == 0:
+            log.info("  Double fill: Reverted as expected")
+        else:
+            log.error("  Double fill: UNEXPECTEDLY SUCCEEDED")
     except (ContractLogicError, Web3RPCError):
         log.info("  Double fill: Reverted as expected")
 

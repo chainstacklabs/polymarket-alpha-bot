@@ -186,10 +186,10 @@ def main():
         log.info("Alice CTF token %s: %s units", tid, bal)
 
     # Also check using the CLOB token IDs from API (should match minted IDs)
-    for label, token_id_str in [("YES", market["yes_token_id"]), ("NO", market["no_token_id"])]:
-        tid = int(token_id_str)
+    for label, token_id in [("YES", market["yes_token_id"]), ("NO", market["no_token_id"])]:
+        tid = int(token_id)
         bal = ctf.functions.balanceOf(alice, tid).call()
-        log.info("Alice %s (CLOB ID %s...): %s units", label, token_id_str[:20], bal)
+        log.info("Alice %s (CLOB ID %s...): %s units", label, str(token_id)[:20], bal)
 
     # --- Step 6: Verify merge works (round-trip) ---
     log.info("\n--- Merging back (round-trip test) ---")

@@ -196,11 +196,12 @@ def main():
     index_set = 1  # convert using question 0
     convert_amount = 5 * 10**6  # convert 5 units (we have 10 per question)
 
-    log.info("indexSet=%d (binary: %s) — converting NO from questions 0-%d",
-             index_set, bin(index_set), num_to_split - 1)
-    log.info("Expected: collateral = %d * (questions_in_set - 1) = %d * %d = $%d",
-             convert_amount // 10**6, convert_amount // 10**6, num_to_split - 1,
-             (convert_amount // 10**6) * (num_to_split - 1))
+    bits_in_set = bin(index_set).count("1")
+    log.info("indexSet=%d (binary: %s, %d bit(s) set) — converting via question 0",
+             index_set, bin(index_set), bits_in_set)
+    expected_collateral = (convert_amount // 10**6) * max(bits_in_set - 1, 0)
+    log.info("Expected collateral: $%d (amount × (bits_set - 1) = %d × %d)",
+             expected_collateral, convert_amount // 10**6, max(bits_in_set - 1, 0))
 
     usdc_before_convert = usdc.functions.balanceOf(alice).call()
 
@@ -215,14 +216,7 @@ def main():
         tx = adapter.functions.convertPositions(market_id_bytes, index_set, convert_amount).transact({"from": alice, "gas": 20_000_000})
         receipt = w3.eth.wait_for_transaction_receipt(tx)
         if receipt["status"] == 0:
-            log.error("convertPositions reverted on-chain!")
-            log.info("Trying single question (indexSet=1)...")
-            tx = adapter.functions.convertPositions(market_id_bytes, 1, convert_amount).transact({"from": alice, "gas": 20_000_000})
-            receipt = w3.eth.wait_for_transaction_receipt(tx)
-            if receipt["status"] == 0:
-                log.error("indexSet=1 also reverted. Need to investigate NegRiskAdapter internals.")
-            else:
-                log.info("indexSet=1 succeeded! gas=%d", receipt["gasUsed"])
+            log.error("convertPositions reverted on-chain! Need to investigate NegRiskAdapter internals.")
         else:
             log.info("Convert tx: %s (gas: %d)", receipt["transactionHash"].hex(), receipt["gasUsed"])
     except (ContractLogicError, Web3RPCError) as e:

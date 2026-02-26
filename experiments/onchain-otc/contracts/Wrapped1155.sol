@@ -49,6 +49,7 @@ contract Wrapped1155 {
     }
 
     function transfer(address to, uint256 amount) external returns (bool) {
+        require(to != address(0), "zero address");
         balanceOf[msg.sender] -= amount;
         balanceOf[to] += amount;
         emit Transfer(msg.sender, to, amount);
@@ -56,6 +57,7 @@ contract Wrapped1155 {
     }
 
     function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        require(to != address(0), "zero address");
         uint256 allowed = allowance[from][msg.sender];
         if (allowed != type(uint256).max) {
             allowance[from][msg.sender] = allowed - amount;

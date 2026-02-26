@@ -99,7 +99,9 @@ def snapshot(w3: Web3) -> str:
 
 
 def revert(w3: Web3, snap_id: str):
-    w3.provider.make_request("evm_revert", [snap_id])
+    result = w3.provider.make_request("evm_revert", [snap_id])
+    if not result.get("result"):
+        raise RuntimeError(f"Failed to revert snapshot {snap_id}")
 
 
 def fetch_negrisk_event() -> dict:
