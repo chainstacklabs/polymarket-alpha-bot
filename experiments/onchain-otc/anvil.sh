@@ -24,7 +24,7 @@ fi
 FORK_URL="${FORK_URL:-${CHAINSTACK_NODE:?Set CHAINSTACK_NODE in .env (must be archive node)}}"
 
 echo "=== Anvil Polygon Fork ==="
-echo "RPC source: $FORK_URL"
+echo "RPC source: ${FORK_URL%%\?*}"
 echo "Local RPC:  http://127.0.0.1:8545"
 echo "Chain ID:   137 (Polygon mainnet)"
 echo ""

@@ -96,8 +96,8 @@ def fetch_active_market() -> dict:
                 return {
                     "question": m.get("question", "?"),
                     "condition_id": condition_id,
-                    "yes_token_id": tokens[0],
-                    "no_token_id": tokens[1],
+                    "yes_token_id": int(tokens[0]),
+                    "no_token_id": int(tokens[1]),
                 }
 
     raise RuntimeError("No suitable active market found")

@@ -424,10 +424,8 @@ def main():
     log.info("  10a PASS: Replay attack rejected (nonce incremented to %d)",
              settlement.functions.nonces(alice).call())
 
-    # 10b: Tampered signature — Bob tries to fill with his own address as seller
+    # 10b: Tampered signature — use Alice's signature but claim Charlie is the seller
     charlie = w3.eth.accounts[2]
-    fake_intent = {**intent_data, "seller": charlie, "nonce": 0}
-    # Use the same signature (from Alice) but claim Charlie is the seller
     tx = settlement.functions.fillIntent(
         (charlie, wrapper_addr, wrap_amount, Web3.to_checksum_address(USDC_E), price, deadline, 0),
         price, v, r, s,
@@ -437,6 +435,7 @@ def main():
     log.info("  10b PASS: Tampered signature rejected (ecrecover mismatch)")
 
     # 10c: Expired intent
+    snap_before_expiry = snapshot(w3)
     w3.provider.make_request("evm_increaseTime", [7200])  # +2 hours
     w3.provider.make_request("evm_mine", [])
 
@@ -452,9 +451,8 @@ def main():
     assert receipt["status"] == 0, "Expired intent should revert!"
     log.info("  10c PASS: Expired intent rejected")
 
-    # Revert time for step 11
-    w3.provider.make_request("evm_increaseTime", [-7200])
-    w3.provider.make_request("evm_mine", [])
+    # Revert to pre-expiry state for step 11
+    revert(w3, snap_before_expiry)
 
     # === Step 11: Bob unwraps to get native CTF tokens ===
     log.info("\n--- Step 11: Bob unwraps wYES → native CTF YES tokens ---")

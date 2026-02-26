@@ -100,6 +100,8 @@ contract Wrapped1155Factory {
 
     /// @notice Called when ERC-1155 tokens are transferred to this contract.
     ///         THIS IS THE WRAP FUNCTION — just safeTransferFrom your tokens here.
+    /// @dev First wrap for a new tokenId costs ~650k gas (deploys wrapper).
+    ///      Subsequent wraps cost ~57k gas. Provide sufficient gas limit.
     function onERC1155Received(
         address,
         address from,

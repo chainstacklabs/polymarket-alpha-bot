@@ -269,7 +269,7 @@ def main():
 
     # USDC.e must be approved for the exchange (setup_accounts.py only approves CTF + adapter)
     max_uint = 2**256 - 1
-    for name, addr in [("Alice", alice), ("Bob", bob)]:
+    for _, addr in [("Alice", alice), ("Bob", bob)]:
         tx = usdc_full.functions.approve(Web3.to_checksum_address(CTF_EXCHANGE), max_uint).transact({"from": addr})
         w3.eth.wait_for_transaction_receipt(tx)
     log.info("USDC.e approved for CTF Exchange (Alice & Bob)")
@@ -278,7 +278,7 @@ def main():
     condition_bytes = bytes.fromhex(
         market["condition_id"][2:] if market["condition_id"].startswith("0x") else market["condition_id"]
     )
-    for name, addr in [("Alice", alice), ("Bob", bob)]:
+    for _, addr in [("Alice", alice), ("Bob", bob)]:
         bal = ctf.functions.balanceOf(addr, yes_id).call()
         if bal < 50 * 10**6:
             tx = ctf.functions.splitPosition(

@@ -19,7 +19,6 @@ USAGE
 
 import json
 import logging
-import time
 from pathlib import Path
 
 import httpx
@@ -172,8 +171,9 @@ def main():
     print_state("After", ctf, usdc, alice, bob, yes_id)
 
     # Verify offer is no longer active
+    # Offer struct: (maker, erc1155, tokenId, amount, erc20, price, taker, deadline, active)
     offer = escrow.functions.getOffer(offer_id).call()
-    log.info("  Offer active: %s", offer[8])  # active field
+    log.info("  Offer active: %s", offer[8])
     assert not offer[8], "Offer should be inactive after fill"
     log.info("  Test 1: PASS")
 

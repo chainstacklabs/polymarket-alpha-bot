@@ -198,7 +198,7 @@ This is the on-chain equivalent of a DEX limit order — but permissionless, wit
 
 ### Contract Design (`OTCEscrow.sol`)
 
-```
+```text
 createOffer(ctf, tokenId, amount, wantToken, wantAmount, deadline, taker)
   → Maker deposits ERC-1155 tokens into escrow
   → Returns offerId
@@ -267,7 +267,7 @@ This is permissionless — anyone can convert without touching the CLOB. It's es
 
 ### How `convertPositions` Works (Step by Step)
 
-```
+```text
 Market: "Who wins?" — 4 outcomes [A, B, C, D]
 Alice splits question A: now holds 100 YES[A] + 100 NO[A]
 
@@ -346,7 +346,7 @@ This scenario explores the operator mechanics: EIP-712 signing, order struct, `f
 
 ### EIP-712 Order Struct
 
-```
+```text
 EIP712Domain {
     name: "Polymarket CTF Exchange"
     version: "1"
@@ -485,7 +485,7 @@ We test every trading scenario — getting pure YES exposure, pure NO exposure, 
 
 The most important finding: **split + convert produces YES on ALL outcomes, which is worth exactly $1 regardless of who wins.** This is break-even, not a directional bet.
 
-```
+```text
 Split $100 on question A → 100 YES[A] + 100 NO[A]
 Convert NO[A]             → +100 YES[B] + 100 YES[C] + 100 YES[D]
 
@@ -499,7 +499,7 @@ To get actual directional exposure, you **must sell the unwanted tokens** to a c
 ### Trading Scenarios (Practical Guide)
 
 **"I'm bullish on A" → Pure YES[A]:**
-```
+```text
 1. Split $100 on A          → 100 YES[A] + 100 NO[A]     (220k gas)
 2. Convert NO[A]            → +100 YES[B,C,D]             (473k gas)
 3. OTC sell YES[B,C,D]      → receive ~$(1-price_A) USDC  (52k × 3 gas)
@@ -508,7 +508,7 @@ To get actual directional exposure, you **must sell the unwanted tokens** to a c
 ```
 
 **"I'm bullish on A" (simpler, no convert):**
-```
+```text
 1. Split $100 on A          → 100 YES[A] + 100 NO[A]     (220k gas)
 2. OTC sell NO[A]           → receive ~$(1-price_A) USDC  (52k gas)
    Net cost: ~$price_A per token
@@ -516,7 +516,7 @@ To get actual directional exposure, you **must sell the unwanted tokens** to a c
 ```
 
 **"I'm bearish on A" → Pure NO[A]:**
-```
+```text
 1. Split $100 on A          → 100 YES[A] + 100 NO[A]     (220k gas)
 2. OTC sell YES[A]          → receive ~$price_A USDC      (52k gas)
    Net cost: ~$(1-price_A) per token
@@ -557,7 +557,7 @@ The Scenario 4 failure was likely caused by the large market (40 on-chain questi
 
 **What are intents?** An intent is a signed, declarative message where a user specifies a desired outcome rather than an explicit execution path. Instead of constructing a specific transaction ("split on CTF, sell on CLOB"), the user signs: "I want to sell 100 YES tokens and receive at least 45 USDC.e." Specialized actors called **solvers** compete to fulfill it optimally.
 
-```
+```text
 Traditional tx:  User → "call swap(tokenA, tokenB, amount) on router 0xABC"
 Intent:          User → "I want ≥45 USDC.e for my 100 YES tokens, figure it out"
 ```
@@ -579,6 +579,7 @@ Key properties:
 | UniswapX | Not confirmed on Polygon | No | Permissionless fillers, Dutch auction |
 | Across Protocol | Live (bridge) | No | Cross-chain intent bridge, sub-2s fills |
 | ERC-7683 standard | Spec only | No | Uses Permit2 (ERC-20 only) |
+
 All intent protocols are built around ERC-20 `approve()` + `transferFrom()`. ERC-1155 uses `setApprovalForAll` — fundamentally different pattern. (Note: Seaport supports ERC-1155 natively but is order-based, not intent-based — no solver competition.)
 
 ### Prior Art: Gnosis `1155-to-20` Wrapper
@@ -596,7 +597,7 @@ The bridge between ERC-1155 and intent protocols is the **Gnosis wrapper** — c
 
 **How it works:**
 
-```
+```text
 User's Polymarket YES token (ERC-1155, tokenId=12345)
     │
     │  safeTransferFrom(user, factory, tokenId, amount, "")
@@ -620,7 +621,7 @@ Wrapped YES token (standard ERC-20)
 
 ### Approach: Wrapper + CoW Protocol
 
-```
+```text
 CTF ERC-1155 → wrap → wYES (ERC-20) → CoW Protocol intent → solver fills → USDC.e
 ```
 
@@ -719,7 +720,7 @@ settlement.functions.fillIntent(
 
 ### Contract Design (`IntentSettlement.sol`)
 
-```
+```text
 fillIntent(SellIntent intent, uint256 buyAmount, uint8 v, bytes32 r, bytes32 s)
   → Verifies EIP-712 signature via ecrecover
   → Checks: deadline, nonce, minBuyAmount
@@ -744,7 +745,7 @@ cancelAll()
 
 ### Architecture
 
-```
+```text
               wrap                sign intent        fillIntent()
 CTF ERC-1155  ────►  wYES  ──────────────────►  IntentSettlement  ──►  USDC.e
 (YES token)   ◄────  wYES  ◄── unwrap ◄─────   (on-chain swap)
@@ -763,7 +764,7 @@ IntentSettlement (our contract):
 
 **The permissionless marketplace:**
 
-```
+```text
 Alice signs intent:                            Bob (agent/solver):
 "sell 50 wYES for ≥$45 USDC"                  sees intent, evaluates price
       │                                               │

@@ -151,7 +151,7 @@ def main():
     num_to_split = len(markets)  # must split ALL questions for convertPositions
 
     usdc_before = usdc.functions.balanceOf(alice).call()
-    log.info("\n--- Step 1: Split $50 each on %d questions via NegRiskAdapter ---", num_to_split)
+    log.info("\n--- Step 1: Split $%d each on %d questions via NegRiskAdapter ---", split_amount // 10**6, num_to_split)
     log.info("Alice USDC.e before: $%.2f", usdc_before / 1e6)
 
     for i in range(num_to_split):

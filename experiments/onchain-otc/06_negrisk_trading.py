@@ -195,7 +195,7 @@ def main():
     log.info("SCENARIO 1: Split one question → get YES[0] + NO[0]")
     log.info("=" * 70)
 
-    gas, status = split_question(adapter, w3, alice, markets[0]["condition_id"], AMOUNT)
+    gas, _ = split_question(adapter, w3, alice, markets[0]["condition_id"], AMOUNT)
     log.info("Split $100 on [0] '%s': gas=%d", favorite, gas)
 
     y0 = ctf.functions.balanceOf(alice, markets[0]["yes_id"]).call()
