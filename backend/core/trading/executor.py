@@ -22,6 +22,7 @@ class MarketInfo:
     no_token_id: Optional[str]
     yes_price: float
     no_price: float
+    neg_risk: bool = False
 
 
 @dataclass
@@ -83,6 +84,7 @@ class TradingExecutor:
             no_token_id=clob_tokens[1] if len(clob_tokens) > 1 else None,
             yes_price=float(prices[0]) if prices else 0.5,
             no_price=float(prices[1]) if len(prices) > 1 else 0.5,
+            neg_risk=bool(data.get("negRisk", False)),
         )
 
     @staticmethod
@@ -112,21 +114,38 @@ class TradingExecutor:
         self,
         condition_id: str,
         amount_usd: float,
+        neg_risk: bool = False,
     ) -> tuple[str, list[str]]:
-        """Split USDC into YES + NO tokens. Returns (tx_hash, [ctf_token_ids])."""
+        """Split USDC into YES + NO tokens. Returns (tx_hash, [ctf_token_ids]).
+
+        For binary markets, splits via CTF directly.
+        For NegRisk (multi-outcome) markets, splits via the NegRisk adapter
+        so minted tokens match CLOB token IDs.
+        """
         w3 = self._get_web3()
         address = Web3.to_checksum_address(self.wallet.address)
         account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
 
+        # NegRisk adapter has the same splitPosition(5-param) ABI as CTF
+        split_contract_addr = (
+            CONTRACTS["NEG_RISK_ADAPTER"] if neg_risk else CONTRACTS["CTF"]
+        )
         ctf = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["CTF"]),
+            address=Web3.to_checksum_address(split_contract_addr),
             abi=CTF_ABI,
+        )
+        logger.info(
+            f"Split via {'NegRisk adapter' if neg_risk else 'CTF'}: {split_contract_addr[:10]}..."
         )
 
         amount_wei = int(amount_usd * 1e6)
         condition_bytes = bytes.fromhex(
             condition_id[2:] if condition_id.startswith("0x") else condition_id
         )
+
+        # Use 20% gas price bump to avoid TX being dropped during congestion
+        base_gas_price = w3.eth.gas_price
+        gas_price = int(base_gas_price * 1.2)
 
         tx = ctf.functions.splitPosition(
             Web3.to_checksum_address(CONTRACTS["USDC_E"]),
@@ -139,18 +158,18 @@ class TradingExecutor:
                 "from": address,
                 "nonce": w3.eth.get_transaction_count(address),
                 "gas": 300000,
-                "gasPrice": w3.eth.gas_price,
+                "gasPrice": gas_price,
                 "chainId": 137,
             }
         )
 
         signed = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        logger.info(f"Split TX: {tx_hash.hex()}")
+        logger.info(f"Split TX: {tx_hash.hex()} (gasPrice={gas_price})")
 
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
         if receipt["status"] != 1:
-            raise ValueError(f"Split failed: {tx_hash.hex()}")
+            raise ValueError(f"Split reverted on-chain: {tx_hash.hex()}")
 
         ctf_token_ids = self.parse_ctf_token_ids_from_receipt(receipt, CONTRACTS["CTF"])
         logger.info(f"Split minted CTF tokens: {ctf_token_ids}")
@@ -190,7 +209,9 @@ class TradingExecutor:
 
         # Split position
         try:
-            split_tx, ctf_token_ids = self._split_position(market.condition_id, amount)
+            split_tx, ctf_token_ids = self._split_position(
+                market.condition_id, amount, neg_risk=market.neg_risk
+            )
         except Exception as e:
             return TradeResult(
                 success=False,

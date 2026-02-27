@@ -6,10 +6,18 @@ from typing import Optional
 from loguru import logger
 
 
-def compute_sell_price(price: float, slippage: float) -> float:
-    """Compute worst-case sell price with slippage. Matches CLOB order logic."""
+def _tick_decimals(tick_size: float) -> int:
+    """Count decimal places from a tick size value."""
+    tick_str = f"{tick_size:.10f}".rstrip("0")
+    return len(tick_str.split(".")[1]) if "." in tick_str else 0
+
+
+def compute_sell_price(price: float, slippage: float, tick_size: float = 0.01) -> float:
+    """Compute worst-case sell price with slippage, rounded to tick size."""
     slippage_pct = max(10, min(50, slippage))
-    return round(max(price * (1 - slippage_pct / 100), 0.01), 2)
+    raw = price * (1 - slippage_pct / 100)
+    decimals = _tick_decimals(tick_size)
+    return round(max(raw, tick_size), decimals)
 
 
 def sell_via_clob(
@@ -42,7 +50,13 @@ def sell_via_clob(
         from py_clob_client.clob_types import MarketOrderArgs, OrderType
         from py_clob_client.order_builder.constants import SELL
 
-        sell_price = compute_sell_price(price, slippage)
+        # Fetch market's tick size for correct price precision
+        try:
+            tick_size = float(client.get_tick_size(token_id))
+        except Exception:
+            tick_size = 0.01  # fallback
+
+        sell_price = compute_sell_price(price, slippage, tick_size)
 
         order = client.create_market_order(
             MarketOrderArgs(
@@ -61,7 +75,9 @@ def sell_via_clob(
             return None, 0.0, error_msg
 
         order_id = result.get("orderID", str(result)[:40])
-        logger.info(f"CLOB market sell (price={sell_price}): {order_id}")
+        logger.info(
+            f"CLOB market sell (price={sell_price}, tick={tick_size}): {order_id}"
+        )
 
         # FAK orders fill immediately — check actual matched size
         filled_size = _get_filled_size(client, order_id)

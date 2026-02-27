@@ -120,7 +120,12 @@ class WalletManager:
         )
 
         # Check USDC approvals
-        for contract in ["CTF", "CTF_EXCHANGE", "NEG_RISK_CTF_EXCHANGE"]:
+        for contract in [
+            "CTF",
+            "CTF_EXCHANGE",
+            "NEG_RISK_CTF_EXCHANGE",
+            "NEG_RISK_ADAPTER",
+        ]:
             allowance = usdc.functions.allowance(checksum, CONTRACTS[contract]).call()
             if allowance == 0:
                 return False
@@ -183,6 +188,7 @@ class WalletManager:
             (usdc, "approve", CONTRACTS["CTF"], MAX_UINT256),
             (usdc, "approve", CONTRACTS["CTF_EXCHANGE"], MAX_UINT256),
             (usdc, "approve", CONTRACTS["NEG_RISK_CTF_EXCHANGE"], MAX_UINT256),
+            (usdc, "approve", CONTRACTS["NEG_RISK_ADAPTER"], MAX_UINT256),
             (ctf, "setApprovalForAll", CONTRACTS["CTF_EXCHANGE"], True),
             (ctf, "setApprovalForAll", CONTRACTS["NEG_RISK_CTF_EXCHANGE"], True),
             (ctf, "setApprovalForAll", CONTRACTS["NEG_RISK_ADAPTER"], True),

@@ -123,6 +123,7 @@ export interface Position {
 
   state: 'active' | 'pending' | 'partial' | 'complete'
   entry_net_cost: number
+  realized_proceeds: number
   current_value: number
   pnl: number
   pnl_pct: number

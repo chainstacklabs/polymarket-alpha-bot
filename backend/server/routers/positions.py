@@ -114,6 +114,7 @@ class PositionResponse(BaseModel):
     # Derived
     state: str
     entry_net_cost: float  # Actual cost after selling unwanted tokens
+    realized_proceeds: float  # USDC recovered from exit sells/merges
     current_value: float
     pnl: float
     pnl_pct: float
