@@ -309,7 +309,7 @@ def cmd_approve():
                     "from": address,
                     "nonce": w3.eth.get_transaction_count(address),
                     "gas": 100000,
-                    "gasPrice": w3.eth.gas_price,
+                    "gasPrice": int(w3.eth.gas_price * 1.2),
                     "chainId": 137,
                 }
             )
@@ -318,7 +318,7 @@ def cmd_approve():
             tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
             print(f"  TX: {tx_hash.hex()[:20]}...")
 
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
             status = "OK" if receipt["status"] == 1 else "FAILED"
             print(f"  Status: {status}")
 
