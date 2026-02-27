@@ -88,6 +88,7 @@ class LivePosition:
     # Derived state
     state: str  # active, pending, partial, complete
     entry_net_cost: float  # Actual cost after selling unwanted tokens
+    realized_proceeds: float  # USDC recovered from exit sells/merges
     current_value: float
     pnl: float
     pnl_pct: float
@@ -307,6 +308,7 @@ class PositionService:
         self,
         gross_cost: float,
         net_cost: float,
+        realized_proceeds: float,
         target_wanted: float,
         target_unwanted: float,
         cover_wanted: float,
@@ -314,7 +316,11 @@ class PositionService:
         target_price: float,
         cover_price: float,
     ) -> tuple[float, float, float]:
-        """Calculate current value, P&L, and P&L percentage."""
+        """Calculate current value, P&L, and P&L percentage.
+
+        current_value = token_holdings_value + realized_proceeds (from exit sells/merges).
+        effective_cost = gross_cost if unwanted tokens remain, else net_cost.
+        """
         target_mergeable = min(target_wanted, target_unwanted)
         cover_mergeable = min(cover_wanted, cover_unwanted)
 
@@ -335,7 +341,7 @@ class PositionService:
             + (cover_excess_unwanted * cover_unwanted_price)
         )
 
-        current_value = merge_value + market_value
+        current_value = merge_value + market_value + realized_proceeds
 
         has_significant_unwanted = (target_unwanted > 0.01) or (cover_unwanted > 0.01)
         effective_cost = gross_cost if has_significant_unwanted else net_cost
@@ -541,10 +547,12 @@ class PositionService:
             net_cost = amount * (
                 entry["target_entry_price"] + entry["cover_entry_price"]
             )
+            realized_proceeds = entry.get("realized_proceeds", 0.0)
 
             current_value, pnl, pnl_pct = self._calculate_pnl(
                 gross_cost,
                 net_cost,
+                realized_proceeds,
                 target_wanted,
                 target_unwanted,
                 cover_wanted,
@@ -587,6 +595,7 @@ class PositionService:
                     cover_unwanted_balance=round(cover_unwanted, 4),
                     state=state,
                     entry_net_cost=round(net_cost, 4),
+                    realized_proceeds=realized_proceeds,
                     current_value=current_value,
                     pnl=pnl,
                     pnl_pct=pnl_pct,

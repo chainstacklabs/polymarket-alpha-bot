@@ -216,7 +216,14 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
       }
 
       setResult(data)
-      setBuyStep(data.success ? 'success' : 'error')
+      // Partial success: at least one split went through — show success view with warnings
+      const anySplit = data.target?.split_tx || data.cover?.split_tx
+      if (data.success || anySplit) {
+        setBuyStep('success')
+      } else {
+        setError(data.target?.error || data.cover?.error || 'Trade failed')
+        setBuyStep('error')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Trade failed')
       setBuyStep('error')
@@ -283,7 +290,8 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                     <span
                       className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${p.target_position === 'YES' ? 'bg-emerald/15 text-emerald' : 'bg-rose/15 text-rose'}`}
                     >
-                      {p.target_position} @ ${p.target_price.toFixed(2)}
+                      {p.target_position} @ $
+                      {Math.max(0.01, p.target_price).toFixed(2)}
                     </span>
                     {p.target_group_slug && (
                       <button
@@ -347,7 +355,8 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                     <span
                       className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${p.cover_position === 'YES' ? 'bg-emerald/15 text-emerald' : 'bg-rose/15 text-rose'}`}
                     >
-                      {p.cover_position} @ ${p.cover_price.toFixed(2)}
+                      {p.cover_position} @ $
+                      {Math.max(0.01, p.cover_price).toFixed(2)}
                     </span>
                     {p.cover_group_slug && (
                       <button
@@ -632,13 +641,11 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
 
               {result.warnings && result.warnings.length > 0 && (
                 <div className="bg-amber-500/10 border border-amber-500/25 rounded-lg p-2 space-y-1">
-                  <p className="text-amber-500 text-xs font-medium">
-                    Splits succeeded but CLOB sells were blocked.
-                  </p>
-                  <p className="text-amber-500 text-xs">
-                    Enable your proxy, then go to Positions to sell unwanted
-                    tokens.
-                  </p>
+                  {result.warnings.map((w: string, i: number) => (
+                    <p key={i} className="text-amber-500 text-xs">
+                      {w}
+                    </p>
+                  ))}
                 </div>
               )}
 

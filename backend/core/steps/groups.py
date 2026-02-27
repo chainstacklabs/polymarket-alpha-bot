@@ -36,7 +36,9 @@ FILTER_PLACEHOLDERS = True
 PLACEHOLDER_PATTERN = re.compile(r"^Person [A-Z]$")
 
 # Minimum markets for a group to be useful for covering
-MIN_MARKETS_PER_GROUP = 2
+# Set to 1: single-market events are valid hedge participants (e.g. Polymarket
+# sometimes splits timeframe brackets into separate single-market events)
+MIN_MARKETS_PER_GROUP = 1
 
 
 # =============================================================================

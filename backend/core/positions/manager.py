@@ -95,15 +95,28 @@ class PositionManager:
         self,
         condition_id: str,
         amount: float,
+        neg_risk: bool = False,
     ) -> tuple[Optional[str], Optional[str]]:
-        """Merge YES+NO tokens back to USDC via CTF contract. Returns (tx_hash, error)."""
+        """Merge YES+NO tokens back to USDC. Returns (tx_hash, error).
+
+        For binary markets, merges via CTF directly.
+        For NegRisk (multi-outcome) markets, merges via the NegRisk adapter.
+        """
         w3 = self._get_web3()
         address = Web3.to_checksum_address(self.wallet.address)
         account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
 
-        ctf = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["CTF"]),
+        # NegRisk adapter has the same mergePositions ABI as CTF
+        merge_contract_addr = (
+            CONTRACTS["NEG_RISK_ADAPTER"] if neg_risk else CONTRACTS["CTF"]
+        )
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(merge_contract_addr),
             abi=CTF_ABI,
+        )
+        logger.info(
+            f"Merge via {'NegRisk adapter' if neg_risk else 'CTF'}: "
+            f"{merge_contract_addr[:10]}..."
         )
 
         amount_wei = int(amount * 1e6)
@@ -112,7 +125,10 @@ class PositionManager:
         )
 
         try:
-            tx = ctf.functions.mergePositions(
+            base_gas_price = w3.eth.gas_price
+            gas_price = int(base_gas_price * 1.2)
+
+            tx = contract.functions.mergePositions(
                 Web3.to_checksum_address(CONTRACTS["USDC_E"]),
                 bytes(32),  # parentCollectionId
                 condition_bytes,
@@ -123,16 +139,16 @@ class PositionManager:
                     "from": address,
                     "nonce": w3.eth.get_transaction_count(address),
                     "gas": 300000,
-                    "gasPrice": w3.eth.gas_price,
+                    "gasPrice": gas_price,
                     "chainId": 137,
                 }
             )
 
             signed = account.sign_transaction(tx)
             tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-            logger.info(f"Merge TX: {tx_hash.hex()}")
+            logger.info(f"Merge TX: {tx_hash.hex()} (gasPrice={gas_price})")
 
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
             if receipt["status"] != 1:
                 return None, f"Merge transaction failed: {tx_hash.hex()}"
 
@@ -216,7 +232,7 @@ class PositionManager:
                 error="CLOB client initialization failed",
             )
 
-        from core.trading.clob import sell_via_clob, compute_sell_price
+        from core.trading.clob import sell_via_clob
 
         order_id, filled_size, error = sell_via_clob(
             client, token_id, balance, price, slippage=slippage
@@ -224,9 +240,9 @@ class PositionManager:
 
         filled = filled_size > 0
 
-        # Calculate recovered value from actual fill, not requested amount
-        sell_price = compute_sell_price(price, slippage)
-        recovered = filled_size * sell_price
+        # Estimate recovered value: use market price (not slippage floor)
+        # FAK fills at best available prices, typically near market price
+        recovered = filled_size * price
 
         # Update storage if selling unwanted tokens
         if filled and token_type == "unwanted":
@@ -302,8 +318,9 @@ class PositionManager:
                 error=f"Failed to fetch market info: {e}",
             )
 
-        # Execute merge
-        tx_hash, error = self._merge_tokens(condition_id, mergeable)
+        # Execute merge — use NegRisk adapter for multi-outcome markets
+        neg_risk = bool(market_data.get("negRisk", False))
+        tx_hash, error = self._merge_tokens(condition_id, mergeable, neg_risk=neg_risk)
 
         if error:
             return MergeResult(
@@ -415,6 +432,10 @@ class PositionManager:
 
         total = round(target_result.recovered + cover_result.recovered, 4)
         any_success = target_result.recovered > 0 or cover_result.recovered > 0
+
+        # Record realized proceeds for accurate P&L
+        if total > 0:
+            self.storage.add_realized_proceeds(position_id, total)
 
         messages = []
         if target_result.merged > 0:

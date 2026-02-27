@@ -316,13 +316,13 @@ async def buy_position(
                 "from": address,
                 "nonce": w3.eth.get_transaction_count(address),
                 "gas": 100000,
-                "gasPrice": w3.eth.gas_price,
+                "gasPrice": int(w3.eth.gas_price * 1.2),
                 "chainId": 137,
             }
         )
         signed = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
         print(f"  {'OK' if receipt['status'] == 1 else 'FAILED'}")
         time.sleep(2)
     else:
@@ -347,7 +347,7 @@ async def buy_position(
             "from": address,
             "nonce": w3.eth.get_transaction_count(address),
             "gas": 300000,
-            "gasPrice": w3.eth.gas_price,
+            "gasPrice": int(w3.eth.gas_price * 1.2),
             "chainId": 137,
         }
     )
@@ -356,7 +356,7 @@ async def buy_position(
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
     print(f"  TX: {tx_hash.hex()}")
 
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
     if receipt["status"] != 1:
         print("  FAILED")
         return
@@ -379,7 +379,14 @@ async def buy_position(
                 from py_clob_client.clob_types import OrderArgs, OrderType
                 from py_clob_client.order_builder.constants import SELL
 
-                sell_price = round(unwanted_price * 0.98, 2)  # 2% below market
+                # Fetch tick size for correct precision (varies per market)
+                try:
+                    tick_size = float(client.get_tick_size(unwanted_token))
+                except Exception:
+                    tick_size = 0.01
+                tick_str = f"{tick_size:.10f}".rstrip("0")
+                decimals = len(tick_str.split(".")[1]) if "." in tick_str else 0
+                sell_price = round(max(unwanted_price * 0.98, tick_size), decimals)
 
                 order = client.create_order(
                     OrderArgs(

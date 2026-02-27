@@ -1,6 +1,8 @@
 .playwright-mcp
 .vscode/
 .worktrees/
+cache
+out
 
 # Python-generated files
 __pycache__/

@@ -10,6 +10,7 @@ export interface FavoriteEntry {
 
 export function useFavorites() {
   const [favorites, setFavorites] = useState<Map<string, FavoriteEntry>>(() => {
+    if (typeof window === 'undefined') return new Map()
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {

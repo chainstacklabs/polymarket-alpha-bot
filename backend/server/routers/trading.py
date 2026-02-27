@@ -89,33 +89,37 @@ async def buy_pair(req: BuyPairRequest):
             slippage=req.slippage,
         )
 
-        # Collect warnings for CLOB failures
+        # Collect warnings — distinguish split failures from CLOB failures
         warnings = []
         if result.target.error:
-            warnings.append(f"Target CLOB sell failed: {result.target.error}")
+            if "split" in result.target.error.lower():
+                warnings.append(f"Target split failed: {result.target.error}")
+            else:
+                warnings.append(f"Target CLOB sell failed: {result.target.error}")
         if result.cover.error:
-            warnings.append(f"Cover CLOB sell failed: {result.cover.error}")
+            if "split" in result.cover.error.lower():
+                warnings.append(f"Cover split failed: {result.cover.error}")
+            else:
+                warnings.append(f"Cover CLOB sell failed: {result.cover.error}")
 
         if warnings:
-            is_geoblock = any(
-                "geoblock" in (w or "").lower() or "restricted" in (w or "").lower()
-                for w in warnings
-            )
+            is_geoblock = any("restricted" in (w or "").lower() for w in warnings)
             if is_geoblock:
                 warnings.append(
                     "CLOB sells blocked by region restriction. Enable a proxy, then go to Positions to sell unwanted tokens."
                 )
-            else:
+            elif not any("split failed" in w.lower() for w in warnings):
                 warnings.append(
                     "You hold both YES and NO tokens. Go to Positions to sell unwanted sides."
                 )
 
         # Record position entry for tracking
-        # Uses market info captured during trade - no extra API calls needed
+        # Record if ANY split succeeded — partial trades still have on-chain tokens
+        any_split = result.target.split_tx or result.cover.split_tx
         logger.info(
-            f"Trade result.success={result.success}, attempting position recording"
+            f"Trade result.success={result.success}, splits={bool(result.target.split_tx)}/{bool(result.cover.split_tx)}, attempting position recording"
         )
-        if result.success:
+        if any_split:
             try:
                 from datetime import datetime
                 from uuid import uuid4

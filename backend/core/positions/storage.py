@@ -59,6 +59,7 @@ class PositionEntry:
     notes: Optional[str] = None
     selling_target: bool = False
     selling_cover: bool = False
+    realized_proceeds: float = 0.0  # USDC recovered from exit sells/merges
 
 
 class PositionStorage:
@@ -146,6 +147,27 @@ class PositionStorage:
                     p[f"selling_{side}"] = selling
                     self.save_all(positions)
                     logger.debug(f"Selling {side}={selling} for {position_id}")
+                    return True
+            return False
+
+    def add_realized_proceeds(
+        self,
+        position_id: str,
+        amount: float,
+    ) -> bool:
+        """Add to realized proceeds (thread-safe). Returns True if found."""
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") == position_id:
+                    p["realized_proceeds"] = round(
+                        p.get("realized_proceeds", 0.0) + amount, 4
+                    )
+                    self.save_all(positions)
+                    logger.info(
+                        f"Added ${amount:.4f} realized proceeds for {position_id} "
+                        f"(total: ${p['realized_proceeds']:.4f})"
+                    )
                     return True
             return False
 

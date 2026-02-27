@@ -144,7 +144,7 @@ def main():
                 "from": address,
                 "nonce": w3.eth.get_transaction_count(address),
                 "gas": 100000,
-                "gasPrice": w3.eth.gas_price,
+                "gasPrice": int(w3.eth.gas_price * 1.2),
                 "chainId": 137,
             }
         )
@@ -154,7 +154,7 @@ def main():
         print(f"  TX: {tx_hash.hex()}")
         print(f"  View: https://polygonscan.com/tx/{tx_hash.hex()}")
 
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
         if receipt["status"] != 1:
             print("  ERROR: Transfer failed")
             return
@@ -173,7 +173,7 @@ def main():
                 "from": address,
                 "nonce": w3.eth.get_transaction_count(address),
                 "gas": 100000,
-                "gasPrice": w3.eth.gas_price,
+                "gasPrice": int(w3.eth.gas_price * 1.2),
                 "chainId": 137,
             }
         )
@@ -183,7 +183,7 @@ def main():
         print(f"  TX: {tx_hash.hex()}")
         print(f"  View: https://polygonscan.com/tx/{tx_hash.hex()}")
 
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
         if receipt["status"] != 1:
             print("  ERROR: Transfer failed")
             return
@@ -245,7 +245,7 @@ def main_pol():
         return
 
     # Calculate max transfer (balance - gas cost)
-    gas_price = w3.eth.gas_price
+    gas_price = int(w3.eth.gas_price * 1.2)
     gas_limit = 21000  # Standard ETH/POL transfer
     gas_cost = gas_price * gas_limit
 
@@ -289,7 +289,7 @@ def main_pol():
     print(f"  TX: {tx_hash.hex()}")
     print(f"  View: https://polygonscan.com/tx/{tx_hash.hex()}")
 
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
     if receipt["status"] != 1:
         print("  ERROR: Transfer failed")
         return

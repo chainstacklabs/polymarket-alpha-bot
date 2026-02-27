@@ -252,7 +252,7 @@ def main():
                 "from": address,
                 "nonce": retry_call(lambda: w3.eth.get_transaction_count(address)),
                 "gas": 100000,
-                "gasPrice": retry_call(lambda: w3.eth.gas_price),
+                "gasPrice": int(retry_call(lambda: w3.eth.gas_price) * 1.2),
                 "chainId": 137,
             }
         )
@@ -263,7 +263,7 @@ def main():
         )
         print(f"  TX: {tx_hash.hex()}")
 
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
         if receipt["status"] != 1:
             print("  ERROR: Approval failed")
             return
@@ -281,7 +281,7 @@ def main():
         "data": quote["data"],
         "value": quote["value"],
         "gas": int(quote["gas"] * 1.3),
-        "gasPrice": retry_call(lambda: w3.eth.gas_price),
+        "gasPrice": int(retry_call(lambda: w3.eth.gas_price) * 1.2),
         "nonce": retry_call(lambda: w3.eth.get_transaction_count(address)),
         "chainId": 137,
     }
@@ -291,7 +291,7 @@ def main():
     print(f"  TX: {tx_hash.hex()}")
     print(f"  View: https://polygonscan.com/tx/{tx_hash.hex()}")
 
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
     if receipt["status"] != 1:
         print("  ERROR: Swap failed")
         return
