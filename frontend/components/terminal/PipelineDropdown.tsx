@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import type { PipelineStatus } from '@/types/pipeline'
 import { getApiBaseUrl } from '@/config/api-config'
 import { formatElapsed, formatTime } from '@/utils/format-time'
+import { useModelSettings } from '@/hooks/useModelSettings'
 
 // =============================================================================
 // MAIN COMPONENT
@@ -16,6 +17,8 @@ export function PipelineDropdown() {
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetting, setResetting] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const { settings: modelSettings, update: updateModelSettings } =
+    useModelSettings()
 
   // Fetch pipeline status
   async function fetchStatus() {
@@ -64,7 +67,12 @@ export function PipelineDropdown() {
       const res = await fetch(`${getApiBaseUrl()}/pipeline/run/production`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ full, max_events: maxEvents }),
+        body: JSON.stringify({
+          full,
+          max_events: maxEvents,
+          implications_model: modelSettings.implicationsModel || undefined,
+          validation_model: modelSettings.validationModel || undefined,
+        }),
       })
       if (res.ok) {
         fetchStatus()
@@ -190,6 +198,32 @@ export function PipelineDropdown() {
                     <span className="text-text-secondary">
                       {currentStep.step_name}
                     </span>
+                    {(currentStep.step_number === 4 ||
+                      currentStep.step_number === 6) && (
+                      <span
+                        className="text-[9px] text-cyan/60 truncate max-w-[100px]"
+                        title={
+                          currentStep.step_number === 4
+                            ? (modelSettings.implicationsModel ||
+                              status?.default_models?.implications ||
+                              '')
+                            : (modelSettings.validationModel ||
+                              status?.default_models?.validation ||
+                              '')
+                        }
+                      >
+                        {(currentStep.step_number === 4
+                          ? (modelSettings.implicationsModel ||
+                            status?.default_models?.implications ||
+                            '')
+                          : (modelSettings.validationModel ||
+                            status?.default_models?.validation ||
+                            '')
+                        )
+                          .split('/')
+                          .pop()}
+                      </span>
+                    )}
                     <span className="text-text-muted font-mono ml-auto">
                       {formatElapsed(currentStep.elapsed_seconds)}
                     </span>
@@ -227,6 +261,11 @@ export function PipelineDropdown() {
 
             {/* Actions */}
             <div className="pt-2 border-t border-border space-y-1.5">
+              {/* LLM cost warning */}
+              <p className="text-[10px] text-amber-400/80 leading-tight pb-1.5">
+                ⚠ Pipeline uses LLM tokens. Try Quick Demo or free models
+                first.
+              </p>
               <button
                 onClick={() => runPipeline(false, 50)}
                 disabled={isRunning || resetting}
@@ -285,6 +324,51 @@ export function PipelineDropdown() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* LLM Models */}
+            <div className="pt-2 border-t border-border space-y-2">
+              <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">
+                LLM Models
+              </span>
+              <div className="space-y-1.5">
+                <div>
+                  <label className="text-[10px] text-text-muted block mb-0.5">
+                    Implications
+                  </label>
+                  <input
+                    type="text"
+                    value={modelSettings.implicationsModel}
+                    onChange={(e) =>
+                      updateModelSettings({
+                        implicationsModel: e.target.value,
+                      })
+                    }
+                    placeholder={
+                      status?.default_models?.implications || 'env default'
+                    }
+                    className="w-full px-2 py-1 rounded text-xs bg-surface-elevated border border-border text-text-primary placeholder:text-text-muted/50 focus:outline-none focus:border-cyan/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-text-muted block mb-0.5">
+                    Validation
+                  </label>
+                  <input
+                    type="text"
+                    value={modelSettings.validationModel}
+                    onChange={(e) =>
+                      updateModelSettings({
+                        validationModel: e.target.value,
+                      })
+                    }
+                    placeholder={
+                      status?.default_models?.validation || 'env default'
+                    }
+                    className="w-full px-2 py-1 rounded text-xs bg-surface-elevated border border-border text-text-primary placeholder:text-text-muted/50 focus:outline-none focus:border-cyan/50"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
