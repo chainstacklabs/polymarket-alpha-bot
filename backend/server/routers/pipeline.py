@@ -28,10 +28,10 @@ class ProductionRunRequest(BaseModel):
         default=None, gt=0, description="Limit number of events fetched (must be > 0)"
     )
     implications_model: str | None = Field(
-        default=None, description="Override LLM model for implications extraction"
+        default=None, max_length=200, description="Override LLM model for implications extraction"
     )
     validation_model: str | None = Field(
-        default=None, description="Override LLM model for validation"
+        default=None, max_length=200, description="Override LLM model for validation"
     )
 
 

@@ -192,43 +192,33 @@ export function PipelineDropdown() {
                 </div>
 
                 {/* Current step */}
-                {currentStep && (
-                  <div className="flex items-center gap-2 text-xs">
-                    {currentStep.emoji && <span>{currentStep.emoji}</span>}
-                    <span className="text-text-secondary">
-                      {currentStep.step_name}
-                    </span>
-                    {(currentStep.step_number === 4 ||
-                      currentStep.step_number === 6) && (
-                      <span
-                        className="text-[9px] text-cyan/60 truncate max-w-[100px]"
-                        title={
-                          currentStep.step_number === 4
-                            ? (modelSettings.implicationsModel ||
-                              status?.default_models?.implications ||
-                              '')
-                            : (modelSettings.validationModel ||
-                              status?.default_models?.validation ||
-                              '')
-                        }
-                      >
-                        {(currentStep.step_number === 4
-                          ? (modelSettings.implicationsModel ||
-                            status?.default_models?.implications ||
-                            '')
-                          : (modelSettings.validationModel ||
-                            status?.default_models?.validation ||
-                            '')
-                        )
-                          .split('/')
-                          .pop()}
+                {currentStep && (() => {
+                  const activeModel =
+                    currentStep.step_number === 4
+                      ? (modelSettings.implicationsModel || status?.default_models?.implications || '')
+                      : currentStep.step_number === 6
+                        ? (modelSettings.validationModel || status?.default_models?.validation || '')
+                        : ''
+                  return (
+                    <div className="flex items-center gap-2 text-xs">
+                      {currentStep.emoji && <span>{currentStep.emoji}</span>}
+                      <span className="text-text-secondary">
+                        {currentStep.step_name}
                       </span>
-                    )}
-                    <span className="text-text-muted font-mono ml-auto">
-                      {formatElapsed(currentStep.elapsed_seconds)}
-                    </span>
-                  </div>
-                )}
+                      {activeModel && (
+                        <span
+                          className="text-[9px] text-cyan/60 truncate max-w-[100px]"
+                          title={activeModel}
+                        >
+                          {activeModel.split('/').pop()}
+                        </span>
+                      )}
+                      <span className="text-text-muted font-mono ml-auto">
+                        {formatElapsed(currentStep.elapsed_seconds)}
+                      </span>
+                    </div>
+                  )
+                })()}
               </div>
             )}
 

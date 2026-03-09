@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 
 export interface ModelSettings {
   implicationsModel: string
@@ -11,14 +11,15 @@ const STORAGE_KEY = 'alphapoly:pipeline-model-settings'
 const DEFAULTS: ModelSettings = { implicationsModel: '', validationModel: '' }
 
 export function useModelSettings() {
-  const [settings, setSettings] = useState<ModelSettings>(DEFAULTS)
-
-  useEffect(() => {
+  const [settings, setSettings] = useState<ModelSettings>(() => {
+    if (typeof window === 'undefined') return DEFAULTS
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored) setSettings(JSON.parse(stored))
-    } catch {}
-  }, [])
+      return stored ? JSON.parse(stored) : DEFAULTS
+    } catch {
+      return DEFAULTS
+    }
+  })
 
   function update(patch: Partial<ModelSettings>) {
     setSettings((prev) => {
