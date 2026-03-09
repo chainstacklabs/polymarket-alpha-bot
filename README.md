@@ -76,13 +76,32 @@ cd frontend && npm run dev
 
 ## Agentic Coding
 
-This repo is configured for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) via the `.claude/` directory:
+This repo is configured for AI coding agents via the `.claude/` directory:
 
 - **`CLAUDE.md`** — project context, commands, conventions, and API routes
-- **`hooks/`** — auto-lint on edit, guard against writing secrets
+- **`hooks/`** — auto-lint on edit, guard against writing secrets *(Claude Code only)*
 - **`skills/`** — workflows for pipeline management, trading, and feature development
 
-Hooks and skills are Claude Code-specific. `CLAUDE.md` is also read by [GitHub Copilot in VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-a-claudemd-file) (opt-in via `chat.useClaudeMdFile`).
+### Skills
+
+The `.claude/skills/` directory contains [Agent Skills](https://agentskills.io/home) — an open standard for extending AI coding agents with reusable, modular capabilities. Each skill is a directory with a `SKILL.md` file (YAML frontmatter + natural-language instructions) that teaches an agent how to perform a domain-specific workflow.
+
+| Skill | Purpose |
+|-------|---------|
+| `alphapoly-pipeline` | Run, debug, and manage the ML pipeline |
+| `alphapoly-portfolios` | Fetch and display portfolio opportunities |
+| `alphapoly-enter-position` | Execute a covered pair trade |
+| `alphapoly-exit-position` | Exit or manage an open position |
+| `alphapoly-feature` | Add features following stack conventions |
+| `alphapoly-experiment` | Scaffold standalone experiment scripts |
+
+**Cross-agent portability.** The Agent Skills format was [originated by Anthropic](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills) and released as an open standard. It has since been adopted by [OpenAI Codex](https://developers.openai.com/codex/skills/), [GitHub Copilot](https://code.visualstudio.com/docs/copilot/customization/custom-instructions), [Cursor](https://cursor.com/docs/context/rules), Google Antigravity, and [many others](https://github.com/skillmatic-ai/awesome-agent-skills). Skills are filesystem-based (not API-based), so any agent that can read a directory and parse Markdown can consume them — a skill authored for one agent typically runs unchanged in another.
+
+To use the skills in this repo with a different agent, point it at `.claude/skills/` or copy the skill directories into the agent's expected location (e.g., `~/.codex/skills/` for Codex CLI).
+
+### Instructions file
+
+`CLAUDE.md` is read natively by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and by [GitHub Copilot in VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-a-claudemd-file) (opt-in via `chat.useClaudeMdFile`). For broader cross-agent compatibility, [`AGENTS.md`](https://agents.md/) is also provided as a symlink to `CLAUDE.md` — an open format (stewarded by the [Linux Foundation](https://www.linuxfoundation.org/)) supported by Codex, Cursor, Copilot, and others.
 
 ## Experiments
 
