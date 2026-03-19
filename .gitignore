@@ -3,6 +3,7 @@
 .worktrees/
 cache
 out
+docs/
 
 # Python-generated files
 __pycache__/
