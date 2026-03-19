@@ -1,6 +1,7 @@
 """Pipeline status and control endpoints."""
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,6 +26,12 @@ class ProductionRunRequest(BaseModel):
     full: bool = False  # If True, reset and reprocess all
     max_events: int | None = Field(
         default=None, gt=0, description="Limit number of events fetched (must be > 0)"
+    )
+    implications_model: str | None = Field(
+        default=None, max_length=200, description="Override LLM model for implications extraction"
+    )
+    validation_model: str | None = Field(
+        default=None, max_length=200, description="Override LLM model for validation"
     )
 
 
@@ -89,6 +96,10 @@ async def get_status() -> dict[str, Any]:
         "steps": steps,
         "manifest": manifest,
         "step_progress": step_progress,
+        "default_models": {
+            "implications": os.getenv("IMPLICATIONS_MODEL", ""),
+            "validation": os.getenv("VALIDATION_MODEL", ""),
+        },
     }
 
 
@@ -97,7 +108,12 @@ async def get_status() -> dict[str, Any]:
 # =============================================================================
 
 
-def run_production_pipeline_task(full: bool, max_events: int | None = None):
+def run_production_pipeline_task(
+    full: bool,
+    max_events: int | None = None,
+    implications_model: str | None = None,
+    validation_model: str | None = None,
+):
     """Background task to run the production pipeline."""
     global _running_pipeline, _step_tracker
 
@@ -124,7 +140,11 @@ def run_production_pipeline_task(full: bool, max_events: int | None = None):
         from core.runner import run
 
         result = run(
-            full=effective_full, step_tracker=_step_tracker, max_events=max_events
+            full=effective_full,
+            step_tracker=_step_tracker,
+            max_events=max_events,
+            implications_model=implications_model,
+            validation_model=validation_model,
         )
 
         _running_pipeline["status"] = "completed"
@@ -170,7 +190,11 @@ async def run_production(
 
     # Start pipeline in background
     background_tasks.add_task(
-        run_production_pipeline_task, request.full, request.max_events
+        run_production_pipeline_task,
+        request.full,
+        request.max_events,
+        request.implications_model,
+        request.validation_model,
     )
 
     mode = "demo" if request.max_events else ("full" if request.full else "incremental")

@@ -42,4 +42,8 @@ export interface PipelineStatus {
   current_step: string | null
   step_progress: StepProgressData | null
   production: ProductionState | null
+  default_models: {
+    implications: string
+    validation: string
+  } | null
 }
