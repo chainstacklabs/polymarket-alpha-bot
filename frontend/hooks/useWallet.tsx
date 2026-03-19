@@ -47,7 +47,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`${apiBase}/wallet/status`)
-      if (!res.ok) throw new Error('Failed to fetch wallet status')
+      if (!res.ok) {
+        const err = await res.json().catch(() => null)
+        throw new Error(err?.detail || 'Failed to fetch wallet status')
+      }
       const data = await res.json()
       setStatus(data)
       setError(null)
