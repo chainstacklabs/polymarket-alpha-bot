@@ -254,7 +254,7 @@ export function PipelineDropdown() {
               {/* LLM cost warning */}
               <p className="text-[10px] text-amber-400/80 leading-tight pb-1.5">
                 ⚠ Pipeline uses LLM tokens. Try Quick Demo or free models
-                first.
+                first. Free/cheap models may miss opportunities. Budget spend on LLM can exceed hedge profits.
               </p>
               <button
                 onClick={() => runPipeline(false, 50)}
