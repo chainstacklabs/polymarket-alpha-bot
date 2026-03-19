@@ -9,12 +9,14 @@ export function WalletDropdown() {
   const {
     status,
     loading,
+    error: walletError,
     unlock,
     lock,
     generate,
     importKey,
     approveContracts,
   } = useWallet()
+  const needsChainstack = walletError?.includes('CHAINSTACK_NODE')
   const [isOpen, setIsOpen] = useState(false)
   const [view, setView] = useState<View>('status')
   const [password, setPassword] = useState('')
@@ -166,11 +168,13 @@ export function WalletDropdown() {
         <span className="text-xs font-medium">
           {loading
             ? 'Loading...'
-            : isUnlocked
-              ? truncatedAddress
-              : hasWallet
-                ? 'Locked'
-                : 'No Wallet'}
+            : needsChainstack
+              ? 'No RPC'
+              : isUnlocked
+                ? truncatedAddress
+                : hasWallet
+                  ? 'Locked'
+                  : 'No Wallet'}
         </span>
 
         {/* Balance when unlocked */}
@@ -219,8 +223,47 @@ export function WalletDropdown() {
 
           {/* Content */}
           <div className="p-3 space-y-3">
+            {/* Missing RPC endpoint */}
+            {needsChainstack && view === 'status' && (
+              <div className="space-y-2 py-1">
+                <p className="text-xs text-text-muted">
+                  On-chain trading requires a Polygon RPC endpoint.
+                </p>
+                <p className="text-[10px] text-text-muted leading-relaxed">
+                  Set{' '}
+                  <span className="font-mono text-text-secondary">
+                    CHAINSTACK_NODE
+                  </span>{' '}
+                  in your{' '}
+                  <span className="font-mono text-text-secondary">.env</span>{' '}
+                  file, then restart the backend.
+                </p>
+                <a
+                  href="https://chainstack.com/build-better-with-polygon/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 w-full px-2.5 py-1.5 rounded text-xs bg-cyan/10 hover:bg-cyan/20 text-cyan border border-cyan/30 transition-colors"
+                >
+                  Get a free endpoint from Chainstack
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                    />
+                  </svg>
+                </a>
+              </div>
+            )}
+
             {/* No Wallet State */}
-            {!hasWallet && view === 'status' && (
+            {!hasWallet && !needsChainstack && view === 'status' && (
               <div className="space-y-2">
                 <p className="text-xs text-text-muted text-center py-2">
                   No wallet configured
