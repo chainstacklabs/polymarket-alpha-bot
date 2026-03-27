@@ -25,7 +25,7 @@ For a good experience, you'll need to add an LLM from OpenRouter and an RPC node
 
 ## How It Works
 
-1. **Groups** - Fetches multi-outcome markets from Polymarket (e.g., "Presidential Election Winner")
+1. **Groups** - Fetches markets from Polymarket (e.g., "Presidential Election Winner")
 2. **Implications** *(LLM)* - Extracts logical relationships between groups
 3. **Validation** *(LLM)* - Validates implications at the individual market level
 4. **Portfolios** - Computes cost and expected profit for validated pairs using live market prices
@@ -94,8 +94,6 @@ The `.claude/skills/` directory contains [Agent Skills](https://agentskills.io/h
 | `alphapoly-exit-position` | Exit or manage an open position |
 | `alphapoly-feature` | Add features following stack conventions |
 | `alphapoly-experiment` | Scaffold standalone experiment scripts |
-
-**Cross-agent portability.** The Agent Skills format was [originated by Anthropic](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills) and released as an open standard. It has since been adopted by [OpenAI Codex](https://developers.openai.com/codex/skills/), [GitHub Copilot](https://code.visualstudio.com/docs/copilot/customization/custom-instructions), [Cursor](https://cursor.com/docs/context/rules), Google Antigravity, and [many others](https://github.com/skillmatic-ai/awesome-agent-skills). Skills are filesystem-based (not API-based), so any agent that can read a directory and parse Markdown can consume them — a skill authored for one agent typically runs unchanged in another.
 
 To use the skills in this repo with a different agent, point it at `.claude/skills/` or copy the skill directories into the agent's expected location (e.g., `~/.codex/skills/` for Codex CLI).
 
