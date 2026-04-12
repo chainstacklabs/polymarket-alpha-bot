@@ -17,8 +17,8 @@ dependencies = [
     # Trading (experiments)
     "eth-account>=0.13.7",
     "py-clob-client>=0.34.5",
-    "web3>=7.14.0",
-    "cryptography>=46.0.3",
+    "web3>=7.15.0",
+    "cryptography>=46.0.7",
 ]
 
 [build-system]
