@@ -234,10 +234,15 @@ class MarketPollingService:
     async def _poll_once(self, client: httpx.AsyncClient) -> None:
         """Execute a single poll cycle."""
         # Build params
+        # Newest events first: without this, the poller fetches the oldest active
+        # events and almost never sees genuinely new ones (seen_event_ids is pre-
+        # populated from state at startup, so first-page overlap ≈ 100%).
         params: dict[str, Any] = {
             "limit": PAGE_SIZE,
             "active": "true",
             "closed": "false",
+            "order": "startDate",
+            "ascending": "false",
         }
         if self._tag_id:
             params["tag_id"] = self._tag_id

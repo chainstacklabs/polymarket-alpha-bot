@@ -23,8 +23,11 @@ API OPTIONS INVESTIGATED
 STRATEGIES TESTED
     A. Poll /markets ordered by createdAt DESC (newest first)
     B. Poll /events with same approach (events contain markets)
-    C. Track `new` boolean field on markets
     D. Use start_date_min filter to reduce payload size
+
+    Previously there was Strategy C (poll /markets with new=true filter),
+    removed 2026-04-15: the `new=true` filter is silently ignored on the
+    /markets/keyset endpoint — it returns year-old markets with new=False.
 
 USAGE
     uv run python experiments/08_new_market_polling.py
@@ -283,33 +286,6 @@ async def poll_events_endpoint(
     return markets
 
 
-async def poll_new_markets_only(
-    client: httpx.AsyncClient,
-    limit: int = PAGE_SIZE,
-) -> list[MarketInfo]:
-    """
-    Strategy C: Poll /markets filtering for new=true markets.
-
-    Polymarket marks recently created markets with a `new` boolean.
-    """
-    params: dict[str, Any] = {
-        "limit": limit,
-        "order": "createdAt",
-        "ascending": "false",
-        "active": "true",
-        "closed": "false",
-        "new": "true",  # Only markets marked as new
-    }
-
-    markets_raw = await fetch_json(client, "/markets/keyset", params)
-    if isinstance(markets_raw, dict):
-        markets_raw = markets_raw.get("markets", [])
-    if not markets_raw:
-        return []
-
-    return [extract_market_info(m) for m in markets_raw]
-
-
 # =============================================================================
 # MARKET TRACKER
 # =============================================================================
@@ -382,7 +358,7 @@ async def run_polling_loop(
     Run continuous polling loop to detect new markets.
 
     Args:
-        strategy: "markets", "events", or "new_only"
+        strategy: "markets" or "events"
         interval: Seconds between polls
         duration: Optional max duration in seconds
         tag: Tag slug to filter by (e.g., "politics"). Use None for all markets.
@@ -436,8 +412,6 @@ async def run_polling_loop(
                     markets = await poll_markets_endpoint(client)
                 elif strategy == "events":
                     markets = await poll_events_endpoint(client, tag_id=tag_id)
-                elif strategy == "new_only":
-                    markets = await poll_new_markets_only(client)
                 else:
                     log.error(f"Unknown strategy: {strategy}")
                     break
@@ -492,7 +466,7 @@ async def run_polling_loop(
 
 async def compare_strategies() -> None:
     """
-    Compare all three strategies in a single run.
+    Compare both strategies in a single run.
 
     Useful for understanding which approach returns the most useful data.
     """
@@ -506,7 +480,6 @@ async def compare_strategies() -> None:
         strategies = [
             ("markets", poll_markets_endpoint),
             ("events", poll_events_endpoint),
-            ("new_only", poll_new_markets_only),
         ]
 
         for name, poll_fn in strategies:
