@@ -43,7 +43,7 @@ TAG_SLUG = os.getenv("POLYMARKET_TAG", "politics")
 ENABLED = os.getenv("MARKET_POLLING_ENABLED", "true").lower() == "true"
 
 # API settings
-PAGE_SIZE = 100
+PAGE_SIZE = 200
 REQUEST_TIMEOUT = 30.0
 MAX_RETRIES = 3
 
@@ -257,7 +257,6 @@ class MarketPollingService:
         # Build params
         params: dict[str, Any] = {
             "limit": PAGE_SIZE,
-            "offset": 0,
             "active": "true",
             "closed": "false",
         }
@@ -265,7 +264,9 @@ class MarketPollingService:
             params["tag_id"] = self._tag_id
 
         # Fetch events
-        events_raw = await fetch_json(client, "/events", params)
+        events_raw = await fetch_json(client, "/events/keyset", params)
+        if isinstance(events_raw, dict):
+            events_raw = events_raw.get("events", [])
         if not events_raw:
             return
 

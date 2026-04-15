@@ -56,7 +56,7 @@ GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
 # Polling settings
 DEFAULT_POLL_INTERVAL_SECONDS = 60  # How often to check for new markets
 DEFAULT_TAG = "politics"  # Filter by tag (same as pipeline uses)
-PAGE_SIZE = 100  # Max items per request
+PAGE_SIZE = 200  # Max items per request
 REQUEST_TIMEOUT = 30.0
 MAX_RETRIES = 3
 
@@ -223,7 +223,6 @@ async def poll_markets_endpoint(
     """
     params: dict[str, Any] = {
         "limit": limit,
-        "offset": 0,
         "order": "createdAt",
         "ascending": "false",  # Newest first
         "active": "true",
@@ -233,7 +232,9 @@ async def poll_markets_endpoint(
     if start_date_min:
         params["start_date_min"] = start_date_min.isoformat()
 
-    markets_raw = await fetch_json(client, "/markets", params)
+    markets_raw = await fetch_json(client, "/markets/keyset", params)
+    if isinstance(markets_raw, dict):
+        markets_raw = markets_raw.get("markets", [])
     if not markets_raw:
         return []
 
@@ -257,7 +258,6 @@ async def poll_events_endpoint(
     """
     params: dict[str, Any] = {
         "limit": limit,
-        "offset": 0,
         "order": "startDate",  # Events don't have createdAt, use startDate
         "ascending": "false",
         "active": "true",
@@ -267,7 +267,9 @@ async def poll_events_endpoint(
     if tag_id:
         params["tag_id"] = tag_id
 
-    events_raw = await fetch_json(client, "/events", params)
+    events_raw = await fetch_json(client, "/events/keyset", params)
+    if isinstance(events_raw, dict):
+        events_raw = events_raw.get("events", [])
     if not events_raw:
         return []
 
@@ -292,7 +294,6 @@ async def poll_new_markets_only(
     """
     params: dict[str, Any] = {
         "limit": limit,
-        "offset": 0,
         "order": "createdAt",
         "ascending": "false",
         "active": "true",
@@ -300,7 +301,9 @@ async def poll_new_markets_only(
         "new": "true",  # Only markets marked as new
     }
 
-    markets_raw = await fetch_json(client, "/markets", params)
+    markets_raw = await fetch_json(client, "/markets/keyset", params)
+    if isinstance(markets_raw, dict):
+        markets_raw = markets_raw.get("markets", [])
     if not markets_raw:
         return []
 
