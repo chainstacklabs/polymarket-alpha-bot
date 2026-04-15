@@ -303,19 +303,41 @@ class PositionService:
             for i in range(0, len(uncached), 50):
                 batch = uncached[i : i + 50]
                 params = [("id", mid) for mid in batch]
-                try:
-                    resp = client.get("/markets/keyset", params=params)
-                    resp.raise_for_status()
-                    payload = resp.json()
-                    for m in payload.get("markets", []):
-                        mid = str(m.get("id", ""))
-                        if m.get("feesEnabled"):
-                            stub: dict = {"id": mid, "feesEnabled": True}
-                            if "feeSchedule" in m:
-                                stub["feeSchedule"] = m["feeSchedule"]
-                            self._fee_cache[mid] = stub
-                except Exception as e:
-                    logger.debug(f"Bulk fee fetch failed for batch {batch[:3]}...: {e}")
+                # Inline retry: 3 attempts with exponential backoff.
+                # Sync helper — can't use fetch_json_with_retry (async).
+                # Permanent 4xx (except 429) breaks early so we don't waste time.
+                payload = None
+                last_exc: Exception | None = None
+                for attempt in range(3):
+                    try:
+                        resp = client.get("/markets/keyset", params=params)
+                        status = resp.status_code
+                        if 400 <= status < 500 and status != 429:
+                            last_exc = httpx.HTTPStatusError(
+                                f"HTTP {status}", request=resp.request, response=resp
+                            )
+                            break
+                        resp.raise_for_status()
+                        payload = resp.json()
+                        break
+                    except Exception as e:
+                        last_exc = e
+                        if attempt < 2:
+                            import time as _time
+
+                            _time.sleep(2**attempt)
+                if payload is None:
+                    logger.debug(
+                        f"Bulk fee fetch failed for batch {batch[:3]}...: {last_exc}"
+                    )
+                    continue
+                for m in payload.get("markets", []):
+                    mid = str(m.get("id", ""))
+                    if m.get("feesEnabled"):
+                        stub: dict = {"id": mid, "feesEnabled": True}
+                        if "feeSchedule" in m:
+                            stub["feeSchedule"] = m["feeSchedule"]
+                        self._fee_cache[mid] = stub
 
     def _calculate_state(
         self,

@@ -29,6 +29,7 @@ from typing import Any
 import httpx
 from loguru import logger
 
+from core.http_retry import fetch_json_with_retry
 from core.incremental import process_new_event
 from core.paths import GAMMA_API_BASE_URL
 from core.state import load_state
@@ -45,7 +46,6 @@ ENABLED = os.getenv("MARKET_POLLING_ENABLED", "true").lower() == "true"
 # API settings
 PAGE_SIZE = 200
 REQUEST_TIMEOUT = 30.0
-MAX_RETRIES = 3
 
 # Rate limiting
 MIN_POLL_INTERVAL = 30  # Never poll faster than this
@@ -55,27 +55,6 @@ MAX_CONSECUTIVE_ERRORS = 5  # Pause polling after this many errors
 # =============================================================================
 # API HELPERS
 # =============================================================================
-
-
-async def fetch_json(
-    client: httpx.AsyncClient,
-    endpoint: str,
-    params: dict[str, Any] | None = None,
-) -> Any:
-    """Fetch JSON from API with retry logic."""
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = await client.get(endpoint, params=params)
-            resp.raise_for_status()
-            return resp.json()
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            if attempt == MAX_RETRIES:
-                raise
-            status = getattr(e, "response", None)
-            delay = attempt * (2 if status and status.status_code == 429 else 1)
-            logger.warning(f"Retry {attempt}/{MAX_RETRIES} for {endpoint}: {e}")
-            await asyncio.sleep(delay)
-    return None
 
 
 def parse_json_field(value: Any) -> Any:
@@ -210,7 +189,7 @@ class MarketPollingService:
             # Resolve tag ID once
             if TAG_SLUG:
                 try:
-                    tag = await fetch_json(client, f"/tags/slug/{TAG_SLUG}")
+                    tag = await fetch_json_with_retry(client, f"/tags/slug/{TAG_SLUG}")
                     if tag:
                         self._tag_id = str(tag.get("id"))
                         logger.info(f"Resolved tag '{TAG_SLUG}' -> id={self._tag_id}")
@@ -264,7 +243,7 @@ class MarketPollingService:
             params["tag_id"] = self._tag_id
 
         # Fetch events
-        events_raw = await fetch_json(client, "/events/keyset", params)
+        events_raw = await fetch_json_with_retry(client, "/events/keyset", params)
         if isinstance(events_raw, dict):
             events_raw = events_raw.get("events", [])
         if not events_raw:
