@@ -118,6 +118,9 @@ export function PositionTableRow({
         </td>
 
         {/* P&L */}
+        {/* TODO(fees): Add target_fee_rate_display badge here once the field is
+            threaded through LivePosition → PositionResponse → Position type.
+            Backend already subtracts exit fees from unrealized P&L. */}
         <td className="px-3 py-2.5">
           <div>
             <span

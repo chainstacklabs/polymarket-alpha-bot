@@ -31,6 +31,7 @@ Note:
 
 from loguru import logger
 
+from core.fees import compute_fee
 from core.state import PipelineState
 
 # =============================================================================
@@ -105,6 +106,15 @@ def classify_tier(coverage: float) -> tuple[int, str]:
     return 4, "LOW_COVERAGE"
 
 
+def _pair_to_market_stub(pair: dict, side: str) -> dict:
+    """Build a minimal market dict for fee computation from pair fee fields."""
+    return {
+        "id": pair.get(f"{side}_market_id", ""),
+        "feesEnabled": pair.get(f"{side}_feesEnabled", False),
+        "feeSchedule": pair.get(f"{side}_feeSchedule"),
+    }
+
+
 # =============================================================================
 # PORTFOLIO BUILDING
 # =============================================================================
@@ -155,6 +165,18 @@ def build_portfolios(
         # Classify tier
         tier, tier_label = classify_tier(metrics["coverage"])
 
+        # Taker fees on entry legs (per-market fee schedule from enrich_fees).
+        # For a covered pair the dominant expected fee is the sum of entry fees
+        # across both legs (the winning leg pays $1, losing leg pays $0).
+        target_market_stub = _pair_to_market_stub(pair, "target")
+        cover_market_stub = _pair_to_market_stub(pair, "cover")
+        expected_fees = compute_fee(
+            target_price, target_price, target_market_stub
+        ) + compute_fee(cover_price, cover_price, cover_market_stub)
+
+        profit = 1.0 - total_cost - expected_fees
+        profit_pct = (profit / total_cost * 100) if total_cost > 0 else 0.0
+
         portfolio = {
             # Identity
             "pair_id": pair["pair_id"],
@@ -186,10 +208,9 @@ def build_portfolios(
             "relationship_type": pair.get("relationship_type", ""),
             # Metrics
             "total_cost": round(total_cost, 4),
-            "profit": round(1.0 - total_cost, 4),
-            "profit_pct": round((1.0 - total_cost) / total_cost * 100, 2)
-            if total_cost > 0
-            else 0,
+            "expected_fees": round(expected_fees, 4),
+            "profit": round(profit, 4),
+            "profit_pct": round(profit_pct, 2),
             **metrics,
             # Tier
             "tier": tier,
@@ -199,6 +220,9 @@ def build_portfolios(
             "validation_analysis": pair.get("_validation", {}).get(
                 "brief_analysis", ""
             ),
+            # Internal: fee stubs for price-update recomputation
+            "_target_fee_market": target_market_stub,
+            "_cover_fee_market": cover_market_stub,
         }
 
         portfolios.append(portfolio)
@@ -368,15 +392,23 @@ def update_portfolio_prices(
 
             tier, tier_label = classify_tier(metrics["coverage"])
 
+            # Recompute fees at new prices
+            target_stub = portfolio.get("_target_fee_market", {})
+            cover_stub = portfolio.get("_cover_fee_market", {})
+            expected_fees = compute_fee(
+                new_target_price, new_target_price, target_stub
+            ) + compute_fee(new_cover_price, new_cover_price, cover_stub)
+            profit = 1.0 - total_cost - expected_fees
+            profit_pct = (profit / total_cost * 100) if total_cost > 0 else 0.0
+
             portfolio = {
                 **portfolio,
                 "target_price": new_target_price,
                 "cover_price": new_cover_price,
                 "total_cost": round(total_cost, 4),
-                "profit": round(1.0 - total_cost, 4),
-                "profit_pct": round((1.0 - total_cost) / total_cost * 100, 2)
-                if total_cost > 0
-                else 0,
+                "expected_fees": round(expected_fees, 4),
+                "profit": round(profit, 4),
+                "profit_pct": round(profit_pct, 2),
                 **metrics,
                 "tier": tier,
                 "tier_label": tier_label,

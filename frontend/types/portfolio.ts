@@ -36,6 +36,7 @@ export interface Portfolio {
 
   // Metrics
   total_cost: number
+  expected_fees?: number
   profit?: number
   profit_pct?: number
   coverage: number

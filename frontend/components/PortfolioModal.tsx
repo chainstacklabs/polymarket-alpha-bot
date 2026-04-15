@@ -419,6 +419,14 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                 </p>
               </div>
             </div>
+            {(p.expected_fees ?? 0) > 0 && (
+              <div className="flex justify-between text-xs text-neutral-500 px-1">
+                <span>Expected fees</span>
+                <span className="font-mono">
+                  ${(p.expected_fees ?? 0).toFixed(2)}
+                </span>
+              </div>
+            )}
             <p className="text-[10px] text-text-muted/70 text-center">
               * Estimates based on current prices, actual results may vary due
               to liquidity
