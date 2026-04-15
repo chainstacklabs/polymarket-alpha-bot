@@ -117,12 +117,27 @@ def _get_filled_size(client, order_id: str) -> float:
             return size_matched
         except Exception as e:
             last_exc = e
+            # Short-circuit likely-permanent failures (auth / missing order)
+            # instead of burning retries and flattening to 0.0, which would
+            # hide actionable state from the caller.
+            err = str(e).lower()
+            if any(
+                tok in err
+                for tok in (
+                    "401",
+                    "403",
+                    "404",
+                    "unauthorized",
+                    "forbidden",
+                    "not found",
+                )
+            ):
+                logger.warning(f"Permanent get_order failure for {order_id}: {e}")
+                break
             if attempt < 2:
                 logger.debug(
                     f"get_filled_size retry {attempt + 1}/3 for {order_id}: {e}"
                 )
                 time.sleep(2**attempt)
-    logger.warning(
-        f"Could not fetch order status for {order_id} after 3 attempts: {last_exc}"
-    )
+    logger.warning(f"Could not fetch order status for {order_id}: {last_exc}")
     return 0.0
