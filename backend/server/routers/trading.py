@@ -56,6 +56,8 @@ class BuyPairResponse(BaseModel):
 class EstimateResponse(BaseModel):
     pair_id: str
     total_cost: float
+    expected_fees: float
+    net_cost: float
     target_market: dict
     cover_market: dict
     wallet_balance: float
@@ -201,6 +203,8 @@ async def buy_pair(req: BuyPairRequest):
 @router.post("/buy-pair/estimate", response_model=EstimateResponse)
 async def estimate_buy_pair(req: BuyPairRequest):
     """Estimate costs for a pair purchase without executing."""
+    from core.fees import compute_fee
+
     wallet_manager = get_wallet_manager()
     executor = TradingExecutor(wallet_manager)
 
@@ -208,28 +212,49 @@ async def estimate_buy_pair(req: BuyPairRequest):
         target_market = await executor.get_market_info(req.target_market_id)
         cover_market = await executor.get_market_info(req.cover_market_id)
 
+        target_price = (
+            target_market.yes_price
+            if req.target_position == "YES"
+            else target_market.no_price
+        )
+        cover_price = (
+            cover_market.yes_price
+            if req.cover_position == "YES"
+            else cover_market.no_price
+        )
+
         total_cost = req.amount_per_position * 2
         balances = wallet_manager.get_balances()
+
+        # Compute expected taker fees from fee schedules
+        def _fee_stub(m) -> dict:
+            stub: dict = {"id": m.market_id, "feesEnabled": m.fees_enabled}
+            if m.fee_schedule:
+                stub["feeSchedule"] = m.fee_schedule
+            return stub
+
+        expected_fees = compute_fee(
+            req.amount_per_position, target_price, _fee_stub(target_market)
+        ) + compute_fee(req.amount_per_position, cover_price, _fee_stub(cover_market))
+        net_cost = total_cost + expected_fees
 
         return EstimateResponse(
             pair_id=req.pair_id,
             total_cost=total_cost,
+            expected_fees=round(expected_fees, 4),
+            net_cost=round(net_cost, 4),
             target_market={
                 "question": target_market.question[:60],
                 "position": req.target_position,
-                "price": target_market.yes_price
-                if req.target_position == "YES"
-                else target_market.no_price,
+                "price": target_price,
             },
             cover_market={
                 "question": cover_market.question[:60],
                 "position": req.cover_position,
-                "price": cover_market.yes_price
-                if req.cover_position == "YES"
-                else cover_market.no_price,
+                "price": cover_price,
             },
             wallet_balance=balances.usdc_e,
-            sufficient_balance=balances.usdc_e >= total_cost,
+            sufficient_balance=balances.usdc_e >= net_cost,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

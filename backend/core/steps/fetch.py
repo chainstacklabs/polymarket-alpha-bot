@@ -133,6 +133,56 @@ def process_events(
 
 
 # =============================================================================
+# FEE ENRICHMENT
+# =============================================================================
+
+
+async def enrich_fees(
+    client: httpx.AsyncClient, events: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Attach feeSchedule to every market with feesEnabled=true.
+
+    Mutates market dicts in place for efficiency; returns the same events list.
+    No-op for fee-exempt markets (zero calls when target tag is fee-exempt).
+    """
+    from core.fees import is_fee_bearing
+
+    # Collect fee-bearing market IDs across all events
+    fee_bearing: dict[str, dict[str, Any]] = {}
+    for event in events:
+        for market in event.get("markets", []):
+            if is_fee_bearing(market) and "feeSchedule" not in market:
+                mid = market.get("id")
+                if mid:
+                    fee_bearing[str(mid)] = market
+
+    if not fee_bearing:
+        return events
+
+    logger.info(f"Enriching {len(fee_bearing)} fee-bearing market(s) with feeSchedule")
+
+    # Batch in groups of 50 to keep URL lengths reasonable
+    ids = list(fee_bearing.keys())
+    for i in range(0, len(ids), 50):
+        batch = ids[i : i + 50]
+        params = [("id", mid) for mid in batch]
+        try:
+            resp = await client.get("/markets/keyset", params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+            for m in payload.get("markets", []):
+                mid = str(m.get("id", ""))
+                if mid in fee_bearing and "feeSchedule" in m:
+                    fee_bearing[mid]["feeSchedule"] = m["feeSchedule"]
+        except Exception as e:
+            logger.warning(f"Fee enrichment batch failed (ids={batch[:3]}...): {e}")
+
+    enriched = sum(1 for m in fee_bearing.values() if "feeSchedule" in m)
+    logger.info(f"Fee enrichment: {enriched}/{len(fee_bearing)} markets enriched")
+    return events
+
+
+# =============================================================================
 # MAIN FUNCTION
 # =============================================================================
 
@@ -192,6 +242,9 @@ async def fetch_events(
 
         # Process events and markets
         events = process_events(list(all_events.values()))
+
+        # Attach feeSchedule to fee-bearing markets
+        events = await enrich_fees(client, events)
 
         # Apply max_events limit if specified
         if max_events is not None and len(events) > max_events:

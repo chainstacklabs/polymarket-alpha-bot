@@ -23,6 +23,8 @@ class MarketInfo:
     yes_price: float
     no_price: float
     neg_risk: bool = False
+    fees_enabled: bool = False
+    fee_schedule: Optional[dict] = None
 
 
 @dataclass
@@ -85,6 +87,8 @@ class TradingExecutor:
             yes_price=float(prices[0]) if prices else 0.5,
             no_price=float(prices[1]) if len(prices) > 1 else 0.5,
             neg_risk=bool(data.get("negRisk", False)),
+            fees_enabled=bool(data.get("feesEnabled", False)),
+            fee_schedule=data.get("feeSchedule"),
         )
 
     @staticmethod
@@ -291,12 +295,37 @@ class TradingExecutor:
         if not self.wallet.is_unlocked:
             raise ValueError("Wallet not unlocked")
 
+        # Fetch market info (includes fee schedule when feesEnabled=True)
+        from core.fees import compute_fee
+
+        target_info = await self.get_market_info(target_market_id)
+        cover_info = await self.get_market_info(cover_market_id)
+
+        target_price = (
+            target_info.yes_price if target_position == "YES" else target_info.no_price
+        )
+        cover_price = (
+            cover_info.yes_price if cover_position == "YES" else cover_info.no_price
+        )
+
+        def _fee_stub(info: MarketInfo) -> dict:
+            stub: dict = {"id": info.market_id, "feesEnabled": info.fees_enabled}
+            if info.fee_schedule:
+                stub["feeSchedule"] = info.fee_schedule
+            return stub
+
+        entry_fees = compute_fee(
+            amount_per_position, target_price, _fee_stub(target_info)
+        ) + compute_fee(amount_per_position, cover_price, _fee_stub(cover_info))
+
         balances = self.wallet.get_balances()
-        required = amount_per_position * 2
+        required = amount_per_position * 2 + entry_fees
 
         if balances.usdc_e < required:
             raise ValueError(
-                f"Insufficient USDC.e: need {required:.2f}, have {balances.usdc_e:.2f}"
+                f"Insufficient USDC.e: need {required:.2f} "
+                f"(includes ${entry_fees:.2f} taker fees), "
+                f"have {balances.usdc_e:.2f}"
             )
 
         # Buy target position

@@ -159,24 +159,28 @@ def get_cover_markets(
 
     markets = []
     for m in cover_group.get("markets", []):
-        markets.append(
-            {
-                "market_id": m["id"],
-                "market_slug": m.get("slug", ""),
-                "question": m.get("question", ""),
-                "resolution_date": m.get("resolution_date"),
-                "price_yes": m.get("price_yes", 0.5),
-                "price_no": m.get("price_no", 0.5),
-                "bracket_label": m.get("bracket_label"),
-                "source_group_id": cover_info["group_id"],
-                "source_group_title": cover_info.get("title", ""),
-                "source_group_slug": cover_group.get("slug", ""),
-                "cover_position": cover_position,
-                "relationship": relationship,
-                "relationship_type": relationship_type,
-                "probability": probability,
-            }
-        )
+        cm = {
+            "market_id": m["id"],
+            "market_slug": m.get("slug", ""),
+            "question": m.get("question", ""),
+            "resolution_date": m.get("resolution_date"),
+            "price_yes": m.get("price_yes", 0.5),
+            "price_no": m.get("price_no", 0.5),
+            "bracket_label": m.get("bracket_label"),
+            "source_group_id": cover_info["group_id"],
+            "source_group_title": cover_info.get("title", ""),
+            "source_group_slug": cover_group.get("slug", ""),
+            "cover_position": cover_position,
+            "relationship": relationship,
+            "relationship_type": relationship_type,
+            "probability": probability,
+        }
+        # Thread fee data for downstream cost estimates
+        if m.get("feesEnabled"):
+            cm["feesEnabled"] = True
+            if "feeSchedule" in m:
+                cm["feeSchedule"] = m["feeSchedule"]
+        markets.append(cm)
     return markets
 
 
@@ -221,6 +225,9 @@ def expand_implication_to_pairs(
         target_price_yes = target_market.get("price_yes", 0.5)
         target_price_no = target_market.get("price_no", 0.5)
         target_bracket = target_market.get("bracket_label")
+        # Fee data (present after enrich_fees step)
+        target_fees_enabled = target_market.get("feesEnabled", False)
+        target_fee_schedule = target_market.get("feeSchedule")
 
         # Expand YES covers (for target_YES position)
         for cover_info in yes_covering_groups:
@@ -267,6 +274,11 @@ def expand_implication_to_pairs(
                         "cover_probability": cm["probability"],
                         "relationship": cm["relationship"],
                         "relationship_type": cm["relationship_type"],
+                        # Fee data for cost estimates
+                        "target_feesEnabled": target_fees_enabled,
+                        "target_feeSchedule": target_fee_schedule,
+                        "cover_feesEnabled": cm.get("feesEnabled", False),
+                        "cover_feeSchedule": cm.get("feeSchedule"),
                     }
                 )
 
@@ -320,6 +332,11 @@ def expand_implication_to_pairs(
                             "cover_probability": cm["probability"],
                             "relationship": cm["relationship"],
                             "relationship_type": cm["relationship_type"],
+                            # Fee data for cost estimates
+                            "target_feesEnabled": target_fees_enabled,
+                            "target_feeSchedule": target_fee_schedule,
+                            "cover_feesEnabled": cm.get("feesEnabled", False),
+                            "cover_feeSchedule": cm.get("feeSchedule"),
                         }
                     )
 

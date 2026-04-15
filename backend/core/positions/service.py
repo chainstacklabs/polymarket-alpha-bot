@@ -108,6 +108,7 @@ class PositionService:
         self.storage = storage
         self.wallet = wallet
         self._token_cache: dict[str, tuple[str, str]] = {}  # market_id -> (yes, no)
+        self._fee_cache: dict[str, dict] = {}  # market_id -> fee market stub
 
         # Lazy-init Web3 and contracts
         self._w3: Optional[Web3] = None
@@ -282,6 +283,40 @@ class PositionService:
             return round(1 - yes_price, 4)
         return round(yes_price, 4)
 
+    def _bulk_fetch_fee_stubs(self, market_ids: list[str]) -> None:
+        """Populate self._fee_cache for the given market IDs in one batched call.
+
+        Uses /markets/keyset?id=A&id=B&... which accepts multi-value id filter
+        (verified 2026-04-15). Missing markets default to fee-exempt stubs.
+        """
+        uncached = [mid for mid in market_ids if mid and mid not in self._fee_cache]
+        if not uncached:
+            return
+
+        # Pre-seed cache with fee-exempt stubs so partial failures still return something
+        for mid in uncached:
+            self._fee_cache[mid] = {"id": mid, "feesEnabled": False}
+
+        with httpx.Client(
+            base_url="https://gamma-api.polymarket.com", timeout=10.0
+        ) as client:
+            for i in range(0, len(uncached), 50):
+                batch = uncached[i : i + 50]
+                params = [("id", mid) for mid in batch]
+                try:
+                    resp = client.get("/markets/keyset", params=params)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                    for m in payload.get("markets", []):
+                        mid = str(m.get("id", ""))
+                        if m.get("feesEnabled"):
+                            stub: dict = {"id": mid, "feesEnabled": True}
+                            if "feeSchedule" in m:
+                                stub["feeSchedule"] = m["feeSchedule"]
+                            self._fee_cache[mid] = stub
+                except Exception as e:
+                    logger.debug(f"Bulk fee fetch failed for batch {batch[:3]}...: {e}")
+
     def _calculate_state(
         self,
         target_wanted: float,
@@ -315,11 +350,14 @@ class PositionService:
         cover_unwanted: float,
         target_price: float,
         cover_price: float,
+        exit_fees: float = 0.0,
     ) -> tuple[float, float, float]:
         """Calculate current value, P&L, and P&L percentage.
 
         current_value = token_holdings_value + realized_proceeds (from exit sells/merges).
         effective_cost = gross_cost if unwanted tokens remain, else net_cost.
+        exit_fees: estimated taker fees if selling at current prices (unrealized
+            P&L only -- realized proceeds from the CLOB already net fees).
         """
         target_mergeable = min(target_wanted, target_unwanted)
         cover_mergeable = min(cover_wanted, cover_unwanted)
@@ -341,7 +379,7 @@ class PositionService:
             + (cover_excess_unwanted * cover_unwanted_price)
         )
 
-        current_value = merge_value + market_value + realized_proceeds
+        current_value = merge_value + market_value + realized_proceeds - exit_fees
 
         has_significant_unwanted = (target_unwanted > 0.01) or (cover_unwanted > 0.01)
         effective_cost = gross_cost if has_significant_unwanted else net_cost
@@ -517,6 +555,17 @@ class PositionService:
         for (pos_idx, field), balance in zip(token_id_map, balances):
             position_balances[pos_idx][field] = balance
 
+        # Bulk-fetch fee stubs for all markets (single batched HTTP call)
+        all_market_ids = list(
+            {
+                mid
+                for entry in entries
+                for mid in (entry["target_market_id"], entry["cover_market_id"])
+                if mid
+            }
+        )
+        self._bulk_fetch_fee_stubs(all_market_ids)
+
         # Build LivePosition objects
         results = []
         for entry, bal in zip(entries, position_balances):
@@ -549,6 +598,22 @@ class PositionService:
             )
             realized_proceeds = entry.get("realized_proceeds", 0.0)
 
+            # Estimate exit fees at current prices (unrealized P&L only --
+            # realized P&L uses actual CLOB proceeds which already net fees).
+            from core.fees import compute_fee
+
+            target_fee_stub = self._fee_cache.get(
+                entry["target_market_id"], {"feesEnabled": False}
+            )
+            cover_fee_stub = self._fee_cache.get(
+                entry["cover_market_id"], {"feesEnabled": False}
+            )
+            target_value = target_wanted * target_price
+            cover_value = cover_wanted * cover_price
+            exit_fees = compute_fee(
+                target_value, target_price, target_fee_stub
+            ) + compute_fee(cover_value, cover_price, cover_fee_stub)
+
             current_value, pnl, pnl_pct = self._calculate_pnl(
                 gross_cost,
                 net_cost,
@@ -559,6 +624,7 @@ class PositionService:
                 cover_unwanted,
                 target_price,
                 cover_price,
+                exit_fees=exit_fees,
             )
 
             results.append(

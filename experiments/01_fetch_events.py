@@ -26,6 +26,12 @@ INPUT
         - /tags/slug/{slug} - Get tag metadata
         - /events?tag_id=X  - Get events with nested markets
 
+    NOTE ON FEES: The /events/keyset endpoint does NOT include feeSchedule in
+    its market objects. If you adapt this script for fee-bearing tags (e.g.
+    crypto), you need a supplementary /markets/keyset?id=... lookup to fetch
+    feesEnabled + feeSchedule per market. See backend/core/steps/fetch.py::
+    enrich_fees for the production pattern.
+
 OUTPUT
     data/01_fetch_events/<timestamp>/
         - events.json   : All active events with nested markets array
