@@ -9,6 +9,7 @@ import httpx
 from web3 import Web3
 from loguru import logger
 
+from core.http_retry import fetch_json_with_retry
 from core.wallet.contracts import CONTRACTS, CTF_ABI
 from core.wallet.manager import WalletManager
 
@@ -70,10 +71,9 @@ class TradingExecutor:
     async def get_market_info(self, market_id: str) -> MarketInfo:
         """Fetch market info from Polymarket API."""
         async with httpx.AsyncClient(timeout=30.0) as http:
-            resp = await http.get(
-                f"https://gamma-api.polymarket.com/markets/{market_id}"
+            data = await fetch_json_with_retry(
+                http, f"https://gamma-api.polymarket.com/markets/{market_id}"
             )
-            data = resp.json()
 
         clob_tokens = json.loads(data.get("clobTokenIds", "[]"))
         prices = json.loads(data.get("outcomePrices", "[0.5, 0.5]"))

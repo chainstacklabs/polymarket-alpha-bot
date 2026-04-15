@@ -10,6 +10,7 @@ import json
 import httpx
 from loguru import logger
 
+from core.http_retry import PermanentError, TransientError, fetch_json_with_retry
 from core.paths import GAMMA_API_BASE_URL, LIVE_DIR
 
 # =============================================================================
@@ -154,15 +155,9 @@ class TokenResolver:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             for market_id in market_ids:
                 try:
-                    resp = await client.get(f"{GAMMA_API_BASE_URL}/markets/{market_id}")
-
-                    if resp.status_code != 200:
-                        logger.warning(
-                            f"Failed to fetch market {market_id}: {resp.status_code}"
-                        )
-                        continue
-
-                    market = resp.json()
+                    market = await fetch_json_with_retry(
+                        client, f"{GAMMA_API_BASE_URL}/markets/{market_id}"
+                    )
                     clob_token_ids = market.get("clobTokenIds", "[]")
 
                     # Parse JSON string if needed
@@ -204,7 +199,13 @@ class TokenResolver:
 
                     new_market_to_tokens[market_id] = [yes_token, no_token]
 
-                except (httpx.RequestError, json.JSONDecodeError, KeyError) as e:
+                except (
+                    httpx.RequestError,
+                    json.JSONDecodeError,
+                    KeyError,
+                    TransientError,
+                    PermanentError,
+                ) as e:
                     logger.warning(f"Error fetching market {market_id}: {e}")
                     continue
 

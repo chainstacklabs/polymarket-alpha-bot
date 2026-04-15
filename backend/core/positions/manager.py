@@ -7,6 +7,8 @@ import httpx
 from loguru import logger
 from web3 import Web3
 
+
+from core.http_retry import fetch_json_with_retry
 from core.wallet.contracts import CONTRACTS, CTF_ABI
 from core.wallet.manager import WalletManager
 from core.positions.storage import PositionStorage
@@ -85,11 +87,9 @@ class PositionManager:
     async def _get_market_info(self, market_id: str) -> dict:
         """Fetch market info from Polymarket API."""
         async with httpx.AsyncClient(timeout=30.0) as http:
-            resp = await http.get(
-                f"https://gamma-api.polymarket.com/markets/{market_id}"
+            return await fetch_json_with_retry(
+                http, f"https://gamma-api.polymarket.com/markets/{market_id}"
             )
-            resp.raise_for_status()
-            return resp.json()
 
     def _merge_tokens(
         self,

@@ -98,18 +98,31 @@ def sell_via_clob(
 
 
 def _get_filled_size(client, order_id: str) -> float:
-    """Query order fill status. Returns matched token amount."""
-    try:
-        time.sleep(1)  # Brief wait for settlement
-        order = client.get_order(order_id)
-        size_matched = float(order.get("size_matched", 0))
-        logger.info(
-            f"Order {order_id}: size_matched={size_matched}, "
-            f"original_size={order.get('original_size')}"
-        )
-        return size_matched
-    except Exception as e:
-        logger.warning(f"Could not fetch order status for {order_id}: {e}")
-        # Don't assume a fill we can't verify — balance queries will
-        # show the real token state on next position refresh
-        return 0.0
+    """Query order fill status. Returns matched token amount.
+
+    Retries on transient SDK errors (up to 3 attempts with exponential backoff).
+    Returns 0.0 on exhausted retries — caller should treat this as unverified
+    and rely on balance queries on next position refresh.
+    """
+    time.sleep(1)  # Brief wait for settlement
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            order = client.get_order(order_id)
+            size_matched = float(order.get("size_matched", 0))
+            logger.info(
+                f"Order {order_id}: size_matched={size_matched}, "
+                f"original_size={order.get('original_size')}"
+            )
+            return size_matched
+        except Exception as e:
+            last_exc = e
+            if attempt < 2:
+                logger.debug(
+                    f"get_filled_size retry {attempt + 1}/3 for {order_id}: {e}"
+                )
+                time.sleep(2**attempt)
+    logger.warning(
+        f"Could not fetch order status for {order_id} after 3 attempts: {last_exc}"
+    )
+    return 0.0

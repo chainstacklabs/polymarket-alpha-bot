@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 from loguru import logger
 
+from core.http_retry import fetch_json_with_retry
 from core.paths import GAMMA_API_BASE_URL
 
 # =============================================================================
@@ -20,33 +21,6 @@ from core.paths import GAMMA_API_BASE_URL
 TARGET_TAG_SLUG = os.getenv("POLYMARKET_TAG", "politics")
 PAGE_SIZE = 200
 REQUEST_TIMEOUT = 30.0
-MAX_RETRIES = 3
-
-
-# =============================================================================
-# API FUNCTIONS
-# =============================================================================
-
-
-async def fetch_json(
-    client: httpx.AsyncClient,
-    endpoint: str,
-    params: dict[str, Any] | None = None,
-) -> Any:
-    """Fetch JSON from API with retry logic."""
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = await client.get(endpoint, params=params)
-            resp.raise_for_status()
-            return resp.json()
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            if attempt == MAX_RETRIES:
-                raise
-            status = getattr(e, "response", None)
-            delay = attempt * (2 if status and status.status_code == 429 else 1)
-            logger.warning(f"Retry {attempt}/{MAX_RETRIES} for {endpoint}: {e}")
-            await asyncio.sleep(delay)
-    return None
 
 
 async def fetch_all_pages(
@@ -63,7 +37,7 @@ async def fetch_all_pages(
         params: dict[str, Any] = {**base_params, "limit": PAGE_SIZE}
         if after_cursor:
             params["after_cursor"] = after_cursor
-        page = await fetch_json(client, endpoint, params)
+        page = await fetch_json_with_retry(client, endpoint, params)
         if not page:
             break
         items = page.get(resource_key, []) if isinstance(page, dict) else []
@@ -167,9 +141,9 @@ async def enrich_fees(
         batch = ids[i : i + 50]
         params = [("id", mid) for mid in batch]
         try:
-            resp = await client.get("/markets/keyset", params=params)
-            resp.raise_for_status()
-            payload = resp.json()
+            payload = await fetch_json_with_retry(
+                client, "/markets/keyset", params=params
+            )
             for m in payload.get("markets", []):
                 mid = str(m.get("id", ""))
                 if mid in fee_bearing and "feeSchedule" in m:
@@ -216,7 +190,7 @@ async def fetch_events(
 
         for tag_slug in tags:
             # Get tag ID
-            tag = await fetch_json(client, f"/tags/slug/{tag_slug}")
+            tag = await fetch_json_with_retry(client, f"/tags/slug/{tag_slug}")
             if not tag:
                 logger.warning(f"Tag '{tag_slug}' not found, skipping")
                 continue
