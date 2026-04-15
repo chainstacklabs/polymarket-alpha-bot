@@ -57,7 +57,7 @@ import httpx
 GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
 TARGET_TAG_SLUG = "politics"
 CLOSED = False
-PAGE_SIZE = 100
+PAGE_SIZE = 200
 REQUEST_TIMEOUT = 30.0
 MAX_RETRIES = 3
 
@@ -100,19 +100,26 @@ async def fetch_json(
 async def fetch_all_pages(
     client: httpx.AsyncClient, endpoint: str, base_params: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Fetch all pages from a paginated endpoint."""
+    """Fetch all pages from a keyset-paginated endpoint."""
+    resource_key = endpoint.rstrip("/").split("/")[-2]
     results: list[dict[str, Any]] = []
-    offset = 0
+    after_cursor: str | None = None
     while True:
-        params = {**base_params, "limit": PAGE_SIZE, "offset": offset}
+        params: dict[str, Any] = {**base_params, "limit": PAGE_SIZE}
+        if after_cursor:
+            params["after_cursor"] = after_cursor
         page = await fetch_json(client, endpoint, params)
         if not page:
             break
-        results.extend(page)
-        log.info(f"Fetched {len(page)} items from {endpoint} (total: {len(results)})")
-        if len(page) < PAGE_SIZE:
+        items = page.get(resource_key, []) if isinstance(page, dict) else []
+        if not items:
             break
-        offset += PAGE_SIZE
+        results.extend(items)
+        log.info(f"Fetched {len(items)} items from {endpoint} (total: {len(results)})")
+        next_cursor = page.get("next_cursor") if isinstance(page, dict) else None
+        if not next_cursor:
+            break
+        after_cursor = next_cursor
     return results
 
 
@@ -196,7 +203,7 @@ async def main() -> None:
 
         events_raw = await fetch_all_pages(
             client,
-            "/events",
+            "/events/keyset",
             {"tag_id": tag_id, "active": "true", "closed": str(CLOSED).lower()},
         )
 
