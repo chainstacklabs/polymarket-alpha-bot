@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
     "loguru>=0.7.3",
-    "python-dotenv>=1.2.1",
+    "python-dotenv>=1.2.2",
     # Console output
     "rich>=13.0.0",
     # API
