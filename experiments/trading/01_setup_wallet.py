@@ -50,11 +50,22 @@ RPC_URL = os.environ["CHAINSTACK_NODE"]
 # Polymarket contracts on Polygon
 CONTRACTS = {
     "USDC_E": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+    "PUSD": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
     "CTF": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
     "CTF_EXCHANGE": "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E",
     "NEG_RISK_CTF_EXCHANGE": "0xC5d563A36AE78145C45a50134d48A1215220f80a",
     "NEG_RISK_ADAPTER": "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
 }
+
+
+def _v2_enabled() -> bool:
+    """Match backend's POLYMARKET_V2_ENABLED parsing (experiments are standalone)."""
+    return os.environ.get("POLYMARKET_V2_ENABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 ERC20_ABI = [
     {
@@ -192,6 +203,14 @@ def cmd_status():
     print("\nBalances:")
     print(f"  POL:    {pol:.4f}")
     print(f"  USDC.e: ${usdc_balance:.2f}")
+
+    # Under the V2 flag, also show pUSD — V2 collateral after the cutover.
+    if _v2_enabled():
+        pusd = w3.eth.contract(
+            address=Web3.to_checksum_address(CONTRACTS["PUSD"]), abi=ERC20_ABI
+        )
+        pusd_balance = pusd.functions.balanceOf(address).call() / 1e6
+        print(f"  pUSD:   ${pusd_balance:.2f}")
 
     # Approvals
     print("\nApprovals:")

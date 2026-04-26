@@ -7,14 +7,30 @@ from eth_account import Account
 from web3 import Web3
 from loguru import logger
 
+from core.feature_flags import v2_enabled
 from core.wallet.storage import WalletStorage
-from core.wallet.contracts import CONTRACTS, ERC20_ABI, CTF_ABI
+from core.wallet.contracts import CONTRACTS, V2_CONTRACTS, ERC20_ABI, CTF_ABI
+
+
+def _collateral_address() -> str:
+    """Active collateral token address (pUSD under V2 flag, USDC.e otherwise)."""
+    return V2_CONTRACTS["PUSD"] if v2_enabled() else CONTRACTS["USDC_E"]
+
+
+def _exchange_addresses() -> tuple[str, str]:
+    """(CTF exchange, NegRisk CTF exchange) addresses for the active env."""
+    if v2_enabled():
+        return (
+            V2_CONTRACTS["CTF_EXCHANGE_V2"],
+            V2_CONTRACTS["NEG_RISK_CTF_EXCHANGE_V2"],
+        )
+    return (CONTRACTS["CTF_EXCHANGE"], CONTRACTS["NEG_RISK_CTF_EXCHANGE"])
 
 
 @dataclass
 class WalletBalances:
     pol: float
-    usdc_e: float
+    usdc_e: float  # Holds pUSD balance when POLYMARKET_V2_ENABLED is set.
 
 
 @dataclass
@@ -93,13 +109,14 @@ class WalletManager:
 
         pol = float(w3.from_wei(w3.eth.get_balance(checksum), "ether"))
 
-        usdc = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["USDC_E"]),
+        # pUSD when V2 flag is set, USDC.e otherwise. Both are 6-decimal ERC-20s.
+        collateral = w3.eth.contract(
+            address=Web3.to_checksum_address(_collateral_address()),
             abi=ERC20_ABI,
         )
-        usdc_balance = usdc.functions.balanceOf(checksum).call() / 1e6
+        collateral_balance = collateral.functions.balanceOf(checksum).call() / 1e6
 
-        return WalletBalances(pol=pol, usdc_e=usdc_balance)
+        return WalletBalances(pol=pol, usdc_e=collateral_balance)
 
     def check_approvals(self) -> bool:
         """Check if all Polymarket approvals are set."""
@@ -110,8 +127,8 @@ class WalletManager:
         w3 = self._get_web3()
         checksum = Web3.to_checksum_address(address)
 
-        usdc = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["USDC_E"]),
+        collateral = w3.eth.contract(
+            address=Web3.to_checksum_address(_collateral_address()),
             abi=ERC20_ABI,
         )
         ctf = w3.eth.contract(
@@ -119,22 +136,27 @@ class WalletManager:
             abi=CTF_ABI,
         )
 
-        # Check USDC approvals
-        for contract in [
-            "CTF",
-            "CTF_EXCHANGE",
-            "NEG_RISK_CTF_EXCHANGE",
-            "NEG_RISK_ADAPTER",
-        ]:
-            allowance = usdc.functions.allowance(checksum, CONTRACTS[contract]).call()
+        ctf_exchange, neg_risk_exchange = _exchange_addresses()
+        # NegRisk adapter is unchanged in V2 (per Polymarket docs 2026-04-26).
+        collateral_spenders = [
+            CONTRACTS["CTF"],
+            ctf_exchange,
+            neg_risk_exchange,
+            CONTRACTS["NEG_RISK_ADAPTER"],
+        ]
+        ctf_operators = [
+            ctf_exchange,
+            neg_risk_exchange,
+            CONTRACTS["NEG_RISK_ADAPTER"],
+        ]
+
+        for spender in collateral_spenders:
+            allowance = collateral.functions.allowance(checksum, spender).call()
             if allowance == 0:
                 return False
 
-        # Check CTF approvals
-        for contract in ["CTF_EXCHANGE", "NEG_RISK_CTF_EXCHANGE", "NEG_RISK_ADAPTER"]:
-            approved = ctf.functions.isApprovedForAll(
-                checksum, CONTRACTS[contract]
-            ).call()
+        for operator in ctf_operators:
+            approved = ctf.functions.isApprovedForAll(checksum, operator).call()
             if not approved:
                 return False
 
@@ -172,8 +194,8 @@ class WalletManager:
         address = Web3.to_checksum_address(self._address)
         account = w3.eth.account.from_key(self._unlocked_key)
 
-        usdc = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["USDC_E"]),
+        collateral = w3.eth.contract(
+            address=Web3.to_checksum_address(_collateral_address()),
             abi=ERC20_ABI,
         )
         ctf = w3.eth.contract(
@@ -184,13 +206,14 @@ class WalletManager:
         MAX_UINT256 = 2**256 - 1
         tx_hashes = []
 
+        ctf_exchange, neg_risk_exchange = _exchange_addresses()
         approvals = [
-            (usdc, "approve", CONTRACTS["CTF"], MAX_UINT256),
-            (usdc, "approve", CONTRACTS["CTF_EXCHANGE"], MAX_UINT256),
-            (usdc, "approve", CONTRACTS["NEG_RISK_CTF_EXCHANGE"], MAX_UINT256),
-            (usdc, "approve", CONTRACTS["NEG_RISK_ADAPTER"], MAX_UINT256),
-            (ctf, "setApprovalForAll", CONTRACTS["CTF_EXCHANGE"], True),
-            (ctf, "setApprovalForAll", CONTRACTS["NEG_RISK_CTF_EXCHANGE"], True),
+            (collateral, "approve", CONTRACTS["CTF"], MAX_UINT256),
+            (collateral, "approve", ctf_exchange, MAX_UINT256),
+            (collateral, "approve", neg_risk_exchange, MAX_UINT256),
+            (collateral, "approve", CONTRACTS["NEG_RISK_ADAPTER"], MAX_UINT256),
+            (ctf, "setApprovalForAll", ctf_exchange, True),
+            (ctf, "setApprovalForAll", neg_risk_exchange, True),
             (ctf, "setApprovalForAll", CONTRACTS["NEG_RISK_ADAPTER"], True),
         ]
 

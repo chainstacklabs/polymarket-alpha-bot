@@ -67,8 +67,19 @@ RPC_URL = os.environ["CHAINSTACK_NODE"]
 
 CONTRACTS = {
     "USDC_E": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+    "PUSD": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
     "CTF": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
 }
+
+
+def _v2_enabled() -> bool:
+    """Match backend's POLYMARKET_V2_ENABLED parsing (experiments are standalone)."""
+    return os.environ.get("POLYMARKET_V2_ENABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 ERC20_ABI = [
     {
@@ -292,6 +303,12 @@ async def buy_position(
     amount_wei = int(amount * 1e6)
 
     print(f"\nYour USDC.e: ${usdc_balance / 1e6:.2f}")
+    if _v2_enabled():
+        pusd = w3.eth.contract(
+            address=Web3.to_checksum_address(CONTRACTS["PUSD"]), abi=ERC20_ABI
+        )
+        pusd_balance = pusd.functions.balanceOf(address).call()
+        print(f"Your pUSD:   ${pusd_balance / 1e6:.2f}")
 
     if usdc_balance < amount_wei:
         print("ERROR: Insufficient USDC.e")

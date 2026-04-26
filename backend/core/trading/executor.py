@@ -9,9 +9,15 @@ import httpx
 from web3 import Web3
 from loguru import logger
 
+from core.feature_flags import v2_enabled
 from core.http_retry import fetch_json_with_retry
-from core.wallet.contracts import CONTRACTS, CTF_ABI
+from core.wallet.contracts import CONTRACTS, V2_CONTRACTS, CTF_ABI
 from core.wallet.manager import WalletManager
+
+
+def _collateral_address() -> str:
+    """Active collateral token (pUSD under V2 flag, USDC.e otherwise)."""
+    return V2_CONTRACTS["PUSD"] if v2_enabled() else CONTRACTS["USDC_E"]
 
 
 @dataclass
@@ -152,7 +158,7 @@ class TradingExecutor:
         gas_price = int(base_gas_price * 1.2)
 
         tx = ctf.functions.splitPosition(
-            Web3.to_checksum_address(CONTRACTS["USDC_E"]),
+            Web3.to_checksum_address(_collateral_address()),
             bytes(32),  # parentCollectionId
             condition_bytes,
             [1, 2],  # partition for YES, NO
@@ -322,8 +328,9 @@ class TradingExecutor:
         required = amount_per_position * 2 + entry_fees
 
         if balances.usdc_e < required:
+            collateral_label = "pUSD" if v2_enabled() else "USDC.e"
             raise ValueError(
-                f"Insufficient USDC.e: need {required:.2f} "
+                f"Insufficient {collateral_label}: need {required:.2f} "
                 f"(includes ${entry_fees:.2f} taker fees), "
                 f"have {balances.usdc_e:.2f}"
             )

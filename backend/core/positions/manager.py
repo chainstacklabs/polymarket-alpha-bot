@@ -8,11 +8,17 @@ from loguru import logger
 from web3 import Web3
 
 
+from core.feature_flags import v2_enabled
 from core.http_retry import fetch_json_with_retry
-from core.wallet.contracts import CONTRACTS, CTF_ABI
-from core.wallet.manager import WalletManager
-from core.positions.storage import PositionStorage
 from core.positions.service import PositionService
+from core.positions.storage import PositionStorage
+from core.wallet.contracts import CONTRACTS, V2_CONTRACTS, CTF_ABI
+from core.wallet.manager import WalletManager
+
+
+def _collateral_address() -> str:
+    """Active collateral token (pUSD under V2 flag, USDC.e otherwise)."""
+    return V2_CONTRACTS["PUSD"] if v2_enabled() else CONTRACTS["USDC_E"]
 
 
 @dataclass
@@ -129,7 +135,7 @@ class PositionManager:
             gas_price = int(base_gas_price * 1.2)
 
             tx = contract.functions.mergePositions(
-                Web3.to_checksum_address(CONTRACTS["USDC_E"]),
+                Web3.to_checksum_address(_collateral_address()),
                 bytes(32),  # parentCollectionId
                 condition_bytes,
                 [1, 2],  # partition for YES, NO
