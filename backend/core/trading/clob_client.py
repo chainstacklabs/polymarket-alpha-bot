@@ -120,17 +120,23 @@ def _get_clob_client_v2(wallet: WalletManager) -> Optional[object]:
         if not address:
             logger.error("Wallet address is not set")
             return None
-        # V2 takes an options object: chain="polygon", EIP-712 domain version "2".
-        # No builder code (#27 leaves it null; revisit later).
+        # V2 keeps `chain_id` (still int 137 for Polygon) and handles EIP-712
+        # domain version "2" internally. `builder_config=None` per #27 scope.
         client = ClobClientV2(
             host=CLOB_V2_URL,
+            chain_id=137,
             key=private_key,
-            chain="polygon",
             signature_type=0,
             funder=address,
-            signature_version="2",
+            builder_config=None,
         )
-        creds = client.create_or_derive_api_creds()
+        # V2 split V1's `create_or_derive_api_creds` into separate methods.
+        # `derive_api_key` is idempotent for an existing key; falls back to
+        # `create_api_key` if the wallet has no key yet.
+        try:
+            creds = client.derive_api_key()
+        except Exception:
+            creds = client.create_api_key()
         client.set_api_creds(creds)
         return client
     except Exception as e:
