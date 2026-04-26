@@ -17,6 +17,9 @@ dependencies = [
     # Trading (experiments)
     "eth-account>=0.13.7",
     "py-clob-client>=0.34.5",
+    # V2 client for the 2026-04-28 Polymarket cutover (parallel install).
+    # Currently gated by POLYMARKET_V2_ENABLED; see core/trading/clob_client.py.
+    "py-clob-client-v2==1.0.0",
     "web3>=7.15.0",
     "cryptography>=46.0.7",
 ]
