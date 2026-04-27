@@ -103,9 +103,13 @@ To use the skills in this repo with a different agent, point it at `.claude/skil
 
 ## Experiments
 
+Standalone research scripts (no imports from `backend/`). Three groups:
+
 | Folder | Description |
 |--------|-------------|
-| [`experiments/onchain-otc/`](experiments/onchain-otc/) | On-chain OTC trading without the CLOB — split/merge, P2P transfers, atomic escrow, NegRisk conversions, and intent-based settlement on an Anvil fork of Polygon |
+| [`experiments/`](experiments/) | Pipeline-step learning examples — fetch events, build groups, extract implications, validate, score portfolios, stream prices. Mirrors what `backend/core/runner.py` orchestrates, one stage per file. |
+| [`experiments/trading/`](experiments/trading/) | Wallet + funding + position helpers. Generate a wallet, swap native USDC → USDC.e (legacy), wrap USDC.e → pUSD (Polymarket V2 collateral), buy a position, transfer tokens. Flag-aware: scripts read `POLYMARKET_V2_ENABLED` to mirror the backend's V1/V2 routing. |
+| [`experiments/onchain-otc/`](experiments/onchain-otc/) | On-chain OTC trading without the CLOB — split/merge, P2P transfers, atomic escrow, NegRisk conversions, and intent-based settlement on an Anvil fork of Polygon. Forked-chain research; uses USDC.e collateral (the fork's frozen state predates Polymarket V2 / pUSD). |
 
 ---
 
