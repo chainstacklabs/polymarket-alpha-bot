@@ -2,6 +2,14 @@
 
 > Polymarket alpha detection platform. LLM pipeline groups related markets, extracts logical implications, and builds covering portfolios (hedged positions via contrapositive logic). Next.js dashboard with real-time price tracking and position management.
 
+## Polymarket V2 cutover (2026-04-28 11:00 UTC)
+
+The bot supports both V1 (USDC.e collateral) and V2 (pUSD collateral) trading paths, gated by `POLYMARKET_V2_ENABLED`. Single source of truth: `core/feature_flags.v2_enabled()`.
+
+**Phase 2 PR #49** (`feat/v2-flip-default`) flips the default unset → true at cutover. **DO NOT MERGE BEFORE 2026-04-28 11:00 UTC** — V2 books are empty pre-cutover.
+
+Operator post-flip: re-run `WalletManager.set_approvals()` once (approvals are mode-gated). USDC.e holders wrap to pUSD via `experiments/trading/02_wrap_to_pusd.py`. V1 retirement (#37) is queued for ~2026-05-05 after a 1-week soak; the `v1-final` git tag at `94e89ce` is the permanent legacy reference.
+
 ## Commands
 
 ```bash
@@ -59,11 +67,16 @@ data/               # Pipeline outputs (gitignored)
 | `POST /pipeline/run/production` | Trigger pipeline run |
 | `POST /pipeline/reset` | Clear pipeline state |
 | `GET,POST /positions` | Position CRUD |
-| `POST /positions/{id}/sell` | Sell position tokens |
-| `POST /positions/{id}/merge` | Merge complementary tokens |
+| `POST /positions/{id}/sell` | Sell position tokens via CLOB FAK |
+| `POST /positions/{id}/merge` | Merge complementary tokens (CTF mergePositions) |
+| `POST /positions/{id}/exit` | Orchestrated sell + merge fallback |
 | `POST /trading/buy-pair` | Execute covered pair trade |
 | `POST /trading/buy-pair/estimate` | Estimate trade cost |
-| `GET /wallet/status` | Wallet state |
+| `GET /wallet/status` | Wallet state (balances, approvals, V2-aware) |
+| `POST /wallet/generate` | Generate new wallet (encrypted with passphrase) |
+| `POST /wallet/import` | Import private key (encrypted with passphrase) |
+| `POST /wallet/unlock` / `lock` | Decrypt key into memory / clear |
+| `POST /wallet/approve-contracts` | Set all Polymarket approvals (V2-aware) |
 | `GET /health` | Health check |
 
 > Debug: `GET /prices/current`, `WS /prices/ws`
@@ -96,6 +109,7 @@ VALIDATION_MODEL=...               # Required: model for validation
 POLYMARKET_TAG=politics             # Optional: market filter
 MARKET_POLLING_ENABLED=false        # Optional: background polling
 CHAINSTACK_NODE=https://...         # Optional: Polygon RPC for on-chain trades
+POLYMARKET_V2_ENABLED=true         # Optional: V1/V2 path selector. Pre-#49 default false; post-#49 default true. Set =false explicitly to opt back to V1 (until V1 is removed in #37).
 ```
 
 ## Git
