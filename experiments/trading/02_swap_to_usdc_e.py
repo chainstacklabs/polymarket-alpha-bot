@@ -1,16 +1,35 @@
 """
-Swap Native USDC to USDC.e on Polygon
-=====================================
+Swap Native USDC to USDC.e on Polygon  [LEGACY — V1 ONLY]
+=========================================================
 
-Polymarket uses USDC.e (bridged USDC), not native USDC.
-This script swaps your native USDC to USDC.e using DEX aggregators.
+⚠️  Polymarket V2 cutover (2026-04-28 11:00 UTC) makes USDC.e a
+   stepping-stone, not the trading collateral. The bot signs V2 orders with
+   pUSD as collateral. Direct path under V2:
 
-WHY THIS IS NEEDED:
+       Native USDC --(this script)--> USDC.e --(02_wrap_to_pusd.py)--> pUSD
+
+   If you have native USDC and want to trade on V2, run this first to get
+   USDC.e, then run 02_wrap_to_pusd.py to wrap into pUSD.
+
+   If you already hold USDC.e, skip this — go straight to 02_wrap_to_pusd.py.
+
+   Pre-cutover (V1) usage is unchanged: this is the only **conversion** step
+   (native USDC -> USDC.e). It is not the only prerequisite for trading —
+   wallet setup + Polymarket approvals via 01_setup_wallet.py are still
+   required. Not removed because (a) it's still the on-ramp from native USDC
+   for new users and (b) the ParaSwap path itself is independent of
+   Polymarket's collateral choice.
+
+   V2 cutover timestamp and the CollateralOnramp / pUSD addresses live in
+   backend/core/wallet/contracts.py (V2_CONTRACTS).
+
+WHY THIS IS NEEDED (still):
     - Polygon has TWO types of USDC:
       - Native USDC (0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359) - newer
-      - USDC.e (0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174) - bridged, used by Polymarket
-    - If you bridged USDC from Ethereum, you likely have native USDC
-    - Polymarket ONLY accepts USDC.e
+      - USDC.e (0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174) - bridged
+    - The Polymarket Collateral Onramp wraps **USDC.e -> pUSD**, not native.
+      So users who bridged from Ethereum and hold native USDC still need
+      this swap step before they can wrap.
 
 WHAT IT DOES:
     1. Checks your native USDC balance
