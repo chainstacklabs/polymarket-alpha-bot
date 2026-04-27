@@ -15,6 +15,11 @@
 
 # Alphapoly - Polymarket alpha detection platform
 
+> ⚠️ **Polymarket V2 cutover: 2026-04-28 11:00 UTC.**
+> After cutover, set `POLYMARKET_V2_ENABLED=true` in your `.env` and re-run `WalletManager.set_approvals()` once (approvals are mode-gated).
+> If you hold USDC.e, wrap it to pUSD with [`experiments/trading/02_wrap_to_pusd.py`](experiments/trading/02_wrap_to_pusd.py) before trading.
+> V1 code paths will be removed in **v2.0** (~2026-05-05). To pin to the legacy V1 stack: `git checkout v1-final`.
+
 Find covering portfolios across correlated prediction markets using predefined rules and LLM decisions. The system detects relationships between markets, classifies them to identify hedging pairs, and tracks their prices. The platform offers a smooth UI for entering detected pairs when profit opportunities exist and tracking your positions.
 
 For a good experience, you'll need to add an LLM from OpenRouter and an RPC node (see `.env.example`).
