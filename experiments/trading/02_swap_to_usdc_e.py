@@ -13,10 +13,15 @@ Swap Native USDC to USDC.e on Polygon  [LEGACY — V1 ONLY]
 
    If you already hold USDC.e, skip this — go straight to 02_wrap_to_pusd.py.
 
-   Pre-cutover (V1) usage is unchanged: this swap is the only step needed
-   to make funds tradeable on Polymarket. Not removed because (a) it's still
-   the on-ramp from native USDC for new users and (b) the ParaSwap path
-   itself is independent of Polymarket's collateral choice.
+   Pre-cutover (V1) usage is unchanged: this is the only **conversion** step
+   (native USDC -> USDC.e). It is not the only prerequisite for trading —
+   wallet setup + Polymarket approvals via 01_setup_wallet.py are still
+   required. Not removed because (a) it's still the on-ramp from native USDC
+   for new users and (b) the ParaSwap path itself is independent of
+   Polymarket's collateral choice.
+
+   V2 cutover timestamp and the CollateralOnramp / pUSD addresses live in
+   backend/core/wallet/contracts.py (V2_CONTRACTS).
 
 WHY THIS IS NEEDED (still):
     - Polygon has TWO types of USDC:
