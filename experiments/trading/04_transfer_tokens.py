@@ -1,8 +1,11 @@
 """
-Transfer USDC and USDC.e to Another Wallet
-==========================================
+Transfer USDC, USDC.e, and pUSD to Another Wallet
+=================================================
 
-Transfers all USDC and USDC.e from the local wallet to a specified address.
+Transfers all stablecoins from the local wallet to a specified address.
+Token set follows POLYMARKET_V2_ENABLED:
+  unset/false → native USDC + USDC.e
+  true        → native USDC + USDC.e + pUSD (V2 collateral)
 
 USAGE:
     cd backend && uv run python ../experiments/trading/04_transfer_tokens.py <target_address>
@@ -108,28 +111,26 @@ def main():
     w3 = get_web3()
     account = w3.eth.account.from_key(private_key)
 
-    # Check balances
-    usdc_native = w3.eth.contract(
-        address=Web3.to_checksum_address(USDC_NATIVE), abi=ERC20_ABI
-    )
-    usdc_e = w3.eth.contract(address=Web3.to_checksum_address(USDC_E), abi=ERC20_ABI)
+    tokens = [
+        ("USDC native", USDC_NATIVE),
+        ("USDC.e", USDC_E),
+    ]
+    if _v2_enabled():
+        tokens.append(("pUSD", PUSD))
 
-    balance_native = usdc_native.functions.balanceOf(address).call()
-    balance_e = usdc_e.functions.balanceOf(address).call()
+    contracts = {
+        label: w3.eth.contract(address=Web3.to_checksum_address(addr), abi=ERC20_ABI)
+        for label, addr in tokens
+    }
+    balances = {label: c.functions.balanceOf(address).call() for label, c in contracts.items()}
     pol_balance = w3.from_wei(w3.eth.get_balance(address), "ether")
 
     print("\nCurrent balances:")
     print(f"  POL:         {pol_balance:.4f}")
-    print(f"  USDC native: ${balance_native / 1e6:.2f}")
-    print(f"  USDC.e:      ${balance_e / 1e6:.2f}")
+    for label, _ in tokens:
+        print(f"  {label:<12} ${balances[label] / 1e6:.2f}")
 
-    # Under the V2 flag, also surface pUSD so users can see V2 collateral.
-    if _v2_enabled():
-        pusd = w3.eth.contract(address=Web3.to_checksum_address(PUSD), abi=ERC20_ABI)
-        balance_pusd = pusd.functions.balanceOf(address).call()
-        print(f"  pUSD:        ${balance_pusd / 1e6:.2f}")
-
-    if balance_native == 0 and balance_e == 0:
+    if all(b == 0 for b in balances.values()):
         print("\nNo tokens to transfer.")
         return
 
@@ -137,8 +138,7 @@ def main():
         print("\nERROR: Insufficient POL for gas")
         return
 
-    # Confirm
-    total = (balance_native + balance_e) / 1e6
+    total = sum(balances.values()) / 1e6
     if skip_confirm:
         print(f"\nTransferring ${total:.2f} total to {target_address}...")
     else:
@@ -150,13 +150,14 @@ def main():
             return
 
     tx_count = 0
-
-    # Transfer USDC.e
-    if balance_e > 0:
+    for label, _ in tokens:
+        balance = balances[label]
+        if balance == 0:
+            continue
         tx_count += 1
-        print(f"\n[{tx_count}] Transferring ${balance_e / 1e6:.2f} USDC.e...")
+        print(f"\n[{tx_count}] Transferring ${balance / 1e6:.2f} {label}...")
 
-        tx = usdc_e.functions.transfer(target_address, balance_e).build_transaction(
+        tx = contracts[label].functions.transfer(target_address, balance).build_transaction(
             {
                 "from": address,
                 "nonce": w3.eth.get_transaction_count(address),
@@ -175,48 +176,16 @@ def main():
         if receipt["status"] != 1:
             print("  ERROR: Transfer failed")
             return
-        print("  USDC.e transfer complete!")
+        print(f"  {label} transfer complete!")
         time.sleep(2)
 
-    # Transfer native USDC
-    if balance_native > 0:
-        tx_count += 1
-        print(f"\n[{tx_count}] Transferring ${balance_native / 1e6:.2f} native USDC...")
-
-        tx = usdc_native.functions.transfer(
-            target_address, balance_native
-        ).build_transaction(
-            {
-                "from": address,
-                "nonce": w3.eth.get_transaction_count(address),
-                "gas": 100000,
-                "gasPrice": int(w3.eth.gas_price * 1.2),
-                "chainId": 137,
-            }
-        )
-
-        signed = account.sign_transaction(tx)
-        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        print(f"  TX: {tx_hash.hex()}")
-        print(f"  View: https://polygonscan.com/tx/{tx_hash.hex()}")
-
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
-        if receipt["status"] != 1:
-            print("  ERROR: Transfer failed")
-            return
-        print("  Native USDC transfer complete!")
-
-    # Final balances
-    time.sleep(2)
-    balance_native = usdc_native.functions.balanceOf(address).call()
-    balance_e = usdc_e.functions.balanceOf(address).call()
-
+    final = {label: c.functions.balanceOf(address).call() for label, c in contracts.items()}
     print("\n" + "=" * 60)
     print("TRANSFER COMPLETE")
     print("=" * 60)
     print("\nFinal balances:")
-    print(f"  USDC native: ${balance_native / 1e6:.2f}")
-    print(f"  USDC.e:      ${balance_e / 1e6:.2f}")
+    for label, _ in tokens:
+        print(f"  {label:<12} ${final[label] / 1e6:.2f}")
 
 
 def main_pol():

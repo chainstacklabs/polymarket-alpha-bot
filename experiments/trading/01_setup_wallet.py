@@ -7,11 +7,15 @@ Creates a new Polygon wallet and sets up all required Polymarket approvals.
 WHAT IT DOES:
     1. Generates a new Ethereum-compatible wallet (private key + address)
     2. Saves credentials to .wallet.local.json (gitignored)
-    3. Sets USDC.e approvals for all Polymarket contracts
+    3. Sets collateral approvals for all Polymarket contracts.
+       Collateral + exchange targets flip with POLYMARKET_V2_ENABLED:
+         unset/false → USDC.e + V1 exchanges (legacy, retired ~2026-05-05)
+         true        → pUSD   + V2 exchanges (post-cutover 2026-04-28)
 
 PREREQUISITES:
-    - Fund the wallet with POL (for gas) and USDC.e (for trading)
-    - If you have native USDC, run 02_swap_to_usdc_e.py first
+    - Fund the wallet with POL (for gas) and the active collateral (for trading)
+    - V1: USDC.e — if you only have native USDC, run 02_swap_to_usdc_e.py
+    - V2: pUSD   — if you only have USDC.e,    run 02_wrap_to_pusd.py
 
 USAGE:
     cd backend && uv run python ../experiments/trading/01_setup_wallet.py [command]
@@ -190,9 +194,10 @@ def cmd_generate():
     print("=" * 60)
     print(f"\nAddress: {account.address}")
     print(f"Saved to: {WALLET_PATH}")
+    coll_label, _ = _collateral()
     print("\nNEXT STEPS:")
     print("  1. Send POL to this address (for gas, ~0.5 POL is enough)")
-    print("  2. Send USDC.e to this address (for trading)")
+    print(f"  2. Send {coll_label} to this address (for trading)")
     print("  3. Run: uv run python 01_setup_wallet.py approve")
 
 
