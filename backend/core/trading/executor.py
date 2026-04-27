@@ -136,16 +136,21 @@ class TradingExecutor:
         address = Web3.to_checksum_address(self.wallet.address)
         account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
 
-        # NegRisk adapter has the same splitPosition(5-param) ABI as CTF
-        split_contract_addr = (
-            CONTRACTS["NEG_RISK_ADAPTER"] if neg_risk else CONTRACTS["CTF"]
-        )
+        # Always route splits through the standard CTF: the per-outcome
+        # conditionId from Gamma is registered on CTF (verified via
+        # getOutcomeSlotCount). The V1 NegRiskAdapter's 5-arg splitPosition
+        # would still resolve, but its 2-arg native variant requires a
+        # NegRisk-prepared questionId we don't have, and on V2 the adapter
+        # rejects pUSD anyway. The `neg_risk` flag on Gamma is a market
+        # grouping hint, not an on-chain routing instruction for splits.
+        split_contract_addr = CONTRACTS["CTF"]
         ctf = w3.eth.contract(
             address=Web3.to_checksum_address(split_contract_addr),
             abi=CTF_ABI,
         )
         logger.info(
-            f"Split via {'NegRisk adapter' if neg_risk else 'CTF'}: {split_contract_addr[:10]}..."
+            f"Split via CTF{' (NegRisk-grouped market)' if neg_risk else ''}: "
+            f"{split_contract_addr[:10]}..."
         )
 
         amount_wei = int(amount_usd * 1e6)

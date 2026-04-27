@@ -137,7 +137,10 @@ class WalletManager:
         )
 
         ctf_exchange, neg_risk_exchange = _exchange_addresses()
-        # NegRisk adapter is unchanged in V2 (per Polymarket docs 2026-04-26).
+        # NegRisk Adapter is unchanged in V2 (per Polymarket docs 2026-04-26).
+        # We keep its approvals for compatibility, but the bot's actual splits
+        # and merges always route through the standard CTF — see comments in
+        # core/trading/executor.py and core/positions/manager.py.
         collateral_spenders = [
             CONTRACTS["CTF"],
             ctf_exchange,
