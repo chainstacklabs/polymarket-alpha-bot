@@ -82,8 +82,6 @@ class TestSellViaClobRouting:
     def test_v1_uses_v1_market_order_struct(self, mock_fill, v1):
         from core.trading import clob as clob_mod
 
-        importlib.reload(clob_mod)
-
         captured: dict = {}
 
         def fake_create_market_order(args):
@@ -109,8 +107,6 @@ class TestSellViaClobRouting:
     @patch("core.trading.clob._get_filled_size")
     def test_v2_uses_v2_market_order_struct(self, mock_fill, v2):
         from core.trading import clob as clob_mod
-
-        importlib.reload(clob_mod)
 
         captured: dict = {}
 

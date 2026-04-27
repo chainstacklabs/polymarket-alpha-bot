@@ -209,9 +209,13 @@ def get_clob_client():
                 builder_config=None,
             )
             # V2 split V1's `create_or_derive_api_creds` into two calls.
+            # Narrow to PolyApiException so transient network errors fail
+            # visibly instead of silently creating orphan API keys.
+            from py_clob_client_v2.exceptions import PolyApiException
+
             try:
                 creds = client.derive_api_key()
-            except Exception:
+            except PolyApiException:
                 creds = client.create_api_key()
         else:
             client = ClobClient(

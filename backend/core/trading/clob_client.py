@@ -133,11 +133,15 @@ def _get_clob_client_v2(wallet: WalletManager) -> Optional[object]:
             builder_config=None,
         )
         # V2 split V1's `create_or_derive_api_creds` into separate methods.
-        # `derive_api_key` is idempotent for an existing key; falls back to
-        # `create_api_key` if the wallet has no key yet.
+        # `derive_api_key` is idempotent for an existing key; the V2 SDK
+        # raises `PolyApiException` when the address has no key yet — narrow
+        # the catch so transient network errors fail visibly rather than
+        # silently creating orphan keys.
+        from py_clob_client_v2.exceptions import PolyApiException
+
         try:
             creds = client.derive_api_key()
-        except Exception:
+        except PolyApiException:
             creds = client.create_api_key()
         client.set_api_creds(creds)
         return client
