@@ -99,7 +99,7 @@ To use the skills in this repo with a different agent, point it at `.claude/skil
 
 ### Instructions file
 
-`CLAUDE.md` is read natively by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and by [GitHub Copilot in VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-a-claudemd-file) (opt-in via `chat.useClaudeMdFile`). For broader cross-agent compatibility, [`AGENTS.md`](https://agents.md/) is also provided as a symlink to `CLAUDE.md` — an open format (stewarded by the [Linux Foundation](https://www.linuxfoundation.org/)) supported by Codex, Cursor, Copilot, and others.
+`CLAUDE.md` is read natively by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and by [GitHub Copilot in VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-a-claudemd-file) (opt-in via `chat.useClaudeMdFile`). For broader cross-agent compatibility, [`AGENTS.md`](https://agents.md/) is also provided as a symlink to `CLAUDE.md` — an open format supported by Codex, Cursor, Copilot, and others.
 
 ## Experiments
 
