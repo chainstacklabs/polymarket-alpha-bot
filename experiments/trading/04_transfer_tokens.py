@@ -29,6 +29,17 @@ RPC_URL = os.environ["CHAINSTACK_NODE"]
 # Token addresses
 USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+PUSD = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+
+
+def _v2_enabled() -> bool:
+    """Match backend's POLYMARKET_V2_ENABLED parsing (experiments are standalone)."""
+    return os.environ.get("POLYMARKET_V2_ENABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 ERC20_ABI = [
     {
@@ -111,6 +122,12 @@ def main():
     print(f"  POL:         {pol_balance:.4f}")
     print(f"  USDC native: ${balance_native / 1e6:.2f}")
     print(f"  USDC.e:      ${balance_e / 1e6:.2f}")
+
+    # Under the V2 flag, also surface pUSD so users can see V2 collateral.
+    if _v2_enabled():
+        pusd = w3.eth.contract(address=Web3.to_checksum_address(PUSD), abi=ERC20_ABI)
+        balance_pusd = pusd.functions.balanceOf(address).call()
+        print(f"  pUSD:        ${balance_pusd / 1e6:.2f}")
 
     if balance_native == 0 and balance_e == 0:
         print("\nNo tokens to transfer.")

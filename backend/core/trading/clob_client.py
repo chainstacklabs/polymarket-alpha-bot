@@ -20,13 +20,15 @@ CLOB_V1_URL = "https://clob.polymarket.com"
 
 
 def _v2_enabled() -> bool:
-    """Read the V2 feature flag. Defaults to False (V1 stays in charge)."""
-    return os.environ.get("POLYMARKET_V2_ENABLED", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    """Read the V2 feature flag. Defaults to False (V1 stays in charge).
+
+    Thin wrapper around :func:`core.feature_flags.v2_enabled` — kept for
+    backward compatibility with call sites that imported the underscore name.
+    New code should import from :mod:`core.feature_flags` directly.
+    """
+    from core.feature_flags import v2_enabled
+
+    return v2_enabled()
 
 
 def _apply_proxy(clob_helpers_module) -> None:
