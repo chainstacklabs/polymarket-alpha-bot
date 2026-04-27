@@ -380,6 +380,15 @@ class PositionService:
         effective_cost = gross_cost if unwanted tokens remain, else net_cost.
         exit_fees: estimated taker fees if selling at current prices (unrealized
             P&L only -- realized proceeds from the CLOB already net fees).
+
+        V2 note (#36): under V2 the on-chain taker fee is computed at match
+        time via ``getClobMarketInfo()`` rather than baked into the signed
+        order. The estimate from ``feeSchedule`` is still the right
+        approximation for *unrealized* exit-fee projection here -- it matches
+        what V2 will charge as long as we're on the same fee schedule. Realized
+        P&L is derived from balance deltas (``realized_proceeds``) which
+        already nets the actual fee charged on-chain, so no V2 change is
+        needed for the realized side.
         """
         target_mergeable = min(target_wanted, target_unwanted)
         cover_mergeable = min(cover_wanted, cover_unwanted)

@@ -8,6 +8,16 @@ Formula (Polymarket fee docs; verified on live markets 2026-04-15):
 
 All observed markets have exponent=1 and takerOnly=true. Code handles the
 general case; logs a warning on unusual values.
+
+V1 vs V2 (issue #36):
+    - V1 sets `fee_rate_bps` on the signed order; the value is enforced at
+      settlement against the per-market schedule.
+    - V2 drops `fee_rate_bps` from the order struct entirely. Taker fees are
+      computed server-side at match time via ``getClobMarketInfo()``. We never
+      pass fees through `MarketOrderArgsV2` / `OrderArgsV2`.
+    - Either way, `compute_fee()` is **display-only** for our bot: pre-trade
+      cost projection and unrealized-P&L exit-fee estimates. Realized P&L is
+      derived from balance deltas, which already net any actual fees paid.
 """
 
 from typing import Any
@@ -46,6 +56,12 @@ def compute_fee(notional: float, price: float, market: dict[str, Any]) -> float:
     if price <= 0.0 or price >= 1.0:
         return 0.0
     return notional * rate * (price**exponent) * ((1.0 - price) ** exponent)
+
+
+# Public alias matching the issue #36 vocabulary. `compute_fee` is the existing
+# name used across the codebase (cost estimates, exit-fee projections). Both
+# names refer to the same display-only computation.
+display_fee = compute_fee
 
 
 def fee_rate_display(market: dict[str, Any]) -> str | None:

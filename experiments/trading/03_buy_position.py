@@ -168,13 +168,27 @@ async def get_market_info(market_id: str) -> dict:
 
 
 def get_clob_client():
-    """Initialize CLOB client with optional proxy support."""
-    try:
-        from py_clob_client.client import ClobClient
-        import py_clob_client.http_helpers.helpers as clob_helpers
-    except ImportError:
-        print("py-clob-client not installed. Run: uv add py-clob-client")
-        return None
+    """Initialize CLOB client with optional proxy support.
+
+    Picks V2 (``clob-v2.polymarket.com``) when ``POLYMARKET_V2_ENABLED`` is set;
+    otherwise the legacy V1 endpoint. Mirrors backend ``core.trading.clob_client``.
+    """
+    if _v2_enabled():
+        try:
+            from py_clob_client_v2.client import ClobClient
+            import py_clob_client_v2.http_helpers.helpers as clob_helpers
+        except ImportError:
+            print("py-clob-client-v2 not installed. Run: uv add py-clob-client-v2")
+            return None
+        host = "https://clob-v2.polymarket.com"
+    else:
+        try:
+            from py_clob_client.client import ClobClient
+            import py_clob_client.http_helpers.helpers as clob_helpers
+        except ImportError:
+            print("py-clob-client not installed. Run: uv add py-clob-client")
+            return None
+        host = "https://clob.polymarket.com"
 
     # Proxy support
     proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
@@ -185,14 +199,29 @@ def get_clob_client():
     wallet = load_wallet()
 
     try:
-        client = ClobClient(
-            "https://clob.polymarket.com",
-            key=wallet["private_key"],
-            chain_id=137,
-            signature_type=0,
-            funder=wallet["address"],
-        )
-        creds = client.create_or_derive_api_creds()
+        if _v2_enabled():
+            client = ClobClient(
+                host=host,
+                chain_id=137,
+                key=wallet["private_key"],
+                signature_type=0,
+                funder=wallet["address"],
+                builder_config=None,
+            )
+            # V2 split V1's `create_or_derive_api_creds` into two calls.
+            try:
+                creds = client.derive_api_key()
+            except Exception:
+                creds = client.create_api_key()
+        else:
+            client = ClobClient(
+                host,
+                key=wallet["private_key"],
+                chain_id=137,
+                signature_type=0,
+                funder=wallet["address"],
+            )
+            creds = client.create_or_derive_api_creds()
         client.set_api_creds(creds)
         return client
     except Exception as e:
@@ -393,8 +422,16 @@ async def buy_position(
         client = get_clob_client()
         if client:
             try:
-                from py_clob_client.clob_types import OrderArgs, OrderType
-                from py_clob_client.order_builder.constants import SELL
+                if _v2_enabled():
+                    # V2 OrderArgsV2 drops fee_rate_bps/nonce/taker; adds metadata.
+                    from py_clob_client_v2.clob_types import (
+                        OrderArgsV2 as OrderArgs,
+                        OrderType,
+                    )
+                    from py_clob_client_v2.order_builder.constants import SELL
+                else:
+                    from py_clob_client.clob_types import OrderArgs, OrderType
+                    from py_clob_client.order_builder.constants import SELL
 
                 # Fetch tick size for correct precision (varies per market)
                 try:
