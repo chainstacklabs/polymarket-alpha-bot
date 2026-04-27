@@ -26,9 +26,12 @@ PREREQUISITES:
     - USDC.e in wallet (run 02_swap_to_usdc_e.py first if needed).
     - POL for gas.
 
-This is a STUB — the wrap ABI shape is the standard ``wrap(uint256)`` /
-``unwrap(uint256)`` pair Polymarket published with the V2 announcement.
-Verify against the deployed contract before running on mainnet.
+ABI verified against Polygonscan source 2026-04-27 (BUSL-1.1, Solidity 0.8.34).
+``wrap(address asset, address to, uint256 amount)`` requires a prior
+``approve`` on the source token (USDC.e) and is gated by an `onlyUnpaused`
+modifier — this script reads ``Onramp.paused(USDC.e)`` first and aborts on true.
+
+Set ``WRAP_AMOUNT_USD=<decimal>`` to wrap a partial balance (default: full).
 """
 
 import json
@@ -82,20 +85,37 @@ ERC20_ABI = [
     },
 ]
 
-# Minimal wrap/unwrap interface. Adjust if Polymarket publishes a richer ABI.
+# Verified against Polygonscan source 2026-04-27 (CollateralOnramp.sol BUSL-1.1).
+# wrap/unwrap take (asset, to, amount); caller must hold prior `approve` on asset.
+# Onramp also exposes paused(asset) -> bool; pre-flight check before wrapping.
 ONRAMP_ABI = [
     {
-        "inputs": [{"name": "amount", "type": "uint256"}],
+        "inputs": [
+            {"name": "_asset", "type": "address"},
+            {"name": "_to", "type": "address"},
+            {"name": "_amount", "type": "uint256"},
+        ],
         "name": "wrap",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function",
     },
     {
-        "inputs": [{"name": "amount", "type": "uint256"}],
+        "inputs": [
+            {"name": "_asset", "type": "address"},
+            {"name": "_to", "type": "address"},
+            {"name": "_amount", "type": "uint256"},
+        ],
         "name": "unwrap",
         "outputs": [],
         "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "_asset", "type": "address"}],
+        "name": "paused",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
         "type": "function",
     },
 ]
@@ -164,7 +184,24 @@ def main():
         print("\nERROR: Insufficient POL for gas")
         return
 
-    amount = bal_usdce
+    # Pre-flight: Onramp.paused(USDC.e) must be false
+    is_paused = retry_call(
+        lambda: onramp.functions.paused(Web3.to_checksum_address(USDC_E)).call()
+    )
+    if is_paused:
+        print("\nERROR: Onramp is paused for USDC.e — abort")
+        return
+
+    # Wrap supports a custom amount via WRAP_AMOUNT_USD env var (decimal dollars).
+    # Default: full USDC.e balance.
+    custom_amount_usd = os.environ.get("WRAP_AMOUNT_USD")
+    if custom_amount_usd:
+        amount = int(float(custom_amount_usd) * 1e6)
+        if amount > bal_usdce:
+            print(f"\nERROR: WRAP_AMOUNT_USD=${custom_amount_usd} exceeds balance")
+            return
+    else:
+        amount = bal_usdce
     print(f"\nWrapping ${amount / 1e6:.2f} USDC.e -> pUSD")
     confirm = input("Proceed? (yes/no): ")
     if confirm.lower() != "yes":
@@ -199,8 +236,12 @@ def main():
     else:
         print("\n[1/2] Already approved")
 
-    print("\n[2/2] Calling wrap()...")
-    wrap_tx = onramp.functions.wrap(amount).build_transaction(
+    print("\n[2/2] Calling wrap(asset, to, amount)...")
+    wrap_tx = onramp.functions.wrap(
+        Web3.to_checksum_address(USDC_E),
+        address,
+        amount,
+    ).build_transaction(
         {
             "from": address,
             "nonce": retry_call(lambda: w3.eth.get_transaction_count(address)),
