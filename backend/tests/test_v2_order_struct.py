@@ -20,13 +20,14 @@ from core import feature_flags
 
 @pytest.fixture
 def v1(monkeypatch):
-    monkeypatch.delenv("POLYMARKET_V2_ENABLED", raising=False)
+    # Post-cutover the default is V2. Opt-in to V1 explicitly.
+    monkeypatch.setenv("POLYMARKET_V2_ENABLED", "false")
     importlib.reload(feature_flags)
 
 
 @pytest.fixture
 def v2(monkeypatch):
-    monkeypatch.setenv("POLYMARKET_V2_ENABLED", "true")
+    monkeypatch.delenv("POLYMARKET_V2_ENABLED", raising=False)
     importlib.reload(feature_flags)
 
 
