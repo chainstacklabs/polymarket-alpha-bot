@@ -112,16 +112,17 @@ class PositionManager:
         address = Web3.to_checksum_address(self.wallet.address)
         account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
 
-        # NegRisk adapter has the same mergePositions ABI as CTF
-        merge_contract_addr = (
-            CONTRACTS["NEG_RISK_ADAPTER"] if neg_risk else CONTRACTS["CTF"]
-        )
+        # Always merge via standard CTF: the per-outcome conditionId from
+        # Gamma is registered on CTF. Same reasoning as the split path in
+        # `executor.py` — Gamma's `negRisk` flag is a market grouping hint,
+        # not an on-chain routing instruction.
+        merge_contract_addr = CONTRACTS["CTF"]
         contract = w3.eth.contract(
             address=Web3.to_checksum_address(merge_contract_addr),
             abi=CTF_ABI,
         )
         logger.info(
-            f"Merge via {'NegRisk adapter' if neg_risk else 'CTF'}: "
+            f"Merge via CTF{' (NegRisk-grouped market)' if neg_risk else ''}: "
             f"{merge_contract_addr[:10]}..."
         )
 
