@@ -13,18 +13,22 @@ from core.wallet.contracts import CONTRACTS, V2_CONTRACTS
 
 @pytest.fixture
 def v1(monkeypatch):
-    monkeypatch.delenv("POLYMARKET_V2_ENABLED", raising=False)
+    # Post-cutover the default is V2. Opt-in to V1 explicitly.
+    monkeypatch.setenv("POLYMARKET_V2_ENABLED", "false")
     importlib.reload(feature_flags)
 
 
 @pytest.fixture
 def v2(monkeypatch):
-    monkeypatch.setenv("POLYMARKET_V2_ENABLED", "true")
+    monkeypatch.delenv("POLYMARKET_V2_ENABLED", raising=False)
     importlib.reload(feature_flags)
 
 
 class TestFeatureFlag:
-    def test_default_is_false(self, v1):
+    def test_default_is_true_post_cutover(self, v2):
+        assert feature_flags.v2_enabled() is True
+
+    def test_explicit_false_opts_into_v1(self, v1):
         assert feature_flags.v2_enabled() is False
 
     @pytest.mark.parametrize("val", ["1", "true", "True", "yes", "on"])
@@ -34,6 +38,9 @@ class TestFeatureFlag:
 
     @pytest.mark.parametrize("val", ["", "0", "false", "no", "off", "anything"])
     def test_falsy_values(self, monkeypatch, val):
+        # Empty string is an explicit empty value, NOT "unset" — only an
+        # unset env var falls through to the "true" default
+        # (covered by test_default_is_true_post_cutover).
         monkeypatch.setenv("POLYMARKET_V2_ENABLED", val)
         assert feature_flags.v2_enabled() is False
 
