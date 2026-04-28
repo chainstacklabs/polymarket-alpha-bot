@@ -1,21 +1,12 @@
-"""Polymarket contract addresses and ABIs."""
+"""Polymarket contract addresses and ABIs (V2-only post-2026-04-28 cutover)."""
 
-# Polygon mainnet contracts
+# Polygon mainnet — Polymarket V2 contracts (pUSD collateral).
+# Confirmed against Polymarket docs 2026-04-26. CollateralOnramp wraps USDC.e
+# -> pUSD; CollateralOfframp unwraps. PUSD is a proxy; PUSD_IMPL is impl.
 CONTRACTS = {
-    "USDC_E": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
     "CTF": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
-    "CTF_EXCHANGE": "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E",
-    "NEG_RISK_CTF_EXCHANGE": "0xC5d563A36AE78145C45a50134d48A1215220f80a",
-    "NEG_RISK_ADAPTER": "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
-}
-
-# V2 contracts for the 2026-04-28 Polymarket cutover.
-# Confirmed against Polymarket docs on 2026-04-26. pUSD replaces USDC.e as
-# collateral; CTF exchange addresses are new. Onramp wraps USDC.e -> pUSD,
-# offramp unwraps. PUSD is a proxy at PUSD; PUSD_IMPL is the implementation.
-V2_CONTRACTS = {
-    "CTF_EXCHANGE_V2": "0xE111180000d2663C0091e4f400237545B87B996B",
-    "NEG_RISK_CTF_EXCHANGE_V2": "0xe2222d279d744050d28e00520010520000310F59",
+    "CTF_EXCHANGE": "0xE111180000d2663C0091e4f400237545B87B996B",
+    "NEG_RISK_CTF_EXCHANGE": "0xe2222d279d744050d28e00520010520000310F59",
     "PUSD": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
     "PUSD_IMPL": "0x6bBCef9f7ef3B6C592c99e0f206a0DE94Ad0925f",
     "COLLATERAL_ONRAMP": "0x93070a847efEf7F70739046A929D47a521F5B8ee",

@@ -1,18 +1,15 @@
 """Shared CLOB market sell — FAK order with slippage protection.
 
-Under ``POLYMARKET_V2_ENABLED`` the V2 SDK is used. The V2 ``MarketOrderArgsV2``
-struct drops ``fee_rate_bps``/``nonce``/``taker`` (taker fees are computed
-server-side at match time in V2) and adds an optional ``metadata`` field. The
-EIP-712 domain version flips from ``"1"`` to ``"2"`` internally in
-``py_clob_client_v2`` — we don't pass it.
+Uses V2 SDK exclusively post-2026-04-28 cutover. The ``MarketOrderArgsV2``
+struct has no ``fee_rate_bps``/``nonce``/``taker`` (taker fees are computed
+server-side at match time) and adds an optional ``metadata`` field. The
+EIP-712 domain version is "2", handled internally by ``py_clob_client_v2``.
 """
 
 import time
 from typing import Optional
 
 from loguru import logger
-
-from core.feature_flags import v2_enabled
 
 
 def _tick_decimals(tick_size: float) -> int:
@@ -56,18 +53,14 @@ def sell_via_clob(
         return None, 0.0, msg
 
     try:
-        if v2_enabled():
-            # V2 struct: no fee_rate_bps / nonce / taker; fees are match-time.
-            # `metadata` defaults to BYTES32_ZERO; `builder_code` is set on the
-            # client via builder_config (we leave it None per #27 scope).
-            from py_clob_client_v2.clob_types import (
-                MarketOrderArgsV2 as MarketOrderArgs,
-                OrderType,
-            )
-            from py_clob_client_v2.order_builder.constants import SELL
-        else:
-            from py_clob_client.clob_types import MarketOrderArgs, OrderType
-            from py_clob_client.order_builder.constants import SELL
+        # V2 struct: no fee_rate_bps / nonce / taker; fees are match-time.
+        # `metadata` defaults to BYTES32_ZERO; `builder_code` is set on the
+        # client via builder_config (we leave it None per #27 scope).
+        from py_clob_client_v2.clob_types import (
+            MarketOrderArgsV2 as MarketOrderArgs,
+            OrderType,
+        )
+        from py_clob_client_v2.order_builder.constants import SELL
 
         # Fetch market's tick size for correct price precision
         try:

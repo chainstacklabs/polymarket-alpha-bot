@@ -8,17 +8,11 @@ from loguru import logger
 from web3 import Web3
 
 
-from core.feature_flags import v2_enabled
 from core.http_retry import fetch_json_with_retry
 from core.positions.service import PositionService
 from core.positions.storage import PositionStorage
-from core.wallet.contracts import CONTRACTS, V2_CONTRACTS, CTF_ABI
+from core.wallet.contracts import CONTRACTS, CTF_ABI
 from core.wallet.manager import WalletManager
-
-
-def _collateral_address() -> str:
-    """Active collateral token (pUSD under V2 flag, USDC.e otherwise)."""
-    return V2_CONTRACTS["PUSD"] if v2_enabled() else CONTRACTS["USDC_E"]
 
 
 @dataclass
@@ -101,30 +95,22 @@ class PositionManager:
         self,
         condition_id: str,
         amount: float,
-        neg_risk: bool = False,
     ) -> tuple[Optional[str], Optional[str]]:
-        """Merge YES+NO tokens back to USDC. Returns (tx_hash, error).
+        """Merge YES+NO tokens back to pUSD. Returns (tx_hash, error).
 
-        For binary markets, merges via CTF directly.
-        For NegRisk (multi-outcome) markets, merges via the NegRisk adapter.
+        Always routes through the standard CTF: the per-outcome conditionId
+        from Gamma is registered on CTF. Gamma's `negRisk` flag is a market
+        grouping hint, not an on-chain routing instruction.
         """
         w3 = self._get_web3()
         address = Web3.to_checksum_address(self.wallet.address)
         account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
 
-        # Always merge via standard CTF: the per-outcome conditionId from
-        # Gamma is registered on CTF. Same reasoning as the split path in
-        # `executor.py` — Gamma's `negRisk` flag is a market grouping hint,
-        # not an on-chain routing instruction.
-        merge_contract_addr = CONTRACTS["CTF"]
         contract = w3.eth.contract(
-            address=Web3.to_checksum_address(merge_contract_addr),
+            address=Web3.to_checksum_address(CONTRACTS["CTF"]),
             abi=CTF_ABI,
         )
-        logger.info(
-            f"Merge via CTF{' (NegRisk-grouped market)' if neg_risk else ''}: "
-            f"{merge_contract_addr[:10]}..."
-        )
+        logger.info(f"Merge via CTF: {CONTRACTS['CTF'][:10]}...")
 
         amount_wei = int(amount * 1e6)
         condition_bytes = bytes.fromhex(
@@ -136,7 +122,7 @@ class PositionManager:
             gas_price = int(base_gas_price * 1.2)
 
             tx = contract.functions.mergePositions(
-                Web3.to_checksum_address(_collateral_address()),
+                Web3.to_checksum_address(CONTRACTS["PUSD"]),
                 bytes(32),  # parentCollectionId
                 condition_bytes,
                 [1, 2],  # partition for YES, NO
@@ -325,9 +311,7 @@ class PositionManager:
                 error=f"Failed to fetch market info: {e}",
             )
 
-        # Execute merge — use NegRisk adapter for multi-outcome markets
-        neg_risk = bool(market_data.get("negRisk", False))
-        tx_hash, error = self._merge_tokens(condition_id, mergeable, neg_risk=neg_risk)
+        tx_hash, error = self._merge_tokens(condition_id, mergeable)
 
         if error:
             return MergeResult(

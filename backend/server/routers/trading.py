@@ -253,8 +253,8 @@ async def estimate_buy_pair(req: BuyPairRequest):
                 "position": req.cover_position,
                 "price": cover_price,
             },
-            wallet_balance=balances.usdc_e,
-            sufficient_balance=balances.usdc_e >= net_cost,
+            wallet_balance=balances.pusd,
+            sufficient_balance=balances.pusd >= net_cost,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

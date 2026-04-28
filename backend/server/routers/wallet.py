@@ -88,7 +88,7 @@ async def get_status():
         unlocked=status.unlocked,
         balances={
             "pol": status.balances.pol,
-            "usdc_e": status.balances.usdc_e,
+            "pusd": status.balances.pusd,
         }
         if status.balances
         else None,
@@ -105,7 +105,7 @@ async def generate_wallet(req: PasswordRequest):
         address = manager.generate(req.password)
         return GenerateResponse(
             address=address,
-            message="Wallet created. Fund with POL and USDC.e, then set approvals.",
+            message="Wallet created. Fund with POL and pUSD, then set approvals.",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

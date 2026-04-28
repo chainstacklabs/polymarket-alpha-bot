@@ -9,15 +9,9 @@ import httpx
 from web3 import Web3
 from loguru import logger
 
-from core.feature_flags import v2_enabled
 from core.http_retry import fetch_json_with_retry
-from core.wallet.contracts import CONTRACTS, V2_CONTRACTS, CTF_ABI
+from core.wallet.contracts import CONTRACTS, CTF_ABI
 from core.wallet.manager import WalletManager
-
-
-def _collateral_address() -> str:
-    """Active collateral token (pUSD under V2 flag, USDC.e otherwise)."""
-    return V2_CONTRACTS["PUSD"] if v2_enabled() else CONTRACTS["USDC_E"]
 
 
 @dataclass
@@ -124,34 +118,23 @@ class TradingExecutor:
         self,
         condition_id: str,
         amount_usd: float,
-        neg_risk: bool = False,
     ) -> tuple[str, list[str]]:
-        """Split USDC into YES + NO tokens. Returns (tx_hash, [ctf_token_ids]).
+        """Split pUSD into YES + NO tokens. Returns (tx_hash, [ctf_token_ids]).
 
-        For binary markets, splits via CTF directly.
-        For NegRisk (multi-outcome) markets, splits via the NegRisk adapter
-        so minted tokens match CLOB token IDs.
+        Always routes through the standard CTF: the per-outcome conditionId
+        from Gamma is registered on CTF (verified via getOutcomeSlotCount).
+        Gamma's `negRisk` flag is a market grouping hint, not an on-chain
+        routing instruction.
         """
         w3 = self._get_web3()
         address = Web3.to_checksum_address(self.wallet.address)
         account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
 
-        # Always route splits through the standard CTF: the per-outcome
-        # conditionId from Gamma is registered on CTF (verified via
-        # getOutcomeSlotCount). The V1 NegRiskAdapter's 5-arg splitPosition
-        # would still resolve, but its 2-arg native variant requires a
-        # NegRisk-prepared questionId we don't have, and on V2 the adapter
-        # rejects pUSD anyway. The `neg_risk` flag on Gamma is a market
-        # grouping hint, not an on-chain routing instruction for splits.
-        split_contract_addr = CONTRACTS["CTF"]
         ctf = w3.eth.contract(
-            address=Web3.to_checksum_address(split_contract_addr),
+            address=Web3.to_checksum_address(CONTRACTS["CTF"]),
             abi=CTF_ABI,
         )
-        logger.info(
-            f"Split via CTF{' (NegRisk-grouped market)' if neg_risk else ''}: "
-            f"{split_contract_addr[:10]}..."
-        )
+        logger.info(f"Split via CTF: {CONTRACTS['CTF'][:10]}...")
 
         amount_wei = int(amount_usd * 1e6)
         condition_bytes = bytes.fromhex(
@@ -163,7 +146,7 @@ class TradingExecutor:
         gas_price = int(base_gas_price * 1.2)
 
         tx = ctf.functions.splitPosition(
-            Web3.to_checksum_address(_collateral_address()),
+            Web3.to_checksum_address(CONTRACTS["PUSD"]),
             bytes(32),  # parentCollectionId
             condition_bytes,
             [1, 2],  # partition for YES, NO
@@ -224,9 +207,7 @@ class TradingExecutor:
 
         # Split position
         try:
-            split_tx, ctf_token_ids = self._split_position(
-                market.condition_id, amount, neg_risk=market.neg_risk
-            )
+            split_tx, ctf_token_ids = self._split_position(market.condition_id, amount)
         except Exception as e:
             return TradeResult(
                 success=False,
@@ -332,12 +313,11 @@ class TradingExecutor:
         balances = self.wallet.get_balances()
         required = amount_per_position * 2 + entry_fees
 
-        if balances.usdc_e < required:
-            collateral_label = "pUSD" if v2_enabled() else "USDC.e"
+        if balances.pusd < required:
             raise ValueError(
-                f"Insufficient {collateral_label}: need {required:.2f} "
+                f"Insufficient pUSD: need {required:.2f} "
                 f"(includes ${entry_fees:.2f} taker fees), "
-                f"have {balances.usdc_e:.2f}"
+                f"have {balances.pusd:.2f}"
             )
 
         # Buy target position
@@ -371,6 +351,6 @@ class TradingExecutor:
             total_spent=amount_per_position * 2,
             final_balances={
                 "pol": final_balances.pol,
-                "usdc_e": final_balances.usdc_e,
+                "pusd": final_balances.pusd,
             },
         )

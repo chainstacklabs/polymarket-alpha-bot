@@ -20,8 +20,7 @@ Swap Native USDC to USDC.e on Polygon  [LEGACY — V1 ONLY]
    for new users and (b) the ParaSwap path itself is independent of
    Polymarket's collateral choice.
 
-   V2 cutover timestamp and the CollateralOnramp / pUSD addresses live in
-   backend/core/wallet/contracts.py (V2_CONTRACTS).
+   The CollateralOnramp / pUSD addresses live in backend/core/wallet/contracts.py.
 
 WHY THIS IS NEEDED (still):
     - Polygon has TWO types of USDC:

@@ -2,10 +2,8 @@
 Transfer USDC, USDC.e, and pUSD to Another Wallet
 =================================================
 
-Transfers all stablecoins from the local wallet to a specified address.
-Token set follows POLYMARKET_V2_ENABLED:
-  unset/false → native USDC + USDC.e
-  true        → native USDC + USDC.e + pUSD (V2 collateral)
+Transfers all stablecoins (native USDC, USDC.e, pUSD) from the local wallet
+to a specified address.
 
 USAGE:
     cd backend && uv run python ../experiments/trading/04_transfer_tokens.py <target_address>
@@ -34,15 +32,6 @@ USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 PUSD = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 
-
-def _v2_enabled() -> bool:
-    """Match backend's POLYMARKET_V2_ENABLED parsing (experiments are standalone)."""
-    return os.environ.get("POLYMARKET_V2_ENABLED", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
 
 ERC20_ABI = [
     {
@@ -114,9 +103,8 @@ def main():
     tokens = [
         ("USDC native", USDC_NATIVE),
         ("USDC.e", USDC_E),
+        ("pUSD", PUSD),
     ]
-    if _v2_enabled():
-        tokens.append(("pUSD", PUSD))
 
     contracts = {
         label: w3.eth.contract(address=Web3.to_checksum_address(addr), abi=ERC20_ABI)

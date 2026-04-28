@@ -7,30 +7,14 @@ from eth_account import Account
 from web3 import Web3
 from loguru import logger
 
-from core.feature_flags import v2_enabled
 from core.wallet.storage import WalletStorage
-from core.wallet.contracts import CONTRACTS, V2_CONTRACTS, ERC20_ABI, CTF_ABI
-
-
-def _collateral_address() -> str:
-    """Active collateral token address (pUSD under V2 flag, USDC.e otherwise)."""
-    return V2_CONTRACTS["PUSD"] if v2_enabled() else CONTRACTS["USDC_E"]
-
-
-def _exchange_addresses() -> tuple[str, str]:
-    """(CTF exchange, NegRisk CTF exchange) addresses for the active env."""
-    if v2_enabled():
-        return (
-            V2_CONTRACTS["CTF_EXCHANGE_V2"],
-            V2_CONTRACTS["NEG_RISK_CTF_EXCHANGE_V2"],
-        )
-    return (CONTRACTS["CTF_EXCHANGE"], CONTRACTS["NEG_RISK_CTF_EXCHANGE"])
+from core.wallet.contracts import CONTRACTS, ERC20_ABI, CTF_ABI
 
 
 @dataclass
 class WalletBalances:
     pol: float
-    usdc_e: float  # Holds pUSD balance when POLYMARKET_V2_ENABLED is set.
+    pusd: float
 
 
 @dataclass
@@ -99,7 +83,7 @@ class WalletManager:
         logger.info("Wallet locked")
 
     def get_balances(self) -> WalletBalances:
-        """Get POL and USDC.e balances."""
+        """Get POL and pUSD balances."""
         address = self.address
         if not address:
             raise ValueError("No wallet configured")
@@ -109,14 +93,14 @@ class WalletManager:
 
         pol = float(w3.from_wei(w3.eth.get_balance(checksum), "ether"))
 
-        # pUSD when V2 flag is set, USDC.e otherwise. Both are 6-decimal ERC-20s.
-        collateral = w3.eth.contract(
-            address=Web3.to_checksum_address(_collateral_address()),
+        # pUSD is a 6-decimal ERC-20 (Polymarket V2 collateral).
+        pusd = w3.eth.contract(
+            address=Web3.to_checksum_address(CONTRACTS["PUSD"]),
             abi=ERC20_ABI,
         )
-        collateral_balance = collateral.functions.balanceOf(checksum).call() / 1e6
+        pusd_balance = pusd.functions.balanceOf(checksum).call() / 1e6
 
-        return WalletBalances(pol=pol, usdc_e=collateral_balance)
+        return WalletBalances(pol=pol, pusd=pusd_balance)
 
     def check_approvals(self) -> bool:
         """Check if all Polymarket approvals are set."""
@@ -127,8 +111,8 @@ class WalletManager:
         w3 = self._get_web3()
         checksum = Web3.to_checksum_address(address)
 
-        collateral = w3.eth.contract(
-            address=Web3.to_checksum_address(_collateral_address()),
+        pusd = w3.eth.contract(
+            address=Web3.to_checksum_address(CONTRACTS["PUSD"]),
             abi=ERC20_ABI,
         )
         ctf = w3.eth.contract(
@@ -136,25 +120,18 @@ class WalletManager:
             abi=CTF_ABI,
         )
 
-        ctf_exchange, neg_risk_exchange = _exchange_addresses()
-        # NegRisk Adapter is unchanged in V2 (per Polymarket docs 2026-04-26).
-        # We keep its approvals for compatibility, but the bot's actual splits
-        # and merges always route through the standard CTF — see comments in
-        # core/trading/executor.py and core/positions/manager.py.
         collateral_spenders = [
             CONTRACTS["CTF"],
-            ctf_exchange,
-            neg_risk_exchange,
-            CONTRACTS["NEG_RISK_ADAPTER"],
+            CONTRACTS["CTF_EXCHANGE"],
+            CONTRACTS["NEG_RISK_CTF_EXCHANGE"],
         ]
         ctf_operators = [
-            ctf_exchange,
-            neg_risk_exchange,
-            CONTRACTS["NEG_RISK_ADAPTER"],
+            CONTRACTS["CTF_EXCHANGE"],
+            CONTRACTS["NEG_RISK_CTF_EXCHANGE"],
         ]
 
         for spender in collateral_spenders:
-            allowance = collateral.functions.allowance(checksum, spender).call()
+            allowance = pusd.functions.allowance(checksum, spender).call()
             if allowance == 0:
                 return False
 
@@ -197,8 +174,8 @@ class WalletManager:
         address = Web3.to_checksum_address(self._address)
         account = w3.eth.account.from_key(self._unlocked_key)
 
-        collateral = w3.eth.contract(
-            address=Web3.to_checksum_address(_collateral_address()),
+        pusd = w3.eth.contract(
+            address=Web3.to_checksum_address(CONTRACTS["PUSD"]),
             abi=ERC20_ABI,
         )
         ctf = w3.eth.contract(
@@ -209,15 +186,12 @@ class WalletManager:
         MAX_UINT256 = 2**256 - 1
         tx_hashes = []
 
-        ctf_exchange, neg_risk_exchange = _exchange_addresses()
         approvals = [
-            (collateral, "approve", CONTRACTS["CTF"], MAX_UINT256),
-            (collateral, "approve", ctf_exchange, MAX_UINT256),
-            (collateral, "approve", neg_risk_exchange, MAX_UINT256),
-            (collateral, "approve", CONTRACTS["NEG_RISK_ADAPTER"], MAX_UINT256),
-            (ctf, "setApprovalForAll", ctf_exchange, True),
-            (ctf, "setApprovalForAll", neg_risk_exchange, True),
-            (ctf, "setApprovalForAll", CONTRACTS["NEG_RISK_ADAPTER"], True),
+            (pusd, "approve", CONTRACTS["CTF"], MAX_UINT256),
+            (pusd, "approve", CONTRACTS["CTF_EXCHANGE"], MAX_UINT256),
+            (pusd, "approve", CONTRACTS["NEG_RISK_CTF_EXCHANGE"], MAX_UINT256),
+            (ctf, "setApprovalForAll", CONTRACTS["CTF_EXCHANGE"], True),
+            (ctf, "setApprovalForAll", CONTRACTS["NEG_RISK_CTF_EXCHANGE"], True),
         ]
 
         for contract, method, spender, value in approvals:
