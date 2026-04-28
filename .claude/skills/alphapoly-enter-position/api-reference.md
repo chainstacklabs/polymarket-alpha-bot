@@ -6,7 +6,7 @@
 ```
 GET /wallet/status
 ```
-Response: `{ "exists": true, "unlocked": true, "address": "0x...", "balances": { "usdc_e": 150.0, "pol": 0.8 }, "approvals_set": true }`
+Response: `{ "exists": true, "unlocked": true, "address": "0x...", "balances": { "pusd": 150.0, "pol": 0.8 }, "approvals_set": true }`
 
 ### Unlock
 ```
@@ -75,7 +75,7 @@ Same request body as estimate. Response (`BuyPairResponse`):
   },
   "cover": { "...same shape..." },
   "total_spent": 20.0,
-  "final_balances": { "usdc_e": 130.0, "pol": 0.8 },
+  "final_balances": { "pusd": 130.0, "pol": 0.8 },
   "warnings": []
 }
 ```
