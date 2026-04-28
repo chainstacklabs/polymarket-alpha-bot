@@ -14,8 +14,10 @@ from loguru import logger
 
 from core.wallet.manager import WalletManager
 
-# Pre-cutover V2 endpoint; becomes the prod CLOB at 2026-04-28 ~11:00 UTC.
-CLOB_V2_URL = "https://clob-v2.polymarket.com"
+# Post-2026-04-28 cutover: Polymarket consolidated clob-v2.polymarket.com
+# into clob.polymarket.com (the old subdomain now 301-redirects, which the
+# V2 SDK's http client does not follow, so we point at the canonical host).
+CLOB_V2_URL = "https://clob.polymarket.com"
 CLOB_V1_URL = "https://clob.polymarket.com"
 
 
