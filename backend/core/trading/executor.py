@@ -145,17 +145,24 @@ class TradingExecutor:
         base_gas_price = w3.eth.gas_price
         gas_price = int(base_gas_price * 1.2)
 
-        tx = ctf.functions.splitPosition(
+        # Estimate gas live — Chainstack rejects "gas too high" with the old
+        # hardcoded 300000 (a split needs ~135k, merge ~90k). Estimate + 25%
+        # headroom keeps the cap close to actual usage but tolerates state
+        # changes between estimate and submit.
+        split_fn = ctf.functions.splitPosition(
             Web3.to_checksum_address(CONTRACTS["PUSD"]),
             bytes(32),  # parentCollectionId
             condition_bytes,
             [1, 2],  # partition for YES, NO
             amount_wei,
-        ).build_transaction(
+        )
+        gas_estimate = int(split_fn.estimate_gas({"from": address}) * 1.25)
+
+        tx = split_fn.build_transaction(
             {
                 "from": address,
                 "nonce": w3.eth.get_transaction_count(address),
-                "gas": 300000,
+                "gas": gas_estimate,
                 "gasPrice": gas_price,
                 "chainId": 137,
             }
