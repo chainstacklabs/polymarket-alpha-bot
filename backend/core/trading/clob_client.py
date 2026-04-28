@@ -13,7 +13,7 @@ from loguru import logger
 
 from core.wallet.manager import WalletManager
 
-CLOB_URL = "https://clob-v2.polymarket.com"
+CLOB_URL = "https://clob.polymarket.com"
 
 
 def _apply_proxy(clob_helpers_module) -> None:
