@@ -49,7 +49,7 @@ Response (`SellTokenResponse`):
 
 ## Merge Tokens
 
-Burns equal amounts of YES+NO tokens and returns USDC.e collateral. Use when a market has resolved. Merged amount = `min(yes_balance, no_balance)`.
+Burns equal amounts of YES+NO tokens and returns pUSD collateral. Use when a market has resolved. Merged amount = `min(yes_balance, no_balance)`.
 
 ```
 POST /positions/{position_id}/merge

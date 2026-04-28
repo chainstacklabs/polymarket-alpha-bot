@@ -66,20 +66,9 @@ PORTFOLIOS_PATH = PROJECT_ROOT / "data" / "_live" / "portfolios.json"
 RPC_URL = os.environ["CHAINSTACK_NODE"]
 
 CONTRACTS = {
-    "USDC_E": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
     "PUSD": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
     "CTF": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
 }
-
-
-def _v2_enabled() -> bool:
-    """Match backend's POLYMARKET_V2_ENABLED parsing (experiments are standalone)."""
-    return os.environ.get("POLYMARKET_V2_ENABLED", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
 
 ERC20_ABI = [
     {
@@ -168,29 +157,14 @@ async def get_market_info(market_id: str) -> dict:
 
 
 def get_clob_client():
-    """Initialize CLOB client with optional proxy support.
+    """Initialize V2 CLOB client with optional proxy support."""
+    try:
+        from py_clob_client_v2.client import ClobClient
+        import py_clob_client_v2.http_helpers.helpers as clob_helpers
+    except ImportError:
+        print("py-clob-client-v2 not installed. Run: uv add py-clob-client-v2")
+        return None
 
-    Picks V2 (``clob-v2.polymarket.com``) when ``POLYMARKET_V2_ENABLED`` is set;
-    otherwise the legacy V1 endpoint. Mirrors backend ``core.trading.clob_client``.
-    """
-    if _v2_enabled():
-        try:
-            from py_clob_client_v2.client import ClobClient
-            import py_clob_client_v2.http_helpers.helpers as clob_helpers
-        except ImportError:
-            print("py-clob-client-v2 not installed. Run: uv add py-clob-client-v2")
-            return None
-        host = "https://clob-v2.polymarket.com"
-    else:
-        try:
-            from py_clob_client.client import ClobClient
-            import py_clob_client.http_helpers.helpers as clob_helpers
-        except ImportError:
-            print("py-clob-client not installed. Run: uv add py-clob-client")
-            return None
-        host = "https://clob.polymarket.com"
-
-    # Proxy support
     proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
     if proxy:
         print(f"Using proxy: {proxy[:30]}...")
@@ -199,33 +173,20 @@ def get_clob_client():
     wallet = load_wallet()
 
     try:
-        if _v2_enabled():
-            client = ClobClient(
-                host=host,
-                chain_id=137,
-                key=wallet["private_key"],
-                signature_type=0,
-                funder=wallet["address"],
-                builder_config=None,
-            )
-            # V2 split V1's `create_or_derive_api_creds` into two calls.
-            # Narrow to PolyApiException so transient network errors fail
-            # visibly instead of silently creating orphan API keys.
-            from py_clob_client_v2.exceptions import PolyApiException
+        client = ClobClient(
+            host="https://clob-v2.polymarket.com",
+            chain_id=137,
+            key=wallet["private_key"],
+            signature_type=0,
+            funder=wallet["address"],
+            builder_config=None,
+        )
+        from py_clob_client_v2.exceptions import PolyApiException
 
-            try:
-                creds = client.derive_api_key()
-            except PolyApiException:
-                creds = client.create_api_key()
-        else:
-            client = ClobClient(
-                host,
-                key=wallet["private_key"],
-                chain_id=137,
-                signature_type=0,
-                funder=wallet["address"],
-            )
-            creds = client.create_or_derive_api_creds()
+        try:
+            creds = client.derive_api_key()
+        except PolyApiException:
+            creds = client.create_api_key()
         client.set_api_creds(creds)
         return client
     except Exception as e:
@@ -325,26 +286,20 @@ async def buy_position(
     address = Web3.to_checksum_address(wallet["address"])
     account = w3.eth.account.from_key(wallet["private_key"])
 
-    usdc = w3.eth.contract(
-        address=Web3.to_checksum_address(CONTRACTS["USDC_E"]), abi=ERC20_ABI
+    pusd = w3.eth.contract(
+        address=Web3.to_checksum_address(CONTRACTS["PUSD"]), abi=ERC20_ABI
     )
     ctf = w3.eth.contract(
         address=Web3.to_checksum_address(CONTRACTS["CTF"]), abi=CTF_ABI
     )
 
-    usdc_balance = usdc.functions.balanceOf(address).call()
+    pusd_balance = pusd.functions.balanceOf(address).call()
     amount_wei = int(amount * 1e6)
 
-    print(f"\nYour USDC.e: ${usdc_balance / 1e6:.2f}")
-    if _v2_enabled():
-        pusd = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["PUSD"]), abi=ERC20_ABI
-        )
-        pusd_balance = pusd.functions.balanceOf(address).call()
-        print(f"Your pUSD:   ${pusd_balance / 1e6:.2f}")
+    print(f"\nYour pUSD: ${pusd_balance / 1e6:.2f}")
 
-    if usdc_balance < amount_wei:
-        print("ERROR: Insufficient USDC.e")
+    if pusd_balance < amount_wei:
+        print("ERROR: Insufficient pUSD")
         return
 
     if not auto_confirm:
@@ -357,11 +312,11 @@ async def buy_position(
     # =========================================================================
 
     ctf_address = Web3.to_checksum_address(CONTRACTS["CTF"])
-    allowance = usdc.functions.allowance(address, ctf_address).call()
+    allowance = pusd.functions.allowance(address, ctf_address).call()
 
     if allowance < amount_wei:
-        print("\n[1/3] Approving USDC.e...")
-        tx = usdc.functions.approve(ctf_address, 2**256 - 1).build_transaction(
+        print("\n[1/3] Approving pUSD...")
+        tx = pusd.functions.approve(ctf_address, 2**256 - 1).build_transaction(
             {
                 "from": address,
                 "nonce": w3.eth.get_transaction_count(address),
@@ -382,10 +337,10 @@ async def buy_position(
     # STEP 2: SPLIT
     # =========================================================================
 
-    print("\n[2/3] Splitting USDC.e -> YES + NO...")
+    print("\n[2/3] Splitting pUSD -> YES + NO...")
 
     tx = ctf.functions.splitPosition(
-        Web3.to_checksum_address(CONTRACTS["USDC_E"]),
+        Web3.to_checksum_address(CONTRACTS["PUSD"]),
         bytes(32),
         bytes.fromhex(
             condition_id[2:] if condition_id.startswith("0x") else condition_id
@@ -426,16 +381,12 @@ async def buy_position(
         client = get_clob_client()
         if client:
             try:
-                if _v2_enabled():
-                    # V2 OrderArgsV2 drops fee_rate_bps/nonce/taker; adds metadata.
-                    from py_clob_client_v2.clob_types import (
-                        OrderArgsV2 as OrderArgs,
-                        OrderType,
-                    )
-                    from py_clob_client_v2.order_builder.constants import SELL
-                else:
-                    from py_clob_client.clob_types import OrderArgs, OrderType
-                    from py_clob_client.order_builder.constants import SELL
+                # V2 OrderArgsV2 drops fee_rate_bps/nonce/taker; adds metadata.
+                from py_clob_client_v2.clob_types import (
+                    OrderArgsV2 as OrderArgs,
+                    OrderType,
+                )
+                from py_clob_client_v2.order_builder.constants import SELL
 
                 # Fetch tick size for correct precision (varies per market)
                 try:

@@ -7,15 +7,11 @@ Creates a new Polygon wallet and sets up all required Polymarket approvals.
 WHAT IT DOES:
     1. Generates a new Ethereum-compatible wallet (private key + address)
     2. Saves credentials to .wallet.local.json (gitignored)
-    3. Sets collateral approvals for all Polymarket contracts.
-       Collateral + exchange targets flip with POLYMARKET_V2_ENABLED:
-         unset/false → USDC.e + V1 exchanges (legacy, retired ~2026-05-05)
-         true        → pUSD   + V2 exchanges (post-cutover 2026-04-28)
+    3. Sets pUSD + CTF approvals for all Polymarket V2 contracts.
 
 PREREQUISITES:
-    - Fund the wallet with POL (for gas) and the active collateral (for trading)
-    - V1: USDC.e — if you only have native USDC, run 02_swap_to_usdc_e.py
-    - V2: pUSD   — if you only have USDC.e,    run 02_wrap_to_pusd.py
+    - Fund the wallet with POL (for gas) and pUSD (for trading)
+    - If you only have USDC.e, run 02_wrap_to_pusd.py first
 
 USAGE:
     cd backend && uv run python ../experiments/trading/01_setup_wallet.py [command]
@@ -51,44 +47,13 @@ load_dotenv(PROJECT_ROOT / ".env")
 WALLET_PATH = Path(__file__).parent / ".wallet.local.json"
 RPC_URL = os.environ["CHAINSTACK_NODE"]
 
-# Polymarket contracts on Polygon. CTF + NegRisk Adapter unchanged in V2;
-# only the collateral token and the two exchange addresses flip.
+# Polymarket V2 contracts on Polygon (post-2026-04-28 cutover).
 CONTRACTS = {
-    "USDC_E": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
     "PUSD": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
     "CTF": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
-    "CTF_EXCHANGE": "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E",
-    "CTF_EXCHANGE_V2": "0xE111180000d2663C0091e4f400237545B87B996B",
-    "NEG_RISK_CTF_EXCHANGE": "0xC5d563A36AE78145C45a50134d48A1215220f80a",
-    "NEG_RISK_CTF_EXCHANGE_V2": "0xe2222d279d744050d28e00520010520000310F59",
-    "NEG_RISK_ADAPTER": "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
+    "CTF_EXCHANGE": "0xE111180000d2663C0091e4f400237545B87B996B",
+    "NEG_RISK_CTF_EXCHANGE": "0xe2222d279d744050d28e00520010520000310F59",
 }
-
-
-def _v2_enabled() -> bool:
-    """Match backend's POLYMARKET_V2_ENABLED parsing (experiments are standalone)."""
-    return os.environ.get("POLYMARKET_V2_ENABLED", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-
-
-def _collateral():
-    """(label, address) for the active collateral token."""
-    return (
-        ("pUSD", CONTRACTS["PUSD"])
-        if _v2_enabled()
-        else ("USDC.e", CONTRACTS["USDC_E"])
-    )
-
-
-def _exchanges():
-    """(ctf_exchange, neg_risk_exchange) addresses for the active env."""
-    if _v2_enabled():
-        return CONTRACTS["CTF_EXCHANGE_V2"], CONTRACTS["NEG_RISK_CTF_EXCHANGE_V2"]
-    return CONTRACTS["CTF_EXCHANGE"], CONTRACTS["NEG_RISK_CTF_EXCHANGE"]
 
 
 ERC20_ABI = [
@@ -194,10 +159,9 @@ def cmd_generate():
     print("=" * 60)
     print(f"\nAddress: {account.address}")
     print(f"Saved to: {WALLET_PATH}")
-    coll_label, _ = _collateral()
     print("\nNEXT STEPS:")
     print("  1. Send POL to this address (for gas, ~0.5 POL is enough)")
-    print(f"  2. Send {coll_label} to this address (for trading)")
+    print("  2. Send pUSD to this address (for trading)")
     print("  3. Run: uv run python 01_setup_wallet.py approve")
 
 
@@ -220,57 +184,45 @@ def cmd_status():
 
     # Balances
     pol = w3.from_wei(w3.eth.get_balance(address), "ether")
-    usdc = w3.eth.contract(
-        address=Web3.to_checksum_address(CONTRACTS["USDC_E"]), abi=ERC20_ABI
+    pusd = w3.eth.contract(
+        address=Web3.to_checksum_address(CONTRACTS["PUSD"]), abi=ERC20_ABI
     )
-    usdc_balance = usdc.functions.balanceOf(address).call() / 1e6
+    pusd_balance = pusd.functions.balanceOf(address).call() / 1e6
 
     print("\nBalances:")
-    print(f"  POL:    {pol:.4f}")
-    print(f"  USDC.e: ${usdc_balance:.2f}")
+    print(f"  POL:  {pol:.4f}")
+    print(f"  pUSD: ${pusd_balance:.2f}")
 
-    # Under the V2 flag, also show pUSD — V2 collateral after the cutover.
-    if _v2_enabled():
-        pusd = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["PUSD"]), abi=ERC20_ABI
-        )
-        pusd_balance = pusd.functions.balanceOf(address).call() / 1e6
-        print(f"  pUSD:   ${pusd_balance:.2f}")
-
-    # Approvals — collateral token + exchange targets flip under V2.
-    coll_label, coll_addr = _collateral()
-    ctf_exchange, neg_risk_exchange = _exchanges()
-    print(f"\nApprovals ({coll_label} collateral):")
-    coll = w3.eth.contract(address=Web3.to_checksum_address(coll_addr), abi=ERC20_ABI)
+    print("\nApprovals (pUSD collateral):")
     ctf = w3.eth.contract(
         address=Web3.to_checksum_address(CONTRACTS["CTF"]), abi=CTF_ABI
     )
 
     approvals = [
         (
-            f"{coll_label} → CTF",
-            coll.functions.allowance(address, CONTRACTS["CTF"]).call(),
+            "pUSD → CTF",
+            pusd.functions.allowance(address, CONTRACTS["CTF"]).call(),
         ),
         (
-            f"{coll_label} → Exchange",
-            coll.functions.allowance(address, ctf_exchange).call(),
+            "pUSD → Exchange",
+            pusd.functions.allowance(address, CONTRACTS["CTF_EXCHANGE"]).call(),
         ),
         (
-            f"{coll_label} → NegRisk Exchange",
-            coll.functions.allowance(address, neg_risk_exchange).call(),
+            "pUSD → NegRisk Exchange",
+            pusd.functions.allowance(
+                address, CONTRACTS["NEG_RISK_CTF_EXCHANGE"]
+            ).call(),
         ),
         (
             "CTF → Exchange",
-            ctf.functions.isApprovedForAll(address, ctf_exchange).call(),
+            ctf.functions.isApprovedForAll(
+                address, CONTRACTS["CTF_EXCHANGE"]
+            ).call(),
         ),
         (
             "CTF → NegRisk Exchange",
-            ctf.functions.isApprovedForAll(address, neg_risk_exchange).call(),
-        ),
-        (
-            "CTF → NegRisk Adapter",
             ctf.functions.isApprovedForAll(
-                address, CONTRACTS["NEG_RISK_ADAPTER"]
+                address, CONTRACTS["NEG_RISK_CTF_EXCHANGE"]
             ).call(),
         ),
     ]
@@ -306,48 +258,40 @@ def cmd_approve():
         print(f"ERROR: Insufficient POL for gas (have {pol:.4f}, need ~0.01)")
         return
 
-    coll_label, coll_addr = _collateral()
-    ctf_exchange, neg_risk_exchange = _exchanges()
-
     print("=" * 60)
-    print(f"SETTING POLYMARKET APPROVALS ({coll_label} collateral)")
+    print("SETTING POLYMARKET V2 APPROVALS (pUSD collateral)")
     print("=" * 60)
 
-    coll = w3.eth.contract(address=Web3.to_checksum_address(coll_addr), abi=ERC20_ABI)
+    pusd = w3.eth.contract(
+        address=Web3.to_checksum_address(CONTRACTS["PUSD"]), abi=ERC20_ABI
+    )
     ctf = w3.eth.contract(
         address=Web3.to_checksum_address(CONTRACTS["CTF"]), abi=CTF_ABI
     )
 
     MAX_UINT256 = 2**256 - 1
     approvals = [
-        (f"{coll_label} → CTF", coll, "approve", CONTRACTS["CTF"], MAX_UINT256),
-        (f"{coll_label} → Exchange", coll, "approve", ctf_exchange, MAX_UINT256),
+        ("pUSD → CTF", pusd, "approve", CONTRACTS["CTF"], MAX_UINT256),
+        ("pUSD → Exchange", pusd, "approve", CONTRACTS["CTF_EXCHANGE"], MAX_UINT256),
         (
-            f"{coll_label} → NegRisk Exchange",
-            coll,
+            "pUSD → NegRisk Exchange",
+            pusd,
             "approve",
-            neg_risk_exchange,
+            CONTRACTS["NEG_RISK_CTF_EXCHANGE"],
             MAX_UINT256,
         ),
-        ("CTF → Exchange", ctf, "setApprovalForAll", ctf_exchange, True),
+        ("CTF → Exchange", ctf, "setApprovalForAll", CONTRACTS["CTF_EXCHANGE"], True),
         (
             "CTF → NegRisk Exchange",
             ctf,
             "setApprovalForAll",
-            neg_risk_exchange,
-            True,
-        ),
-        (
-            "CTF → NegRisk Adapter",
-            ctf,
-            "setApprovalForAll",
-            CONTRACTS["NEG_RISK_ADAPTER"],
+            CONTRACTS["NEG_RISK_CTF_EXCHANGE"],
             True,
         ),
     ]
 
     for i, (name, contract, method, spender, value) in enumerate(approvals, 1):
-        print(f"\n[{i}/6] {name}...")
+        print(f"\n[{i}/{len(approvals)}] {name}...")
 
         try:
             fn = getattr(contract.functions, method)

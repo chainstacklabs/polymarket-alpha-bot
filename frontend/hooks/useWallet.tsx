@@ -12,7 +12,7 @@ import { getApiBaseUrl } from '@/config/api-config'
 
 interface WalletBalances {
   pol: number
-  usdc_e: number
+  pusd: number
 }
 
 interface WalletStatus {

@@ -20,7 +20,7 @@ interface TradeResult {
   target: { split_tx?: string; clob_order_id?: string; error?: string }
   cover: { split_tx?: string; clob_order_id?: string; error?: string }
   total_spent: number
-  final_balances: { pol: number; usdc_e: number }
+  final_balances: { pol: number; pusd: number }
   warnings?: string[]
 }
 
@@ -111,7 +111,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
   const MIN_AMOUNT = 5
   const amountNum = parseFloat(amount) || 0
   const totalCost = amountNum * 2
-  const hasSufficientBalance = (status?.balances?.usdc_e || 0) >= totalCost
+  const hasSufficientBalance = (status?.balances?.pusd || 0) >= totalCost
   const meetsMinimum = amountNum >= MIN_AMOUNT
   const needsUnlock = !walletLoading && !status?.unlocked
 
@@ -558,7 +558,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                     <span
                       className={`font-mono ${hasSufficientBalance ? 'text-emerald' : 'text-rose'}`}
                     >
-                      ${(status?.balances?.usdc_e || 0).toFixed(2)} USDC.e
+                      ${(status?.balances?.pusd || 0).toFixed(2)} pUSD
                     </span>
                   </div>
 
@@ -642,7 +642,7 @@ export function PortfolioModal({ portfolio: p, onClose }: PortfolioModalProps) {
                   </p>
                   <p className="text-xs text-text-muted">
                     Spent ${result.total_spent.toFixed(2)} · Balance: $
-                    {result.final_balances.usdc_e.toFixed(2)}
+                    {result.final_balances.pusd.toFixed(2)}
                   </p>
                 </div>
               </div>

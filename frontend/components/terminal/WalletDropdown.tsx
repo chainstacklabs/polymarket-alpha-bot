@@ -136,7 +136,7 @@ export function WalletDropdown() {
   // Determine button state
   const isUnlocked = status?.unlocked
   const hasWallet = status?.exists
-  const balance = status?.balances?.usdc_e ?? 0
+  const balance = status?.balances?.pusd ?? 0
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -446,9 +446,9 @@ export function WalletDropdown() {
                 {/* Balances */}
                 <div className="bg-surface-elevated rounded-lg p-2.5 space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-text-muted">USDC.e</span>
+                    <span className="text-text-muted">pUSD</span>
                     <span className="font-mono text-text-primary">
-                      ${(status?.balances?.usdc_e ?? 0).toFixed(2)}
+                      ${(status?.balances?.pusd ?? 0).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
