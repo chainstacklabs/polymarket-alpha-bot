@@ -1,41 +1,39 @@
 """
-Wrap USDC.e -> pUSD on Polygon  (lossless: 1:1 + gas only)
-==========================================================
+Unwrap pUSD -> USDC.e on Polygon  (lossless: 1:1 + gas only)
+============================================================
 
-Polymarket V2 (post-2026-04-28 cutover) settles in pUSD. The
-CollateralOnramp contract converts USDC.e -> pUSD at exactly 1:1 — no
-slippage, no spread, no fees. You pay only Polygon gas (~$0.003 at
-current rates).
+The reverse of ``02_wrap_to_pusd.py``. Uses Polymarket's CollateralOfframp
+to convert pUSD back to USDC.e at exactly 1:1 — no slippage, no spread,
+no fees. You pay only Polygon gas (~$0.003 at current rates).
 
-This is the V2 collateral entry point. The Polymarket app's swap UI
-runs through DEX routers and charges slippage; this contract path
-doesn't. Reverse direction: ``02_unwrap_to_usdc_e.py``.
-
-Order of ops for new users:
-
-    01_setup_wallet.py   -> 02_swap_to_usdc_e.py (only if starting from native USDC)
-                         -> 02_wrap_to_pusd.py   (wrap into pUSD for V2)
-                         -> 03_buy_position.py
+This is the on-ramp flow's exit path. The Polymarket app's swap UI runs
+through DEX routers and charges slippage; this contract path doesn't.
 
 WHAT IT DOES:
-    1. Reads USDC.e balance.
-    2. Approves CollateralOnramp to pull USDC.e.
-    3. Calls ``wrap(asset=USDC.e, to, amount)``; receives pUSD 1:1.
+    1. Reads pUSD balance.
+    2. Approves CollateralOfframp to pull pUSD.
+    3. Calls ``unwrap(asset=USDC.e, to, amount)`` on the Offramp;
+       receives USDC.e 1:1.
 
 USAGE:
-    cd backend && uv run python ../experiments/trading/02_wrap_to_pusd.py
+    cd backend && uv run python ../experiments/trading/02_unwrap_to_usdc_e.py
+
+    # Partial amount (default is full pUSD balance):
+    UNWRAP_AMOUNT_USD=5 uv run python ../experiments/trading/02_unwrap_to_usdc_e.py
 
 PREREQUISITES:
-    - Wallet created (01_setup_wallet.py).
-    - USDC.e in wallet (run 02_swap_to_usdc_e.py first if needed).
-    - POL for gas.
+    - Wallet with pUSD (run 02_wrap_to_pusd.py first to mint some).
+    - POL for gas (~0.01 POL).
 
-ABI verified against Polygonscan source 2026-04-27 (BUSL-1.1, Solidity 0.8.34).
-``wrap(address asset, address to, uint256 amount)`` requires a prior
-``approve`` on the source token (USDC.e) and is gated by an `onlyUnpaused`
-modifier — this script reads ``Onramp.paused(USDC.e)`` first and aborts on true.
+ABI verified against Polygonscan source (CollateralOfframp.sol BUSL-1.1).
+``unwrap(address asset, address to, uint256 amount)`` requires a prior
+``approve`` on pUSD and is gated by an `onlyUnpaused` modifier on the
+target asset — this script reads ``Offramp.paused(USDC.e)`` first and
+aborts on true.
 
-Set ``WRAP_AMOUNT_USD=<decimal>`` to wrap a partial balance (default: full).
+The ``asset`` parameter is the token you want to receive, NOT the token
+being burned. Pass USDC.e to get USDC.e back; passing pUSD reverts with
+``InvalidAsset()`` (selector 0xc891add2).
 """
 
 import json
@@ -57,7 +55,7 @@ RPC_URL = os.environ["CHAINSTACK_NODE"]
 # Polygon mainnet addresses (confirmed 2026-04-26 against Polymarket V2 docs).
 USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 PUSD = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
-COLLATERAL_ONRAMP = "0x93070a847efEf7F70739046A929D47a521F5B8ee"
+COLLATERAL_OFFRAMP = "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
 
 ERC20_ABI = [
     {
@@ -89,21 +87,9 @@ ERC20_ABI = [
     },
 ]
 
-# Verified against Polygonscan source 2026-04-27 (CollateralOnramp.sol BUSL-1.1).
-# wrap/unwrap take (asset, to, amount); caller must hold prior `approve` on asset.
-# Onramp also exposes paused(asset) -> bool; pre-flight check before wrapping.
-ONRAMP_ABI = [
-    {
-        "inputs": [
-            {"name": "_asset", "type": "address"},
-            {"name": "_to", "type": "address"},
-            {"name": "_amount", "type": "uint256"},
-        ],
-        "name": "wrap",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
+# unwrap(asset, to, amount): `asset` is the asset to RECEIVE (e.g. USDC.e).
+# Caller must hold prior `approve` on pUSD against the Offramp.
+OFFRAMP_ABI = [
     {
         "inputs": [
             {"name": "_asset", "type": "address"},
@@ -158,7 +144,7 @@ def main():
     private_key = wallet["private_key"]
 
     print("=" * 60)
-    print("WRAP: USDC.e -> pUSD (Polymarket V2 collateral)")
+    print("UNWRAP: pUSD -> USDC.e  (1:1, gas only)")
     print("=" * 60)
     print(f"\nWallet: {address}")
 
@@ -167,62 +153,58 @@ def main():
 
     usdc_e = w3.eth.contract(address=Web3.to_checksum_address(USDC_E), abi=ERC20_ABI)
     pusd = w3.eth.contract(address=Web3.to_checksum_address(PUSD), abi=ERC20_ABI)
-    onramp = w3.eth.contract(
-        address=Web3.to_checksum_address(COLLATERAL_ONRAMP), abi=ONRAMP_ABI
+    offramp = w3.eth.contract(
+        address=Web3.to_checksum_address(COLLATERAL_OFFRAMP), abi=OFFRAMP_ABI
     )
 
     bal_usdce_pre = retry_call(lambda: usdc_e.functions.balanceOf(address).call())
     bal_pusd_pre = retry_call(lambda: pusd.functions.balanceOf(address).call())
     pol_pre_wei = retry_call(lambda: w3.eth.get_balance(address))
-    bal_usdce = bal_usdce_pre  # back-compat alias used below
-    bal_pusd = bal_pusd_pre
-    pol_balance = w3.from_wei(pol_pre_wei, "ether")
 
     print("\nCurrent balances:")
-    print(f"  POL:    {pol_balance:.4f}")
-    print(f"  USDC.e: ${bal_usdce / 1e6:.2f}")
-    print(f"  pUSD:   ${bal_pusd / 1e6:.2f}")
+    print(f"  POL:    {w3.from_wei(pol_pre_wei, 'ether'):.4f}")
+    print(f"  pUSD:   ${bal_pusd_pre / 1e6:.2f}")
+    print(f"  USDC.e: ${bal_usdce_pre / 1e6:.2f}")
 
-    if bal_usdce == 0:
-        print("\nNo USDC.e to wrap. Run 02_swap_to_usdc_e.py first.")
+    if bal_pusd_pre == 0:
+        print("\nNo pUSD to unwrap. Run 02_wrap_to_pusd.py first.")
         return
 
-    if pol_balance < 0.01:
+    if pol_pre_wei < int(0.01 * 1e18):
         print("\nERROR: Insufficient POL for gas")
         return
 
-    # Pre-flight: Onramp.paused(USDC.e) must be false
+    # Pre-flight: Offramp.paused(USDC.e) must be false
     is_paused = retry_call(
-        lambda: onramp.functions.paused(Web3.to_checksum_address(USDC_E)).call()
+        lambda: offramp.functions.paused(Web3.to_checksum_address(USDC_E)).call()
     )
     if is_paused:
-        print("\nERROR: Onramp is paused for USDC.e — abort")
+        print("\nERROR: Offramp is paused for USDC.e — abort")
         return
 
-    # Wrap supports a custom amount via WRAP_AMOUNT_USD env var (decimal dollars).
-    # Default: full USDC.e balance.
-    custom_amount_usd = os.environ.get("WRAP_AMOUNT_USD")
+    # Custom amount via UNWRAP_AMOUNT_USD env var; default = full pUSD balance.
+    custom_amount_usd = os.environ.get("UNWRAP_AMOUNT_USD")
     if custom_amount_usd:
         amount = int(float(custom_amount_usd) * 1e6)
-        if amount > bal_usdce:
-            print(f"\nERROR: WRAP_AMOUNT_USD=${custom_amount_usd} exceeds balance")
+        if amount > bal_pusd_pre:
+            print(f"\nERROR: UNWRAP_AMOUNT_USD=${custom_amount_usd} exceeds balance")
             return
     else:
-        amount = bal_usdce
-    print(f"\nWrapping ${amount / 1e6:.2f} USDC.e -> pUSD")
+        amount = bal_pusd_pre
+    print(f"\nUnwrapping ${amount / 1e6:.2f} pUSD -> USDC.e")
     confirm = input("Proceed? (yes/no): ")
     if confirm.lower() != "yes":
         print("Cancelled")
         return
 
-    spender = Web3.to_checksum_address(COLLATERAL_ONRAMP)
-    allowance = retry_call(lambda: usdc_e.functions.allowance(address, spender).call())
+    spender = Web3.to_checksum_address(COLLATERAL_OFFRAMP)
+    allowance = retry_call(lambda: pusd.functions.allowance(address, spender).call())
 
     gas_used_total = 0
 
     if allowance < amount:
-        print("\n[1/2] Approving CollateralOnramp...")
-        tx = usdc_e.functions.approve(spender, 2**256 - 1).build_transaction(
+        print("\n[1/2] Approving CollateralOfframp...")
+        tx = pusd.functions.approve(spender, 2**256 - 1).build_transaction(
             {
                 "from": address,
                 "nonce": retry_call(lambda: w3.eth.get_transaction_count(address)),
@@ -246,8 +228,8 @@ def main():
     else:
         print("\n[1/2] Already approved")
 
-    print("\n[2/2] Calling wrap(asset, to, amount)...")
-    wrap_tx = onramp.functions.wrap(
+    print("\n[2/2] Calling unwrap(asset=USDC.e, to, amount)...")
+    unwrap_tx = offramp.functions.unwrap(
         Web3.to_checksum_address(USDC_E),
         address,
         amount,
@@ -260,37 +242,38 @@ def main():
             "chainId": 137,
         }
     )
-    signed = account.sign_transaction(wrap_tx)
+    signed = account.sign_transaction(unwrap_tx)
     tx_hash = retry_call(lambda: w3.eth.send_raw_transaction(signed.raw_transaction))
     print(f"  TX: {tx_hash.hex()}")
     print(f"  View: https://polygonscan.com/tx/{tx_hash.hex()}")
 
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
     if receipt["status"] != 1:
-        print("  ERROR: Wrap failed")
+        print("  ERROR: Unwrap failed")
         return
     gas_used_total += receipt["gasUsed"] * receipt["effectiveGasPrice"]
 
-    print("  Wrap complete!")
+    print("  Unwrap complete!")
 
     time.sleep(2)
     bal_usdce_post = retry_call(lambda: usdc_e.functions.balanceOf(address).call())
     bal_pusd_post = retry_call(lambda: pusd.functions.balanceOf(address).call())
+    pol_post_wei = retry_call(lambda: w3.eth.get_balance(address))
 
-    usdce_delta = (bal_usdce_post - bal_usdce_pre) / 1e6
     pusd_delta = (bal_pusd_post - bal_pusd_pre) / 1e6
+    usdce_delta = (bal_usdce_post - bal_usdce_pre) / 1e6
     gas_pol = w3.from_wei(gas_used_total, "ether")
 
     print("\n" + "=" * 60)
-    print("WRAP COMPLETE — 1:1, no slippage")
+    print("UNWRAP COMPLETE — 1:1, no slippage")
     print("=" * 60)
     print("\nDelta:")
-    print(f"  USDC.e: {usdce_delta:+.6f}")
     print(f"  pUSD:   {pusd_delta:+.6f}")
+    print(f"  USDC.e: {usdce_delta:+.6f}")
     print(f"  Gas:    {gas_pol:.6f} POL")
     print("\nFinal balances:")
-    print(f"  USDC.e: ${bal_usdce_post / 1e6:.2f}")
     print(f"  pUSD:   ${bal_pusd_post / 1e6:.2f}")
+    print(f"  USDC.e: ${bal_usdce_post / 1e6:.2f}")
 
 
 if __name__ == "__main__":

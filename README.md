@@ -110,7 +110,7 @@ Standalone research scripts (no imports from `backend/`). Three groups:
 | Folder | Description |
 |--------|-------------|
 | [`experiments/`](experiments/) | Pipeline-step learning examples — fetch events, build groups, extract implications, validate, score portfolios, stream prices. Mirrors what `backend/core/runner.py` orchestrates, one stage per file. |
-| [`experiments/trading/`](experiments/trading/) | Wallet + funding + position helpers. Generate a wallet, swap native USDC → USDC.e (legacy), wrap USDC.e → pUSD (Polymarket V2 collateral), buy a position, transfer tokens. |
+| [`experiments/trading/`](experiments/trading/) | Wallet + funding + position helpers. Generate a wallet, swap native USDC → USDC.e (one-time DEX hop), wrap USDC.e ↔ pUSD via Polymarket's CollateralOnramp/Offramp (1:1, gas-only, no slippage), buy a position, transfer tokens. |
 | [`experiments/onchain-otc/`](experiments/onchain-otc/) | On-chain OTC trading without the CLOB — split/merge, P2P transfers, atomic escrow, NegRisk conversions, and intent-based settlement on an Anvil fork of Polygon. Forked-chain research; uses USDC.e collateral (the fork's frozen state predates Polymarket V2 / pUSD). |
 
 ---
