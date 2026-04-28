@@ -258,7 +258,6 @@ def main():
     time.sleep(2)
     bal_usdce_post = retry_call(lambda: usdc_e.functions.balanceOf(address).call())
     bal_pusd_post = retry_call(lambda: pusd.functions.balanceOf(address).call())
-    pol_post_wei = retry_call(lambda: w3.eth.get_balance(address))
 
     pusd_delta = (bal_pusd_post - bal_pusd_pre) / 1e6
     usdce_delta = (bal_usdce_post - bal_usdce_pre) / 1e6
