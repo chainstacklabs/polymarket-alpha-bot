@@ -6,7 +6,9 @@
 ```
 GET /wallet/status
 ```
-Response: `{ "exists": true, "unlocked": true, "address": "0x...", "balances": { "pusd": 150.0, "pol": 0.8 }, "approvals_set": true }`
+Response: `{ "exists": true, "unlocked": true, "address": "0x...", "balances": { "pusd": 150.0, "pol": 0.8 }, "approvals_set": true, "relayer_set": true, "deposit_wallet_address": "0x...", "deposit_wallet_deployed": true }`
+
+`balances` is read against the **deposit wallet**. `relayer_set` + `deposit_wallet_deployed` must both be `true` before trading (see SKILL prerequisites).
 
 ### Unlock
 ```
@@ -34,15 +36,20 @@ Request (`BuyPairRequest`):
   "cover_position": "NO",
   "cover_group_slug": "",
   "amount_per_position": 10.0,
-  "skip_clob_sell": false
+  "skip_clob_sell": false,
+  "slippage": 10
 }
 ```
+
+`slippage` is optional (default `10`, range `10`–`50`); it bounds the worst price on the CLOB sell of the unwanted side.
 
 Response (`EstimateResponse`):
 ```json
 {
   "pair_id": "...",
   "total_cost": 20.0,
+  "expected_fees": 0.18,
+  "net_cost": 20.18,
   "target_market": { "question": "...", "position": "YES", "price": 0.72 },
   "cover_market": { "question": "...", "position": "NO", "price": 0.31 },
   "wallet_balance": 150.0,

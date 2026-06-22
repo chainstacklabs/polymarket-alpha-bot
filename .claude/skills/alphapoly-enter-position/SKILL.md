@@ -11,7 +11,8 @@ Enter a hedged pair position (target + cover) from a detected alphapoly portfoli
 
 1. **Backend running** on `http://localhost:8000`
 2. **Wallet unlocked** — check `GET /wallet/status` for `"unlocked": true`; unlock via `POST /wallet/unlock` with `{"password": "<password>"}`
-3. **Sufficient pUSD balance** — total cost is `amount_per_position * 2`
+3. **Deposit wallet ready** — trades sign as sigtype-3 through a per-user deposit wallet, so `GET /wallet/status` must show `"relayer_set": true` and `"deposit_wallet_deployed": true`. If not: attach the relayer key (`POST /wallet/set-relayer`), then deploy (`POST /wallet/deploy-deposit-wallet`). Without this, `buy-pair` fails at order placement.
+4. **Sufficient pUSD in the deposit wallet** — the balance must sit in the deposit wallet (`deposit_wallet_address` from status), not the signer EOA; total cost is `amount_per_position * 2`. The relayer pays gas, so no POL is needed.
 
 ## 7-Step Flow
 

@@ -73,15 +73,36 @@ Response (`MergeTokensResponse`):
 
 ---
 
+## Exit Position (orchestrated)
+
+Exits the **entire** position in one call — merges complementary tokens where possible, sells the rest via CLOB. Preferred over manual per-side sell/merge.
+
+```
+POST /positions/{position_id}/exit
+```
+
+Optional body (`ExitRequest`): `{ "slippage": 10 }` (default `10`, range `10`–`50`). Response (`ExitResponse`):
+```json
+{
+  "success": true,
+  "target": { "merged": 0.0, "merge_tx": null, "sold_wanted": 10.0, "sold_unwanted": 0.0, "recovered": 7.2, "error": null },
+  "cover":  { "merged": 0.0, "merge_tx": null, "sold_wanted": 10.0, "sold_unwanted": 0.0, "recovered": 3.1, "error": null },
+  "total_recovered": 10.3,
+  "message": "Exited position"
+}
+```
+
+---
+
 ## Retry Pending
 
-Retries FOK CLOB orders to clear unwanted tokens on both sides for a `pending` position.
+Retries FAK CLOB orders to clear unwanted tokens on both sides for a `pending` position.
 
 ```
 POST /positions/{position_id}/retry
 ```
 
-No request body. Response (`RetryPendingResponse`):
+Optional body (`RetryPendingRequest`): `{ "slippage": 10 }` (default `10`, range `10`–`50`). Response (`RetryPendingResponse`):
 ```json
 {
   "success": true,

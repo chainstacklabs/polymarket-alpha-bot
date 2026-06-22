@@ -18,7 +18,8 @@ description: Sells or merges tokens from an open alphapoly position via CLOB or 
 
 | Situation | Action |
 |---|---|
-| Exit a live position | Sell — `token_type: "wanted"` |
+| Fully close a position | Exit — orchestrated merge + sell (preferred) |
+| Sell one specific side | Sell — `token_type: "wanted"` |
 | Clear failed entry leftovers | Sell — `token_type: "unwanted"` |
 | Market resolved, hold both outcomes | Merge |
 | State is `pending` | Retry |
@@ -30,6 +31,10 @@ description: Sells or merges tokens from an open alphapoly position via CLOB or 
 ## Quick Reference
 
 ```
+# Fully exit (orchestrated merge + sell) — preferred
+POST /positions/{id}/exit
+{"slippage": 10}
+
 # Sell a side
 POST /positions/{id}/sell
 {"side": "target", "token_type": "wanted"}
@@ -47,7 +52,7 @@ GET /positions/{id}
 
 ## token_type Explained
 
-When entering, the system splits USDC into YES+NO tokens and sells the side you don't want via CLOB to recover partial cost.
+When entering, the system splits pUSD into YES+NO tokens and sells the side you don't want via CLOB to recover partial cost.
 
 - `"wanted"` — the token you hold as your position (normal exit)
 - `"unwanted"` — residual from a failed or partial entry sell (cleanup)
