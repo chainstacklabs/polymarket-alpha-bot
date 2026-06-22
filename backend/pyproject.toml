@@ -14,11 +14,12 @@ dependencies = [
     "uvicorn>=0.25.0",
     "websockets>=12.0",
     "watchfiles>=0.21.0",
-    # Trading (experiments)
+    # Trading
     "eth-account>=0.13.7",
-    "py-clob-client-v2==1.0.0",
     "web3>=7.15.0",
     "cryptography>=46.0.7",
+    # Deposit-wallet (sigtype-3) trading SDK — pinned (beta, money path)
+    "polymarket-client==0.1.0b8",
 ]
 
 [build-system]
@@ -31,3 +32,8 @@ packages = ["server", "core"]
 [tool.ruff.lint.per-file-ignores]
 # load_dotenv() must be called before routers are imported (they read env vars at module level)
 "server/main.py" = ["E402"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

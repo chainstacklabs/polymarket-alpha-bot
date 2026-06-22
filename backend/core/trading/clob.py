@@ -1,12 +1,10 @@
-"""Shared CLOB market sell — FAK order with slippage protection.
+"""Shared CLOB market sell — FAK sigtype-3 order via the polymarket-client SDK.
 
-Uses V2 SDK exclusively post-2026-04-28 cutover. The ``MarketOrderArgsV2``
-struct has no ``fee_rate_bps``/``nonce``/``taker`` (taker fees are computed
-server-side at match time) and adds an optional ``metadata`` field. The
-EIP-712 domain version is "2", handled internally by ``py_clob_client_v2``.
+The deposit-wallet (sigtype-3) client posts orders signed with ERC-1271
+(POLY_1271). Taker fees are computed server-side at match time. Polymarket
+enforces a $1 minimum order size — callers should not sell dust.
 """
 
-import time
 from typing import Optional
 
 from loguru import logger
@@ -33,17 +31,15 @@ def sell_via_clob(
     price: float,
     slippage: float = 10,
 ) -> tuple[Optional[str], float, Optional[str]]:
-    """Sell tokens via CLOB market order. Returns (order_id, filled_size, error).
+    """Sell tokens via a sigtype-3 FAK market order. Returns (order_id, filled_shares, error).
 
-    Always uses FAK (fill available, cancel rest) — partial fills are acceptable
-    when selling unwanted tokens. The price acts as a worst-price cap.
-
-    filled_size is the actual number of tokens matched (0.0 if nothing filled).
+    `client` is a polymarket SecureClient. `min_price` acts as the worst-price
+    floor. Partial fills are acceptable when offloading the unwanted side.
 
     Args:
-        client: Initialized ClobClient instance.
+        client: Authenticated SecureClient (deposit wallet).
         token_id: Token to sell.
-        amount: Number of tokens to sell.
+        amount: Number of shares to sell.
         price: Current market price.
         slippage: Slippage percentage (clamped to 10-50%).
     """
@@ -53,103 +49,35 @@ def sell_via_clob(
         return None, 0.0, msg
 
     try:
-        # V2 struct: no fee_rate_bps / nonce / taker; fees are match-time.
-        # `metadata` defaults to BYTES32_ZERO; `builder_code` is set on the
-        # client via builder_config (we leave it None per #27 scope).
-        from py_clob_client_v2.clob_types import (
-            MarketOrderArgsV2 as MarketOrderArgs,
-            OrderType,
+        min_price = compute_sell_price(price, slippage)
+        resp = client.place_market_order(
+            token_id=token_id,
+            side="SELL",
+            shares=amount,
+            min_price=min_price,
+            order_type="FAK",
         )
-        from py_clob_client_v2.order_builder.constants import SELL
 
-        # Fetch market's tick size for correct price precision
-        try:
-            tick_size = float(client.get_tick_size(token_id))
-        except Exception:
-            tick_size = 0.01  # fallback
+        # RejectedOrder (ok=False) — soft rejection (e.g. fak_not_filled).
+        if not getattr(resp, "ok", False):
+            msg = getattr(resp, "message", None) or "Order rejected by CLOB"
+            logger.error(f"CLOB sell rejected: {msg}")
+            return None, 0.0, msg
 
-        sell_price = compute_sell_price(price, slippage, tick_size)
-
-        order = client.create_market_order(
-            MarketOrderArgs(
-                token_id=token_id,
-                amount=amount,
-                side=SELL,
-                price=sell_price,
-                order_type=OrderType.FAK,
-            )
-        )
-        result = client.post_order(order, OrderType.FAK)
-
-        if result.get("success") is False:
-            error_msg = result.get("errorMsg") or "Order rejected by CLOB"
-            logger.error(f"CLOB post_order failed: {error_msg}")
-            return None, 0.0, error_msg
-
-        order_id = result.get("orderID", str(result)[:40])
+        # AcceptedOrder — making_amount is the shares we sold (matched).
+        order_id = resp.order_id
+        filled = float(resp.making_amount)
         logger.info(
-            f"CLOB market sell (price={sell_price}, tick={tick_size}): {order_id}"
+            f"CLOB sigtype-3 sell (min_price={min_price}): {order_id} filled={filled}"
         )
-
-        # FAK orders fill immediately — check actual matched size
-        filled_size = _get_filled_size(client, order_id)
-        if filled_size < amount:
+        if filled < amount:
             logger.warning(
-                f"FAK partial fill: {filled_size:.4f}/{amount:.4f} for {order_id}"
+                f"FAK partial fill: {filled:.4f}/{amount:.4f} for {order_id}"
             )
-
-        return order_id, filled_size, None
+        return order_id, filled, None
     except Exception as e:
-        error_msg = str(e)
-        if "403" in error_msg and (
-            "blocked" in error_msg.lower() or "restricted" in error_msg.lower()
-        ):
-            error_msg = "Trading restricted in your region — enable proxy"
-        logger.error(f"CLOB sell error: {error_msg}")
-        return None, 0.0, error_msg
-
-
-def _get_filled_size(client, order_id: str) -> float:
-    """Query order fill status. Returns matched token amount.
-
-    Retries on transient SDK errors (up to 3 attempts with exponential backoff).
-    Returns 0.0 on exhausted retries — caller should treat this as unverified
-    and rely on balance queries on next position refresh.
-    """
-    time.sleep(1)  # Brief wait for settlement
-    last_exc: Exception | None = None
-    for attempt in range(3):
-        try:
-            order = client.get_order(order_id)
-            size_matched = float(order.get("size_matched", 0))
-            logger.info(
-                f"Order {order_id}: size_matched={size_matched}, "
-                f"original_size={order.get('original_size')}"
-            )
-            return size_matched
-        except Exception as e:
-            last_exc = e
-            # Short-circuit likely-permanent failures (auth / missing order)
-            # instead of burning retries and flattening to 0.0, which would
-            # hide actionable state from the caller.
-            err = str(e).lower()
-            if any(
-                tok in err
-                for tok in (
-                    "401",
-                    "403",
-                    "404",
-                    "unauthorized",
-                    "forbidden",
-                    "not found",
-                )
-            ):
-                logger.warning(f"Permanent get_order failure for {order_id}: {e}")
-                break
-            if attempt < 2:
-                logger.debug(
-                    f"get_filled_size retry {attempt + 1}/3 for {order_id}: {e}"
-                )
-                time.sleep(2**attempt)
-    logger.warning(f"Could not fetch order status for {order_id}: {last_exc}")
-    return 0.0
+        msg = str(e)
+        if "restricted" in msg.lower() or ("403" in msg and "blocked" in msg.lower()):
+            msg = "Trading restricted in your region — backend must run from an allowed region"
+        logger.error(f"CLOB sell error: {msg}")
+        return None, 0.0, msg

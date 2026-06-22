@@ -21,6 +21,9 @@ interface WalletStatus {
   unlocked: boolean
   balances: WalletBalances | null
   approvals_set: boolean
+  relayer_set: boolean
+  deposit_wallet_address: string | null
+  deposit_wallet_deployed: boolean
 }
 
 interface WalletContextValue {
@@ -28,10 +31,25 @@ interface WalletContextValue {
   loading: boolean
   error: string | null
   refresh: () => Promise<void>
-  generate: (password: string) => Promise<string>
-  importKey: (privateKey: string, password: string) => Promise<string>
+  generate: (
+    password: string,
+    relayerApiKey?: string,
+    relayerAddress?: string
+  ) => Promise<string>
+  importKey: (
+    privateKey: string,
+    password: string,
+    relayerApiKey?: string,
+    relayerAddress?: string
+  ) => Promise<string>
+  setRelayer: (
+    relayerApiKey: string,
+    relayerAddress: string,
+    password: string
+  ) => Promise<void>
   unlock: (password: string) => Promise<void>
   lock: () => Promise<void>
+  deployDepositWallet: () => Promise<void>
   approveContracts: () => Promise<void>
 }
 
@@ -68,11 +86,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const generate = useCallback(
-    async (password: string): Promise<string> => {
+    async (
+      password: string,
+      relayerApiKey?: string,
+      relayerAddress?: string
+    ): Promise<string> => {
       const res = await fetch(`${apiBase}/wallet/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          password,
+          relayer_api_key: relayerApiKey,
+          relayer_address: relayerAddress,
+        }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -86,11 +112,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   )
 
   const importKey = useCallback(
-    async (privateKey: string, password: string): Promise<string> => {
+    async (
+      privateKey: string,
+      password: string,
+      relayerApiKey?: string,
+      relayerAddress?: string
+    ): Promise<string> => {
       const res = await fetch(`${apiBase}/wallet/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ private_key: privateKey, password }),
+        body: JSON.stringify({
+          private_key: privateKey,
+          password,
+          relayer_api_key: relayerApiKey,
+          relayer_address: relayerAddress,
+        }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -99,6 +135,30 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const data = await res.json()
       await refresh()
       return data.address
+    },
+    [apiBase, refresh]
+  )
+
+  const setRelayer = useCallback(
+    async (
+      relayerApiKey: string,
+      relayerAddress: string,
+      password: string
+    ): Promise<void> => {
+      const res = await fetch(`${apiBase}/wallet/set-relayer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          relayer_api_key: relayerApiKey,
+          relayer_address: relayerAddress,
+          password,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Failed to set relayer credentials')
+      }
+      await refresh()
     },
     [apiBase, refresh]
   )
@@ -132,6 +192,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     )
   }, [apiBase])
 
+  const deployDepositWallet = useCallback(async (): Promise<void> => {
+    const res = await fetch(`${apiBase}/wallet/deploy-deposit-wallet`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.detail || 'Failed to deploy deposit wallet')
+    }
+    await refresh()
+  }, [apiBase, refresh])
+
   const approveContracts = useCallback(async (): Promise<void> => {
     const res = await fetch(`${apiBase}/wallet/approve-contracts`, {
       method: 'POST',
@@ -152,8 +223,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         refresh,
         generate,
         importKey,
+        setRelayer,
         unlock,
         lock,
+        deployDepositWallet,
         approveContracts,
       }}
     >

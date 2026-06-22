@@ -5,13 +5,10 @@ from typing import Optional
 
 import httpx
 from loguru import logger
-from web3 import Web3
-
 
 from core.http_retry import fetch_json_with_retry
 from core.positions.service import PositionService
 from core.positions.storage import PositionStorage
-from core.wallet.contracts import CONTRACTS, CTF_ABI
 from core.wallet.manager import WalletManager
 
 
@@ -74,15 +71,6 @@ class PositionManager:
         self.wallet = wallet
         self.storage = storage
         self.service = service
-        self._w3: Optional[Web3] = None
-
-    def _get_web3(self) -> Web3:
-        """Get or create Web3 instance."""
-        if self._w3 is None:
-            self._w3 = Web3(
-                Web3.HTTPProvider(self.wallet.rpc_url, request_kwargs={"timeout": 60})
-            )
-        return self._w3
 
     async def _get_market_info(self, market_id: str) -> dict:
         """Fetch market info from Polymarket API."""
@@ -96,60 +84,25 @@ class PositionManager:
         condition_id: str,
         amount: float,
     ) -> tuple[Optional[str], Optional[str]]:
-        """Merge YES+NO tokens back to pUSD. Returns (tx_hash, error).
+        """Merge YES+NO tokens back to pUSD via a gasless relayer batch.
 
-        Always routes through the standard CTF: the per-outcome conditionId
-        from Gamma is registered on CTF. Gamma's `negRisk` flag is a market
-        grouping hint, not an on-chain routing instruction.
+        Returns (tx_hash, error). The SDK resolves NegRisk routing internally.
         """
-        w3 = self._get_web3()
-        address = Web3.to_checksum_address(self.wallet.address)
-        account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
+        from core.trading.secure_client import get_secure_client
 
-        contract = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["CTF"]),
-            abi=CTF_ABI,
-        )
-        logger.info(f"Merge via CTF: {CONTRACTS['CTF'][:10]}...")
-
-        amount_wei = int(amount * 1e6)
-        condition_bytes = bytes.fromhex(
-            condition_id[2:] if condition_id.startswith("0x") else condition_id
-        )
+        client = get_secure_client(self.wallet)
+        if client is None:
+            return None, "Trading client init failed (unlock + relayer key required)"
 
         try:
-            base_gas_price = w3.eth.gas_price
-            gas_price = int(base_gas_price * 1.2)
-
-            # Estimate gas live — see executor._split_position for context.
-            merge_fn = contract.functions.mergePositions(
-                Web3.to_checksum_address(CONTRACTS["PUSD"]),
-                bytes(32),  # parentCollectionId
-                condition_bytes,
-                [1, 2],  # partition for YES, NO
-                amount_wei,
+            handle = client.merge_positions(
+                condition_id=condition_id,
+                amount=int(amount * 1e6),  # base units (6 decimals)
             )
-            gas_estimate = int(merge_fn.estimate_gas({"from": address}) * 1.25)
-
-            tx = merge_fn.build_transaction(
-                {
-                    "from": address,
-                    "nonce": w3.eth.get_transaction_count(address),
-                    "gas": gas_estimate,
-                    "gasPrice": gas_price,
-                    "chainId": 137,
-                }
-            )
-
-            signed = account.sign_transaction(tx)
-            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-            logger.info(f"Merge TX: {tx_hash.hex()} (gasPrice={gas_price})")
-
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
-            if receipt["status"] != 1:
-                return None, f"Merge transaction failed: {tx_hash.hex()}"
-
-            return tx_hash.hex(), None
+            outcome = handle.wait()
+            tx_hash = outcome.transaction_hash
+            logger.info(f"Merge via deposit wallet: {tx_hash}")
+            return tx_hash, None
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Merge error: {error_msg}")
@@ -214,10 +167,10 @@ class PositionManager:
                 error=f"Insufficient balance: {balance:.4f}",
             )
 
-        # Execute sell
-        from core.trading.clob_client import get_clob_client
+        # Execute sell via deposit-wallet (sigtype-3) client
+        from core.trading.secure_client import get_secure_client
 
-        client = get_clob_client(self.wallet)
+        client = get_secure_client(self.wallet)
         if not client:
             return SellResult(
                 success=False,
@@ -226,7 +179,7 @@ class PositionManager:
                 order_id=None,
                 filled=False,
                 recovered_value=0,
-                error="CLOB client initialization failed",
+                error="Trading client init failed (unlock + relayer key required)",
             )
 
         from core.trading.clob import sell_via_clob

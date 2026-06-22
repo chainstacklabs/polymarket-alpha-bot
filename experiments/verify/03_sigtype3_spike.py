@@ -51,8 +51,17 @@ def main() -> None:
     from polymarket.auth import BuilderApiKey, RelayerApiKey
     from polymarket.errors import UserInputError
 
-    acct = Account.create()
-    print(f"throwaway EOA: {acct.address}")
+    # A RelayerApiKey is bound to the wallet it was minted under — the signer
+    # MUST equal POLY_RELAYER_ADDRESS. Set SPIKE_SIGNER_KEY to that wallet's
+    # private key to sign as it; otherwise fall back to a fresh throwaway EOA
+    # (only valid with a BuilderApiKey, not a wallet-bound RelayerApiKey).
+    signer_key = os.environ.get("SPIKE_SIGNER_KEY")
+    if signer_key:
+        acct = Account.from_key(signer_key)
+        print(f"signer EOA (from SPIKE_SIGNER_KEY): {acct.address}")
+    else:
+        acct = Account.create()
+        print(f"throwaway EOA: {acct.address}")
 
     # optional relayer/builder creds from env
     api_key = None

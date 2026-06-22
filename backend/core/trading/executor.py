@@ -1,17 +1,22 @@
-"""Execute on-chain trades: split + CLOB sell."""
+"""Execute trades via the deposit-wallet (sigtype-3) SDK: split + CLOB sell.
+
+Split/merge run as gasless relayer batches and orders are POLY_1271-signed by
+the deposit wallet — all through the polymarket-client SecureClient. The EOA is
+only the signing key; pUSD + CTF tokens live in the deposit wallet.
+"""
 
 import json
-import time
 from dataclasses import dataclass
 from typing import Optional
 
 import httpx
-from web3 import Web3
 from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
-from core.wallet.contracts import CONTRACTS, CTF_ABI
 from core.wallet.manager import WalletManager
+
+# Polymarket enforces a $1 minimum CLOB order size.
+MIN_ORDER_USD = 1.0
 
 
 @dataclass
@@ -42,9 +47,7 @@ class TradeResult:
     question: str = ""
     wanted_token_id: str = ""
     unwanted_token_id: str = ""
-    ctf_token_ids: Optional[list[str]] = (
-        None  # Actual on-chain CTF token IDs from split
-    )
+    ctf_token_ids: Optional[list[str]] = None
     entry_price: float = 0.0
 
 
@@ -59,14 +62,10 @@ class BuyPairResult:
 
 
 class TradingExecutor:
-    """Executes on-chain trades via split + CLOB sell."""
+    """Executes trades via deposit-wallet split + sigtype-3 CLOB sell."""
 
     def __init__(self, wallet_manager: WalletManager):
         self.wallet = wallet_manager
-        self.rpc_url = wallet_manager.rpc_url
-
-    def _get_web3(self) -> Web3:
-        return Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={"timeout": 60}))
 
     async def get_market_info(self, market_id: str) -> MarketInfo:
         """Fetch market info from Polymarket API."""
@@ -91,95 +90,20 @@ class TradingExecutor:
             fee_schedule=data.get("feeSchedule"),
         )
 
-    @staticmethod
-    def parse_ctf_token_ids_from_receipt(receipt: dict, ctf_address: str) -> list[str]:
-        """Extract minted CTF token IDs from a split TX receipt's TransferBatch event."""
-        try:
-            from eth_abi import decode as abi_decode
+    def _split_position(self, client, condition_id: str, amount_usd: float) -> str:
+        """Split pUSD into YES + NO tokens via a gasless relayer batch.
 
-            ctf_lower = ctf_address.lower()
-            # TransferBatch topic: keccak256("TransferBatch(address,address,address,uint256[],uint256[])")
-            batch_topic = (
-                "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb"
-            )
-
-            for log in receipt.get("logs", []):
-                if (
-                    log["address"].lower() == ctf_lower
-                    and log["topics"][0].hex() == batch_topic[2:]
-                ):
-                    ids, _ = abi_decode(["uint256[]", "uint256[]"], log["data"])
-                    return [str(tid) for tid in ids]
-        except Exception as e:
-            logger.warning(f"Failed to parse CTF token IDs from receipt: {e}")
-        return []
-
-    def _split_position(
-        self,
-        condition_id: str,
-        amount_usd: float,
-    ) -> tuple[str, list[str]]:
-        """Split pUSD into YES + NO tokens. Returns (tx_hash, [ctf_token_ids]).
-
-        Always routes through the standard CTF: the per-outcome conditionId
-        from Gamma is registered on CTF (verified via getOutcomeSlotCount).
-        Gamma's `negRisk` flag is a market grouping hint, not an on-chain
-        routing instruction.
+        `client` is a SecureClient acting for the deposit wallet. Returns the
+        on-chain tx hash. The SDK resolves NegRisk routing internally.
         """
-        w3 = self._get_web3()
-        address = Web3.to_checksum_address(self.wallet.address)
-        account = w3.eth.account.from_key(self.wallet.get_unlocked_key())
-
-        ctf = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["CTF"]),
-            abi=CTF_ABI,
+        handle = client.split_position(
+            condition_id=condition_id,
+            amount=int(amount_usd * 1e6),  # pUSD base units (6 decimals)
         )
-        logger.info(f"Split via CTF: {CONTRACTS['CTF'][:10]}...")
-
-        amount_wei = int(amount_usd * 1e6)
-        condition_bytes = bytes.fromhex(
-            condition_id[2:] if condition_id.startswith("0x") else condition_id
-        )
-
-        # Use 20% gas price bump to avoid TX being dropped during congestion
-        base_gas_price = w3.eth.gas_price
-        gas_price = int(base_gas_price * 1.2)
-
-        # Estimate gas live — Chainstack rejects "gas too high" with the old
-        # hardcoded 300000 (a split needs ~135k, merge ~90k). Estimate + 25%
-        # headroom keeps the cap close to actual usage but tolerates state
-        # changes between estimate and submit.
-        split_fn = ctf.functions.splitPosition(
-            Web3.to_checksum_address(CONTRACTS["PUSD"]),
-            bytes(32),  # parentCollectionId
-            condition_bytes,
-            [1, 2],  # partition for YES, NO
-            amount_wei,
-        )
-        gas_estimate = int(split_fn.estimate_gas({"from": address}) * 1.25)
-
-        tx = split_fn.build_transaction(
-            {
-                "from": address,
-                "nonce": w3.eth.get_transaction_count(address),
-                "gas": gas_estimate,
-                "gasPrice": gas_price,
-                "chainId": 137,
-            }
-        )
-
-        signed = account.sign_transaction(tx)
-        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        logger.info(f"Split TX: {tx_hash.hex()} (gasPrice={gas_price})")
-
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
-        if receipt["status"] != 1:
-            raise ValueError(f"Split reverted on-chain: {tx_hash.hex()}")
-
-        ctf_token_ids = self.parse_ctf_token_ids_from_receipt(receipt, CONTRACTS["CTF"])
-        logger.info(f"Split minted CTF tokens: {ctf_token_ids}")
-
-        return tx_hash.hex(), ctf_token_ids
+        outcome = handle.wait()
+        tx_hash = outcome.transaction_hash
+        logger.info(f"Split via deposit wallet: {tx_hash}")
+        return tx_hash
 
     async def buy_single_position(
         self,
@@ -188,8 +112,9 @@ class TradingExecutor:
         amount: float,
         skip_clob_sell: bool = False,
         slippage: float = 10,
+        client=None,
     ) -> TradeResult:
-        """Buy a single position on a market."""
+        """Buy a single position: split, then sell the unwanted side via CLOB."""
         position = position.upper()
         if position not in ["YES", "NO"]:
             return TradeResult(
@@ -203,18 +128,32 @@ class TradingExecutor:
                 error="Position must be YES or NO",
             )
 
-        # Get market info
+        if client is None:
+            from core.trading.secure_client import get_secure_client
+
+            client = get_secure_client(self.wallet)
+            if client is None:
+                return TradeResult(
+                    success=False,
+                    market_id=market_id,
+                    position=position,
+                    amount=amount,
+                    split_tx=None,
+                    clob_order_id=None,
+                    clob_filled=False,
+                    error="Trading client init failed (unlock + relayer key required)",
+                )
+
         market = await self.get_market_info(market_id)
 
-        # Determine unwanted side
         unwanted_token = (
             market.no_token_id if position == "YES" else market.yes_token_id
         )
         unwanted_price = market.no_price if position == "YES" else market.yes_price
 
-        # Split position
+        # Split position (gasless relayer batch)
         try:
-            split_tx, ctf_token_ids = self._split_position(market.condition_id, amount)
+            split_tx = self._split_position(client, market.condition_id, amount)
         except Exception as e:
             return TradeResult(
                 success=False,
@@ -227,32 +166,26 @@ class TradingExecutor:
                 error=f"Split failed: {e}",
             )
 
-        time.sleep(2)  # Wait for chain confirmation
-
-        # Sell unwanted side
+        # Sell unwanted side via sigtype-3 CLOB
         clob_order_id = None
         clob_filled = False
         clob_error = None
 
         if not skip_clob_sell and unwanted_token:
-            from core.trading.clob_client import get_clob_client
-
-            client = get_clob_client(self.wallet)
-            if client:
+            if amount * unwanted_price < MIN_ORDER_USD:
+                clob_error = (
+                    f"Unwanted side value ${amount * unwanted_price:.2f} below "
+                    f"${MIN_ORDER_USD} CLOB minimum — skipping sell"
+                )
+                logger.warning(clob_error)
+            else:
                 from core.trading.clob import sell_via_clob
 
                 clob_order_id, clob_filled_size, clob_error = sell_via_clob(
-                    client,
-                    unwanted_token,
-                    amount,
-                    unwanted_price,
-                    slippage=slippage,
+                    client, unwanted_token, amount, unwanted_price, slippage=slippage
                 )
                 clob_filled = clob_filled_size > 0
-            else:
-                clob_error = "CLOB client initialization failed"
 
-        # Determine wanted/unwanted token info for position recording
         wanted_token_id = (
             market.yes_token_id if position == "YES" else (market.no_token_id or "")
         )
@@ -269,11 +202,11 @@ class TradingExecutor:
             split_tx=split_tx,
             clob_order_id=clob_order_id,
             clob_filled=clob_filled,
-            error=clob_error,  # CLOB error if sell failed
+            error=clob_error,
             question=market.question,
             wanted_token_id=wanted_token_id,
             unwanted_token_id=unwanted_token_id,
-            ctf_token_ids=ctf_token_ids,
+            ctf_token_ids=[t for t in (market.yes_token_id, market.no_token_id) if t],
             entry_price=entry_price,
         )
 
@@ -289,13 +222,11 @@ class TradingExecutor:
         slippage: float = 10,
     ) -> BuyPairResult:
         """Buy both positions in a portfolio pair."""
-
-        # Check wallet status
         if not self.wallet.is_unlocked:
             raise ValueError("Wallet not unlocked")
 
-        # Fetch market info (includes fee schedule when feesEnabled=True)
         from core.fees import compute_fee
+        from core.trading.secure_client import get_secure_client
 
         target_info = await self.get_market_info(target_market_id)
         cover_info = await self.get_market_info(cover_market_id)
@@ -319,15 +250,21 @@ class TradingExecutor:
 
         balances = self.wallet.get_balances()
         required = amount_per_position * 2 + entry_fees
-
         if balances.pusd < required:
             raise ValueError(
-                f"Insufficient pUSD: need {required:.2f} "
-                f"(includes ${entry_fees:.2f} taker fees), "
-                f"have {balances.pusd:.2f}"
+                f"Insufficient deposit-wallet pUSD: need {required:.2f} "
+                f"(includes ${entry_fees:.2f} taker fees), have {balances.pusd:.2f}"
             )
 
-        # Buy target position
+        # One client for the whole pair. SecureClient.create() auto-deploys the
+        # deposit wallet; split/sell recover allowances on demand, so no
+        # explicit approvals step is needed here.
+        client = get_secure_client(self.wallet)
+        if client is None:
+            raise ValueError(
+                "Trading client init failed (unlock + relayer key required)"
+            )
+
         logger.info(f"Buying target: {target_position} on {target_market_id}")
         target_result = await self.buy_single_position(
             target_market_id,
@@ -335,9 +272,9 @@ class TradingExecutor:
             amount_per_position,
             skip_clob_sell,
             slippage=slippage,
+            client=client,
         )
 
-        # Buy cover position
         logger.info(f"Buying cover: {cover_position} on {cover_market_id}")
         cover_result = await self.buy_single_position(
             cover_market_id,
@@ -345,9 +282,9 @@ class TradingExecutor:
             amount_per_position,
             skip_clob_sell,
             slippage=slippage,
+            client=client,
         )
 
-        # Get final balances
         final_balances = self.wallet.get_balances()
 
         return BuyPairResult(
@@ -356,8 +293,5 @@ class TradingExecutor:
             target=target_result,
             cover=cover_result,
             total_spent=amount_per_position * 2,
-            final_balances={
-                "pol": final_balances.pol,
-                "pusd": final_balances.pusd,
-            },
+            final_balances={"pol": final_balances.pol, "pusd": final_balances.pusd},
         )
