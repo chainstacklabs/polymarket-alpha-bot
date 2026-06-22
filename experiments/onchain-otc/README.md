@@ -3,8 +3,12 @@
 > Explore every on-chain path for trading Polymarket positions **without CLOB**,
 > find edge cases, and prototype an atomic OTC swap.
 
-> ✅ **Re-validated on a V2 Polygon fork 2026-06-22.** All 7 scenarios pass
-> against the post-cutover state. The key finding: **the on-chain CTF/OTC layer
+> ✅ **Re-validated on a V2 Polygon fork 2026-06-22.** All 7 scenario scripts
+> run end-to-end against the post-cutover state. One sub-case is order-dependent
+> rather than a clean pass: in Scenario 6, `convertPositions` after a *single*
+> split reverts when the Gamma API market order doesn't match the on-chain
+> question order (the script catches this and reports it — split all questions
+> to be safe; see Scenario 4/6). The key finding: **the on-chain CTF/OTC layer
 > did not change at the V2 cutover** — conditional tokens are still
 > USDC.e-collateralised (verified: `CTFExchange.getCtfCollateral() == USDC.e`,
 > and 177/177 live non-NegRisk markets derive against USDC.e). So scenarios
@@ -44,7 +48,7 @@ The bottleneck is not smart contracts — it's **finding OTC counterparties**. A
 | [Scenario 1 — Baseline](#scenario-1--baseline-confirm-fork-works) | Validate Anvil fork, split/merge round-trip on a real market |
 | [Scenario 2 — Direct transfers](#scenario-2--direct-transfers-otc-primitives) | P2P token transfers, batch transfers, edge cases, gas costs |
 | [Scenario 3 — Atomic OTC escrow](#scenario-3--atomic-otc-escrow) | Custom Solidity escrow contract for trustless ERC-1155 ↔ ERC-20 swaps |
-| [Scenario 4 — NegRisk conversions](#scenario-4--negrisk-conversions) | Multi-outcome `convertPositions`, initial exploration (corrected in Scenario 6) |
+| [Scenario 4 — NegRisk conversions](#scenario-4--negrisk-conversions) | Multi-outcome `convertPositions`, initial exploration (indexSet/ordering nuance in Scenario 6) |
 | [Scenario 5 — Operator deep-dive](#scenario-5--operator-deep-dive) | V2 EIP-712 order signing + `matchOrders` via impersonated operator |
 | [Scenario 6 — NegRisk trading](#scenario-6--negrisk-trading-scenarios-can-you-avoid-clob-entirely) | 6 comprehensive scenarios proving NegRisk trades work without CLOB |
 | [Scenario 7 — Intent-based trading](#scenario-7--intent-based-trading-for-ctf-tokens) | ERC-20 wrappers + EIP-712 intents = permissionless atomic settlement |
@@ -280,7 +284,7 @@ This is permissionless — anyone can convert without touching the CLOB. It's es
 ### Findings
 
 - **Used Fed Decision market** (4 outcomes) for testing. Smaller markets are more practical for conversion.
-- **~~Must split ALL questions before converting~~ CORRECTED (Scenario 6).** You only need NO tokens for the question(s) whose bits are SET in the indexSet. Scenario 6 testing confirmed: splitting only question 0 then calling `convertPositions(indexSet=1)` succeeds — the adapter only burns NO[0] and mints YES[1,2,3] without touching other questions' NO tokens.
+- **Split ALL questions before converting (safest).** The adapter only burns NO tokens for the on-chain questions whose bits are SET in the indexSet — so in principle you only need NO for those. **But the `indexSet` bit positions index the *on-chain* question order, which does NOT match the Gamma API's `markets[]` array order** (re-verified 2026-06-22: on a 3-outcome market, `indexSet=1` burned the NO of `markets[2]`, not `markets[0]`). So "just split the first API market" is unreliable — `convertPositions` reverts when you don't hold the NO for the question the bit actually maps to. Splitting all questions guarantees you hold every NO the adapter might burn. See the Scenario 6 note below for the corrected analysis.
 - **Single-question indexSet (e.g., `indexSet=1`):** Burns NO[0] and mints YES[1,2,3]. Collateral = $0 (only one bit set).
 - **Multi-question indexSet (e.g., `indexSet=3`, binary 0011):** Burns NO[0]+NO[1], mints YES[2]+YES[3]. Collateral returned = `amount × (bits_set - 1)`. Confirmed in Scenario 6: indexSet=3 on a 4-outcome market returned $100 collateral for $100 amount.
 - **Merge after conversion:** Works for questions NOT involved in the convert (still have matched YES+NO). Fails for the converted question (NO was burned, balance = 0).
@@ -486,7 +490,7 @@ We test every trading scenario — getting pure YES exposure, pure NO exposure, 
 ### Checklist
 
 - [x] Scenario 1: Split one question → YES+NO pair
-- [x] Scenario 2: Convert without splitting all questions (corrects Scenario 4)
+- [x] Scenario 2: Convert after splitting only the first API market (reverts when API order ≠ on-chain order)
 - [x] Scenario 3: Split all + convert + merge → prove break-even
 - [x] Scenario 4: Pure YES via split + convert + OTC sell waste
 - [x] Scenario 5: Pure NO via split + OTC sell YES
@@ -497,7 +501,7 @@ We test every trading scenario — getting pure YES exposure, pure NO exposure, 
 | Scenario | Operations | Total Gas | Status |
 |----------|-----------|-----------|--------|
 | Split one question | 1 split | ~220k | PASS |
-| Convert without splitting all | 1 split + 1 convert | ~692k | PASS (corrects Scenario 4) |
+| Convert after 1 split (API market 0) | 1 split + 1 convert | ~692k | DEPENDS — reverts when API order ≠ on-chain order |
 | Break-even proof | 4 splits + convert + 3 merges | ~2.5M | PASS — confirmed break-even |
 | Pure YES[0] | 1 split + 1 convert + 3 transfers | ~848k | PASS |
 | Pure NO[0] | 1 split + 1 transfer | ~271k | PASS |
@@ -555,17 +559,36 @@ Convert doesn't help with directional exposure, but it IS useful for:
 2. **Cross-outcome arbitrage.** If `sum(YES prices) ≠ 1.0` across outcomes, split + convert + sell can capture the deviation.
 3. **Portfolio rebalancing.** Convert NO on one outcome to YES on others without going through USDC.
 
-### Correction to Scenario 4
+### indexSet bits index the on-chain question order, not the API order
 
-Scenario 4 stated: "Must split ALL questions before converting." **This is wrong.**
+The adapter only burns NO tokens for the on-chain questions whose bits are SET
+in the indexSet — so *in principle* you only need NO for those questions, not
+all of them. An earlier write-up concluded from this that "splitting only
+question 0 then calling `convertPositions(indexSet=1)` works, so Scenario 4 was
+wrong." **That conclusion is unreliable.**
 
-Scenario 6 proved: you only need NO tokens for the question(s) in the indexSet. With `indexSet=1`, only NO[0] is burned — the adapter doesn't touch NO[1,2,3]. Splitting only question 0 before calling `convertPositions(indexSet=1)` works.
+Re-validation (2026-06-22, 3-outcome market) showed:
 
-The Scenario 4 failure was likely caused by the large market (40 on-chain questions vs 27 API-visible), where the adapter's internal operations hit edge cases with hidden questions.
+- **Split all questions, then `convertPositions(indexSet=1)`** → SUCCESS. The
+  burn landed on `NO[markets[2]]` (Argentina) and minted `YES[markets[0]]` +
+  `YES[markets[1]]`. So `indexSet=1` (on-chain question 0) maps to `markets[2]`,
+  **not** `markets[0]`.
+- **Split only `markets[0]`, then `convertPositions(indexSet=1)`** → REVERTS,
+  because Alice holds NO for `markets[0]` but the adapter needs NO for the
+  on-chain question-0 it actually burns (`markets[2]`).
+
+So the takeaway is the opposite of a clean "you don't need to split all":
+the `indexSet` bit positions follow the **on-chain question order**, which the
+Gamma API's `markets[]` array does **not** preserve. Unless you map the on-chain
+ordering yourself, the reliable approach is the original Scenario 4 guidance —
+**split all questions** so you hold every NO the adapter might burn. The
+"single split" shortcut only happens to work when the market you split lines up
+with the indexSet bit.
 
 ### Gotchas
 
 - **`evm_snapshot`/`evm_revert`** is essential for testing multiple scenarios on the same fork without interference. Each scenario starts from a clean state.
+- **`indexSet` bits follow the on-chain question order, not the Gamma API `markets[]` order.** `indexSet=1` targets on-chain question 0, which may be any entry in the API array (it was `markets[2]` on the 3-outcome market tested). If you split only one API market and it isn't the one the bit maps to, `convertPositions` reverts. Split all questions, or map the ordering, before converting.
 - **Convert is always NO→YES.** There is no `unconvertPositions` or reverse direction. To go YES→NO, split + sell.
 - **The "simple path" (split + OTC) is almost always cheaper** than the convert path. Convert adds ~473k gas for the rearrangement step. Only worth it when the rearranged tokens are significantly more liquid.
 
@@ -884,6 +907,7 @@ Intents don't eliminate the counterparty — they replace a **single trusted ope
 | NegRisk via direct CTF split | Minted token IDs ≠ CLOB token IDs | Filter `negRisk=false` for binary scripts; use NegRiskAdapter for NegRisk |
 | USDC.e approval scope | Exchange transfers fail | Approve USDC for each contract separately |
 | NegRisk question count mismatch | Conversion OOG or overflow | Check `getQuestionCount()` on-chain, not API |
+| `indexSet` bits ≠ API market order | `convertPositions` reverts on a single-split shortcut | Bits index on-chain questions; split all (or map ordering) |
 | Convert = break-even trap | NO→YES gives all-outcome exposure = $1 | Must OTC sell waste for directional exposure |
 | Convert is one-way | NO→YES only, no reverse | For YES→NO: split + sell YES side |
 | First wrap is expensive (650k gas) | OOG inside `onERC1155Received` callback | Use 1M gas limit; subsequent wraps are ~57k |
@@ -912,8 +936,10 @@ experiments/onchain-otc/
 ├── anvil.sh              # Start forked chain
 ├── setup_accounts.py     # Fund actors, set approvals
 ├── contracts/
-│   ├── OTCEscrow.sol     # Minimal ERC-1155 <> ERC-20 swap
-│   └── foundry.toml      # Forge compilation config
+│   ├── OTCEscrow.sol         # Scenario 3: minimal ERC-1155 <> ERC-20 swap
+│   ├── Wrapped1155.sol       # Scenario 7: ERC-1155 -> ERC-20 wrapper factory (Gnosis pattern)
+│   ├── IntentSettlement.sol  # Scenario 7: permissionless EIP-712 intent settlement
+│   └── foundry.toml          # Forge compilation config
 ├── 01_baseline.py        # Scenario 1: fork, split, verify balances
 ├── 02_transfers.py       # Scenario 2: direct token transfers, edge cases
 ├── 03_escrow.py          # Scenario 3: deploy & test atomic escrow

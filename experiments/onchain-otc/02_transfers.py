@@ -196,34 +196,56 @@ def main():
     receipt = w3.eth.wait_for_transaction_receipt(tx)
     log.info("  Transfer 0: OK (gas: %d)", receipt["gasUsed"])
 
+    # NOTE: these edge-case transfers pass an explicit `gas`, so web3.py does NOT
+    # simulate first and a revert raises NO Python exception — it returns a
+    # receipt with status=0. We must check receipt["status"] (see README gotcha
+    # "web3.py silent reverts"). Checking only for exceptions reports false
+    # successes.
     log.info("\n=== Edge Case 3: Transfer more than balance ===")
     alice_yes_bal = ctf.functions.balanceOf(alice, yes_id).call()
     try:
-        ctf.functions.safeTransferFrom(
+        tx = ctf.functions.safeTransferFrom(
             alice, bob, yes_id, alice_yes_bal + 1, b"",
         ).transact({"from": alice, "gas": 200_000})
-        log.info("  Transfer > balance: UNEXPECTEDLY SUCCEEDED")
+        status = w3.eth.wait_for_transaction_receipt(tx)["status"]
+        if status == 0:
+            log.info("  Transfer > balance: Reverted as expected (status=0)")
+        else:
+            log.info("  Transfer > balance: UNEXPECTEDLY SUCCEEDED")
     except (ContractLogicError, Web3RPCError) as e:
         log.info("  Transfer > balance: Reverted as expected (%s)", type(e).__name__)
 
     log.info("\n=== Edge Case 4: Transfer to contract address (CTF itself) ===")
+    # CTF does not implement onERC1155Received, so the ERC-1155 safety check
+    # rejects this — expect a revert.
     try:
-        ctf.functions.safeTransferFrom(
+        tx = ctf.functions.safeTransferFrom(
             alice, Web3.to_checksum_address(CTF), yes_id, 1 * 10**6, b"",
         ).transact({"from": alice, "gas": 200_000})
-        log.info("  Transfer to CTF contract: OK")
+        status = w3.eth.wait_for_transaction_receipt(tx)["status"]
+        if status == 0:
+            log.info("  Transfer to CTF contract: Reverted as expected (no onERC1155Received)")
+        else:
+            log.info("  Transfer to CTF contract: UNEXPECTEDLY SUCCEEDED")
     except (ContractLogicError, Web3RPCError) as e:
         log.info("  Transfer to CTF contract: Reverted (%s)", type(e).__name__)
 
     log.info("\n=== Edge Case 5: Bob transfers Alice's tokens without approval ===")
-    # Bob tries to move Alice's NO tokens (Bob is not approved)
+    # Make the test deterministic across reruns: explicitly revoke any approval
+    # left over from Edge Case 6 of a previous run on the persistent fork.
+    tx = ctf.functions.setApprovalForAll(bob, False).transact({"from": alice})
+    w3.eth.wait_for_transaction_receipt(tx)
     is_approved = ctf.functions.isApprovedForAll(alice, bob).call()
     log.info("  Bob approved for Alice's tokens: %s", is_approved)
     try:
-        ctf.functions.safeTransferFrom(
+        tx = ctf.functions.safeTransferFrom(
             alice, bob, no_id, 1 * 10**6, b"",
         ).transact({"from": bob, "gas": 200_000})
-        log.info("  Unauthorized transfer: UNEXPECTEDLY SUCCEEDED")
+        status = w3.eth.wait_for_transaction_receipt(tx)["status"]
+        if status == 0:
+            log.info("  Unauthorized transfer: Reverted as expected (status=0)")
+        else:
+            log.info("  Unauthorized transfer: UNEXPECTEDLY SUCCEEDED")
     except (ContractLogicError, Web3RPCError) as e:
         log.info("  Unauthorized transfer: Reverted as expected (%s)", type(e).__name__)
 
