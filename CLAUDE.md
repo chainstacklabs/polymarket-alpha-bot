@@ -2,7 +2,7 @@
 
 > Polymarket alpha detection platform. LLM pipeline groups related markets, extracts logical implications, and builds covering portfolios (hedged positions via contrapositive logic). Next.js dashboard with real-time price tracking and position management.
 
-Trades against Polymarket V2 (pUSD collateral, `py-clob-client-v2`, EIP-712 domain version "2"). Legacy V1 was retired on 2026-04-28; for archaeology see the `v1-final` git tag.
+Trades against Polymarket V2 (pUSD collateral, official `polymarket-client` SDK, EIP-712 domain version "2") via per-user deposit wallets (signature type 3): each user supplies an EOA key + a Relayer API key, the deposit wallet is deployed gaslessly, and the relayer pays gas. Legacy V1 was retired on 2026-04-28; for archaeology see the `v1-final` git tag.
 
 ## Commands
 
@@ -66,11 +66,13 @@ data/               # Pipeline outputs (gitignored)
 | `POST /positions/{id}/exit` | Orchestrated sell + merge fallback |
 | `POST /trading/buy-pair` | Execute covered pair trade |
 | `POST /trading/buy-pair/estimate` | Estimate trade cost |
-| `GET /wallet/status` | Wallet state (POL + pUSD balances, approvals) |
-| `POST /wallet/generate` | Generate new wallet (encrypted with passphrase) |
-| `POST /wallet/import` | Import private key (encrypted with passphrase) |
+| `GET /wallet/status` | Wallet + deposit-wallet state (pUSD/POL balances, approvals, relayer-set, deposit-wallet deployed) |
+| `POST /wallet/generate` | Generate new wallet, optionally with relayer creds (encrypted with passphrase) |
+| `POST /wallet/import` | Import private key, optionally with relayer creds (encrypted with passphrase) |
+| `POST /wallet/set-relayer` | Attach/replace the relayer API key + address on an existing wallet |
 | `POST /wallet/unlock` / `lock` | Decrypt key into memory / clear |
-| `POST /wallet/approve-contracts` | Set all Polymarket V2 approvals |
+| `POST /wallet/deploy-deposit-wallet` | Deploy the per-user sigtype-3 deposit wallet + approvals (gasless) |
+| `POST /wallet/approve-contracts` | Set trading approvals on the deposit wallet |
 | `GET /health` | Health check |
 
 > Debug: `GET /prices/current`, `WS /prices/ws`

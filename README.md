@@ -21,6 +21,8 @@ Find covering portfolios across correlated prediction markets using predefined r
 
 For a good experience, you'll need to add an LLM from OpenRouter and an RPC node (see `.env.example`).
 
+**Trading** runs through per-user deposit wallets (signature type 3). You supply an EOA signing key plus a Relayer API key (minted at `polymarket.com/settings?tab=api-keys`); the app deploys a deposit wallet gaslessly and the relayer pays gas — fund the deposit wallet with pUSD, no POL needed. Bare EOAs can't trade directly (they're blocked by the V2 CLOB allowlist).
+
 
 
 ![Dashboard Screenshot](assets/dashboard-screenshot.png)
@@ -105,13 +107,14 @@ To use the skills in this repo with a different agent, point it at `.claude/skil
 
 ## Experiments
 
-Standalone research scripts (no imports from `backend/`). Three groups:
+Standalone research scripts (no imports from `backend/`). Four groups:
 
 | Folder | Description |
 |--------|-------------|
 | [`experiments/`](experiments/) | Pipeline-step learning examples — fetch events, build groups, extract implications, validate, score portfolios, stream prices. Mirrors what `backend/core/runner.py` orchestrates, one stage per file. |
-| [`experiments/trading/`](experiments/trading/) | Wallet + funding + position helpers. Generate a wallet, swap native USDC → USDC.e (one-time DEX hop), wrap USDC.e ↔ pUSD via Polymarket's CollateralOnramp/Offramp (1:1, gas-only, no slippage), buy a position, transfer tokens. |
+| [`experiments/trading/`](experiments/trading/) | Wallet + funding + position helpers. Set up a per-user deposit wallet (sigtype-3, deployed gaslessly via a Relayer API key), wrap USDC.e ↔ pUSD via Polymarket's CollateralOnramp/Offramp (1:1, gas-only, no slippage), buy a position, transfer tokens. |
 | [`experiments/onchain-otc/`](experiments/onchain-otc/) | On-chain OTC trading without the CLOB — split/merge, P2P transfers, atomic escrow, NegRisk conversions, and intent-based settlement on an Anvil fork of Polygon. Forked-chain research; uses USDC.e collateral (the fork's frozen state predates Polymarket V2 / pUSD). |
+| [`experiments/verify/`](experiments/verify/) | Verification probes for the deposit-wallet path. `03_sigtype3_spike.py` walks the official `polymarket-client` SDK from L1 auth → deposit-wallet derivation → relayer deploy → a non-filling order, confirming the sigtype-3 allowlist gate is cleared. Reach for it when onboarding breaks. |
 
 ---
 
