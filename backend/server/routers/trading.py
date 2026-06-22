@@ -108,7 +108,7 @@ async def buy_pair(req: BuyPairRequest):
             is_geoblock = any("restricted" in (w or "").lower() for w in warnings)
             if is_geoblock:
                 warnings.append(
-                    "CLOB sells blocked by region restriction. Enable a proxy, then go to Positions to sell unwanted tokens."
+                    "CLOB sells blocked by region restriction. The backend must run from a supported region; then go to Positions to sell unwanted tokens."
                 )
             elif not any("split failed" in w.lower() for w in warnings):
                 warnings.append(

@@ -19,8 +19,8 @@ polymarket.com/settings?tab=api-keys). If they ARE set, it deploys the
 deposit wallet and then places + cancels one non-filling order to confirm
 the allowlist gate is cleared for sigtype 3.
 
-USAGE (route through an allowed-region proxy; PL dev box is geoblocked):
-    HTTPS_PROXY=http://IP:PORT HTTP_PROXY=http://IP:PORT \
+USAGE:
+    POLY_RELAYER_API_KEY=.. POLY_RELAYER_ADDRESS=0x.. SPIKE_SIGNER_KEY=0x.. \
       uv run --no-project --with polymarket-client --prerelease allow \
       python experiments/verify/03_sigtype3_spike.py
 """
@@ -36,16 +36,13 @@ def hr(title: str) -> None:
 
 
 def main() -> None:
-    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-    print(f"proxy: {proxy or '(none — will hit PL geoblock on relayer calls)'}")
-
-    # geoblock litmus through whatever transport env is set
+    # Region eligibility litmus (Polymarket restricts some regions).
     try:
-        with httpx.Client(proxy=proxy, timeout=12.0) as c:
+        with httpx.Client(timeout=12.0) as c:
             geo = c.get("https://polymarket.com/api/geoblock").json()
-        print(f"geoblock litmus: {geo}")
+        print(f"region litmus: {geo}")
     except Exception as e:  # noqa: BLE001
-        print(f"geoblock litmus failed: {type(e).__name__}: {e}")
+        print(f"region litmus failed: {type(e).__name__}: {e}")
 
     from polymarket import SecureClient
     from polymarket.auth import BuilderApiKey, RelayerApiKey

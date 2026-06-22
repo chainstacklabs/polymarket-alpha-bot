@@ -12,7 +12,7 @@ polymarket.com/settings?tab=api-keys (decision B). Approvals are best-effort:
 the relayer may reject some operators, and split/merge/orders recover
 allowances on demand.
 
-USAGE (route through an allowed-region proxy/VPN — many regions are geoblocked):
+USAGE:
     POLY_PK=0x.. POLY_RELAYER_API_KEY=.. POLY_RELAYER_ADDRESS=0x.. \
       uv run --no-project --with polymarket-client --with eth-account \
       --prerelease allow python experiments/trading/01_setup_wallet.py
