@@ -252,11 +252,13 @@ def main():
                 if dy != 0 or dn != 0:
                     log.info("  [%d] %-20s  YES %+d  NO %+d", i, m["title"][:20], dy, dn)
 
-            log.info("\n  FINDING: Convert works with ONLY the indexSet question split!")
-            log.info("  You do NOT need to split all questions first.")
+            log.info("\n  FINDING: Convert succeeded with one split — but only because")
+            log.info("  this market's API order happened to map markets[0] to the")
+            log.info("  on-chain question that indexSet=1 burns. Not guaranteed.")
         else:
             log.info("Convert REVERTED (status=0)")
-            log.info("  FINDING: Must split all questions first for this market.")
+            log.info("  FINDING: indexSet=1 maps to an on-chain question whose NO we")
+            log.info("  did NOT split (API order != on-chain order). Split all to be safe.")
     except (ContractLogicError, Web3RPCError) as e:
         log.info("Convert FAILED: %s", str(e)[:80])
 
@@ -500,8 +502,10 @@ N = %d outcomes in this market
     log.info("KEY FINDINGS:")
     log.info("  1. Split gives YES+NO — always $1 per pair, regardless of market price")
     log.info("  2. Convert burns NO[indexSet] → mints YES on OTHER outcomes (never same outcome)")
-    log.info("  3. Convert does NOT require splitting all questions (corrects Phase 4 finding)")
-    log.info("     Only need NO tokens for the question(s) in the indexSet")
+    log.info("  3. Convert burns NO only for the indexSet questions — BUT indexSet bits")
+    log.info("     index the ON-CHAIN question order, which != Gamma API markets[] order.")
+    log.info("     A single-split shortcut reverts unless that split lines up with the")
+    log.info("     bit. Split all questions (or map the ordering) to be safe.")
     log.info("  4. Split + convert = YES on ALL outcomes = $1 = break even (zero directional exposure)")
     log.info("  5. For directional exposure, you MUST sell the unwanted side (OTC or CLOB)")
     log.info("  6. Convert is useful for rearranging waste into more liquid/sellable tokens")
