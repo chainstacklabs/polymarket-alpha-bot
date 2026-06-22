@@ -1,4 +1,4 @@
-"""Wallet management API endpoints."""
+"""Wallet management API endpoints (deposit-wallet / sigtype-3 flow)."""
 
 import os
 from pathlib import Path
@@ -6,7 +6,6 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from web3.exceptions import Web3RPCError
 
 from core.wallet.storage import WalletStorage
 from core.wallet.manager import WalletManager
@@ -43,9 +42,23 @@ class PasswordRequest(BaseModel):
     password: str
 
 
+class GenerateRequest(BaseModel):
+    password: str
+    relayer_api_key: Optional[str] = None
+    relayer_address: Optional[str] = None
+
+
 class ImportRequest(BaseModel):
     private_key: str
     password: str
+    relayer_api_key: Optional[str] = None
+    relayer_address: Optional[str] = None
+
+
+class SetRelayerRequest(BaseModel):
+    password: str
+    relayer_api_key: str
+    relayer_address: str
 
 
 class WalletStatusResponse(BaseModel):
@@ -54,6 +67,9 @@ class WalletStatusResponse(BaseModel):
     unlocked: bool
     balances: Optional[dict]
     approvals_set: bool
+    relayer_set: bool
+    deposit_wallet_address: Optional[str]
+    deposit_wallet_deployed: bool
 
 
 class GenerateResponse(BaseModel):
@@ -66,9 +82,10 @@ class UnlockResponse(BaseModel):
     address: str
 
 
-class ApprovalResponse(BaseModel):
+class DepositWalletResponse(BaseModel):
     success: bool
-    tx_hashes: list[str]
+    deposit_wallet_address: str
+    message: str
 
 
 # =============================================================================
@@ -78,7 +95,7 @@ class ApprovalResponse(BaseModel):
 
 @router.get("/status", response_model=WalletStatusResponse)
 async def get_status():
-    """Get wallet status including balances and approval state."""
+    """Get wallet status including deposit-wallet state, balances, approvals."""
     manager = get_wallet_manager()
     status = manager.get_status()
 
@@ -86,26 +103,29 @@ async def get_status():
         exists=status.exists,
         address=status.address,
         unlocked=status.unlocked,
-        balances={
-            "pol": status.balances.pol,
-            "pusd": status.balances.pusd,
-        }
+        balances={"pol": status.balances.pol, "pusd": status.balances.pusd}
         if status.balances
         else None,
         approvals_set=status.approvals_set,
+        relayer_set=status.relayer_set,
+        deposit_wallet_address=status.deposit_wallet_address,
+        deposit_wallet_deployed=status.deposit_wallet_deployed,
     )
 
 
 @router.post("/generate", response_model=GenerateResponse)
-async def generate_wallet(req: PasswordRequest):
-    """Generate a new wallet encrypted with password."""
+async def generate_wallet(req: GenerateRequest):
+    """Generate a new wallet, optionally with relayer credentials."""
     manager = get_wallet_manager()
-
     try:
-        address = manager.generate(req.password)
+        address = manager.generate(
+            req.password,
+            relayer_api_key=req.relayer_api_key,
+            relayer_address=req.relayer_address,
+        )
         return GenerateResponse(
             address=address,
-            message="Wallet created. Fund with POL and pUSD, then set approvals.",
+            message="Wallet created. Add a relayer key, deploy the deposit wallet, then send pUSD to it.",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -113,14 +133,32 @@ async def generate_wallet(req: PasswordRequest):
 
 @router.post("/import", response_model=GenerateResponse)
 async def import_wallet(req: ImportRequest):
-    """Import existing private key encrypted with password."""
+    """Import existing private key, optionally with relayer credentials."""
     manager = get_wallet_manager()
-
     try:
-        address = manager.import_key(req.private_key, req.password)
+        address = manager.import_key(
+            req.private_key,
+            req.password,
+            relayer_api_key=req.relayer_api_key,
+            relayer_address=req.relayer_address,
+        )
         return GenerateResponse(
             address=address,
-            message="Wallet imported. Check balances and set approvals if needed.",
+            message="Wallet imported. Add a relayer key and deploy the deposit wallet.",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/set-relayer", response_model=GenerateResponse)
+async def set_relayer(req: SetRelayerRequest):
+    """Attach/replace the relayer API key + address on an existing wallet."""
+    manager = get_wallet_manager()
+    try:
+        manager.set_relayer(req.relayer_api_key, req.relayer_address, req.password)
+        return GenerateResponse(
+            address=req.relayer_address,
+            message="Relayer credentials saved.",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -128,9 +166,8 @@ async def import_wallet(req: ImportRequest):
 
 @router.post("/unlock", response_model=UnlockResponse)
 async def unlock_wallet(req: PasswordRequest):
-    """Unlock wallet for trading (decrypt key into memory)."""
+    """Unlock wallet for trading (decrypt keys into memory)."""
     manager = get_wallet_manager()
-
     try:
         address = manager.unlock(req.password)
         return UnlockResponse(unlocked=True, address=address)
@@ -140,31 +177,45 @@ async def unlock_wallet(req: PasswordRequest):
 
 @router.post("/lock")
 async def lock_wallet():
-    """Lock wallet (clear key from memory)."""
+    """Lock wallet (clear secrets from memory)."""
     manager = get_wallet_manager()
     manager.lock()
     return {"locked": True}
 
 
-@router.post("/approve-contracts", response_model=ApprovalResponse)
-async def approve_contracts():
-    """Set all Polymarket contract approvals (requires unlocked wallet)."""
+@router.post("/deploy-deposit-wallet", response_model=DepositWalletResponse)
+async def deploy_deposit_wallet():
+    """Deploy the deposit wallet + set trading approvals (gasless, requires unlock + relayer key)."""
     manager = get_wallet_manager()
-
     if not manager.is_unlocked:
         raise HTTPException(status_code=401, detail="Unlock wallet first")
-
     try:
-        tx_hashes = manager.set_approvals()
-        return ApprovalResponse(success=True, tx_hashes=tx_hashes)
-    except Web3RPCError as e:
-        # Extract readable message from web3 error
-        msg = str(e)
-        if "insufficient funds" in msg.lower():
-            raise HTTPException(
-                status_code=400,
-                detail="Insufficient POL for gas. Please fund your wallet with POL.",
-            )
-        raise HTTPException(status_code=500, detail=msg)
+        deposit_address = manager.deploy_deposit_wallet()
+        return DepositWalletResponse(
+            success=True,
+            deposit_wallet_address=deposit_address,
+            message="Deposit wallet deployed and approved. Send pUSD to it to trade.",
+        )
     except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/approve-contracts", response_model=DepositWalletResponse)
+async def approve_contracts():
+    """Set trading approvals on the deposit wallet (requires unlock + relayer key)."""
+    manager = get_wallet_manager()
+    if not manager.is_unlocked:
+        raise HTTPException(status_code=401, detail="Unlock wallet first")
+    try:
+        deposit_address = manager.set_approvals()
+        return DepositWalletResponse(
+            success=True,
+            deposit_wallet_address=deposit_address,
+            message="Trading approvals set on deposit wallet.",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

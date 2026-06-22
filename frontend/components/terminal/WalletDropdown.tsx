@@ -14,6 +14,8 @@ export function WalletDropdown() {
     lock,
     generate,
     importKey,
+    setRelayer,
+    deployDepositWallet,
     approveContracts,
   } = useWallet()
   const needsChainstack = walletError?.includes('CHAINSTACK_NODE')
@@ -21,6 +23,7 @@ export function WalletDropdown() {
   const [view, setView] = useState<View>('status')
   const [password, setPassword] = useState('')
   const [privateKey, setPrivateKey] = useState('')
+  const [relayerKey, setRelayerKey] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [processing, setProcessing] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -118,6 +121,52 @@ export function WalletDropdown() {
       setError(e instanceof Error ? e.message : 'Failed to approve')
     } finally {
       setProcessing(false)
+    }
+  }
+
+  async function handleSetRelayer() {
+    if (!relayerKey) {
+      setError('Relayer API key is required')
+      return
+    }
+    if (!password) {
+      setError('Re-enter your wallet password to save (it encrypts the key)')
+      return
+    }
+    setProcessing(true)
+    setError(null)
+    try {
+      // Per-user relayer keys are minted for the EOA, so the relayer address
+      // defaults to this wallet's own address.
+      await setRelayer(relayerKey, status?.address || '', password)
+      setRelayerKey('')
+      setPassword('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save relayer key')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  async function handleDeploy() {
+    setProcessing(true)
+    setError(null)
+    try {
+      await deployDepositWallet()
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : 'Failed to deploy deposit wallet'
+      )
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  function copyDepositWallet() {
+    if (status?.deposit_wallet_address) {
+      navigator.clipboard.writeText(status.deposit_wallet_address)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     }
   }
 
@@ -443,52 +492,107 @@ export function WalletDropdown() {
                   </button>
                 </div>
 
-                {/* Balances */}
-                <div className="bg-surface-elevated rounded-lg p-2.5 space-y-1.5">
+                {/* Deposit wallet setup: relayer key → deploy → fund */}
+                {!status?.relayer_set ? (
+                  <div className="space-y-2 bg-surface-elevated rounded-lg p-2.5">
+                    <p className="text-[10px] text-text-muted leading-relaxed">
+                      Add a Polymarket Relayer API key (mint it for this wallet
+                      at polymarket.com/settings) to enable gasless
+                      deposit-wallet trading.
+                    </p>
+                    <input
+                      type="password"
+                      value={relayerKey}
+                      onChange={(e) => setRelayerKey(e.target.value)}
+                      placeholder="Relayer API key"
+                      className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-cyan font-mono"
+                    />
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Wallet password"
+                      className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-cyan"
+                    />
+                    <button
+                      onClick={handleSetRelayer}
+                      disabled={processing || !relayerKey || !password}
+                      className="w-full px-2.5 py-1.5 rounded text-xs bg-cyan hover:bg-cyan/90 text-void font-medium disabled:opacity-50 transition-colors"
+                    >
+                      {processing ? 'Saving...' : 'Save relayer key'}
+                    </button>
+                  </div>
+                ) : !status?.deposit_wallet_deployed ? (
+                  <button
+                    onClick={handleDeploy}
+                    disabled={processing}
+                    className="w-full px-2.5 py-1.5 rounded text-xs bg-cyan hover:bg-cyan/90 text-void font-medium disabled:opacity-50 transition-colors"
+                  >
+                    {processing ? 'Deploying...' : 'Deploy deposit wallet'}
+                  </button>
+                ) : (
+                  <div className="bg-surface-elevated rounded-lg p-2.5 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-text-muted">
+                        Deposit wallet
+                      </span>
+                      <button
+                        onClick={copyDepositWallet}
+                        className="text-xs font-mono text-text-primary hover:text-cyan transition-colors"
+                      >
+                        {status.deposit_wallet_address
+                          ? `${status.deposit_wallet_address.slice(0, 6)}...${status.deposit_wallet_address.slice(-4)}`
+                          : '—'}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-text-muted">
+                      Send pUSD here — it&apos;s your trading balance.
+                    </p>
+                  </div>
+                )}
+
+                {/* Deposit-wallet pUSD = CLOB buying power */}
+                <div className="bg-surface-elevated rounded-lg p-2.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-text-muted">pUSD</span>
+                    <span className="text-text-muted">Deposit pUSD</span>
                     <span className="font-mono text-text-primary">
                       ${(status?.balances?.pusd ?? 0).toFixed(2)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-text-muted">POL (gas)</span>
-                    <span className="font-mono text-text-primary">
-                      {(status?.balances?.pol ?? 0).toFixed(4)}
-                    </span>
-                  </div>
                 </div>
 
-                {/* Approvals */}
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-text-muted">Contract approvals</span>
-                  {status?.approvals_set ? (
-                    <span className="text-emerald flex items-center gap-1">
-                      <svg
-                        className="w-3 h-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
+                {/* Approvals (only once the deposit wallet is deployed) */}
+                {status?.deposit_wallet_deployed && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-text-muted">Contract approvals</span>
+                    {status?.approvals_set ? (
+                      <span className="text-emerald flex items-center gap-1">
+                        <svg
+                          className="w-3 h-3"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                        Set
+                      </span>
+                    ) : (
+                      <button
+                        onClick={handleApprove}
+                        disabled={processing}
+                        className="text-amber-500 hover:text-amber-400 disabled:opacity-50 transition-colors"
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                      Set
-                    </span>
-                  ) : (
-                    <button
-                      onClick={handleApprove}
-                      disabled={processing}
-                      className="text-amber-500 hover:text-amber-400 disabled:opacity-50 transition-colors"
-                    >
-                      {processing ? 'Approving...' : 'Approve'}
-                    </button>
-                  )}
-                </div>
+                        {processing ? 'Approving...' : 'Approve'}
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {error && <p className="text-rose text-[10px]">{error}</p>}
               </div>
