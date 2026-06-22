@@ -17,7 +17,7 @@ dependencies = [
     # Trading
     "eth-account>=0.13.7",
     "web3>=7.15.0",
-    "cryptography>=46.0.7",
+    "cryptography>=48.0.1",
     # Deposit-wallet (sigtype-3) trading SDK — pinned (beta, money path)
     "polymarket-client==0.1.0b8",
 ]
