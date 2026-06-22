@@ -3,6 +3,22 @@
 > Explore every on-chain path for trading Polymarket positions **without CLOB**,
 > find edge cases, and prototype an atomic OTC swap.
 
+> ✅ **Re-validated on a V2 Polygon fork 2026-06-22.** All 7 scenarios pass
+> against the post-cutover state. The key finding: **the on-chain CTF/OTC layer
+> did not change at the V2 cutover** — conditional tokens are still
+> USDC.e-collateralised (verified: `CTFExchange.getCtfCollateral() == USDC.e`,
+> and 177/177 live non-NegRisk markets derive against USDC.e). So scenarios
+> 1–4, 6, 7 (split/merge/convert/transfer/escrow/intents) are unchanged.
+>
+> The **only** thing that changed is the **CLOB exchange** (Scenario 5):
+> new V2 addresses, EIP-712 domain version "1" → "2", a new order struct
+> (drops `taker`/`expiration`/`nonce`/`feeRateBps`, adds
+> `timestamp`/`metadata`/`builder`), `fillOrder` **removed** (only `matchOrders`
+> remains, now with a leading `conditionId` + operator-supplied fees), an
+> `isOperator`/`isAdmin` auth model, a dual-collateral split (`getCollateral()
+> == pUSD` for the order *cash* leg, `getCtfCollateral() == USDC.e` for the
+> tokens), and on-chain cancel replaced by `pauseUser`/`unpauseUser`.
+
 ## TL;DR
 
 Trustless P2P trading for Polymarket positions is **fully viable without the CLOB**. We validated 7 scenarios on a local Polygon fork (Anvil), from basic token transfers to intent-based atomic settlement:
@@ -29,7 +45,7 @@ The bottleneck is not smart contracts — it's **finding OTC counterparties**. A
 | [Scenario 2 — Direct transfers](#scenario-2--direct-transfers-otc-primitives) | P2P token transfers, batch transfers, edge cases, gas costs |
 | [Scenario 3 — Atomic OTC escrow](#scenario-3--atomic-otc-escrow) | Custom Solidity escrow contract for trustless ERC-1155 ↔ ERC-20 swaps |
 | [Scenario 4 — NegRisk conversions](#scenario-4--negrisk-conversions) | Multi-outcome `convertPositions`, initial exploration (corrected in Scenario 6) |
-| [Scenario 5 — Operator deep-dive](#scenario-5--operator-deep-dive) | EIP-712 order signing, `fillOrder`, `matchOrders` via impersonated operator |
+| [Scenario 5 — Operator deep-dive](#scenario-5--operator-deep-dive) | V2 EIP-712 order signing + `matchOrders` via impersonated operator |
 | [Scenario 6 — NegRisk trading](#scenario-6--negrisk-trading-scenarios-can-you-avoid-clob-entirely) | 6 comprehensive scenarios proving NegRisk trades work without CLOB |
 | [Scenario 7 — Intent-based trading](#scenario-7--intent-based-trading-for-ctf-tokens) | ERC-20 wrappers + EIP-712 intents = permissionless atomic settlement |
 | [Summary](#summary-on-chain-trading-without-clob) | Gas comparison tables, practical trading paths, universal gotchas |
@@ -50,11 +66,16 @@ The bottleneck is not smart contracts — it's **finding OTC counterparties**. A
 
 | Contract | Address | Role |
 |----------|---------|------|
-| USDC.e | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | Collateral token (bridged USDC, 6 decimals) |
-| CTF | `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | ERC-1155 conditional tokens (YES/NO shares) |
-| CTF Exchange | `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` | Operator-gated order matching for binary markets |
-| Neg Risk CTF Exchange | `0xC5d563A36AE78145C45a50134d48A1215220f80a` | Operator-gated order matching for multi-outcome markets |
-| Neg Risk Adapter | `0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296` | Split/merge/convert for multi-outcome (NegRisk) markets |
+| USDC.e | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | **CTF collateral** (positions, 6 decimals) — unchanged in V2 |
+| pUSD | `0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB` | V2 exchange **cash** collateral (`getCollateral()`); wraps USDC.e 1:1 |
+| CTF | `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | ERC-1155 conditional tokens (YES/NO shares) — unchanged |
+| CTF Exchange **V2** | `0xE111180000d2663C0091e4f400237545B87B996B` | Operator-gated `matchOrders` for binary markets (Scenario 5) |
+| Neg Risk CTF Exchange **V2** | `0xe2222d279d744050d28e00520010520000310F59` | Operator-gated `matchOrders` for multi-outcome markets |
+| Neg Risk Adapter | `0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296` | USDC.e-collateralised split/merge/convert — unchanged in V2 |
+
+> CTF Exchange V1 was `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` / NegRisk V1
+> `0xC5d563A36AE78145C45a50134d48A1215220f80a` — retired at the cutover.
+> The CTF and NegRisk Adapter addresses are unchanged.
 
 ---
 
@@ -315,139 +336,142 @@ This is essentially **on-chain arbitrage** of the price constraint `sum(all YES 
 
 ## Scenario 5 — Operator deep-dive
 
+> **This scenario is the one place V2 actually changed things.** Everything below
+> is the **V2** exchange (`0xE111...`), re-validated on the fork 2026-06-22.
+
 ### Background
 
-Polymarket's CLOB order book is **off-chain** — users sign EIP-712 typed data orders, and a trusted **operator** submits matches on-chain. The operator is an EOA with a special role in the exchange contract's `Auth` system:
+Polymarket's CLOB order book is **off-chain** — users sign EIP-712 typed-data orders, and a trusted **operator** submits matches on-chain. On the V2 exchange the operator gate is:
 
-- `admins` mapping — can add/remove operators and other admins
-- `operators` mapping — can call `fillOrder`, `fillOrders`, `matchOrders`
-- Everyone else — cannot interact with the order-matching functions
+- `isAdmin(address) → bool` — can `addOperator`/`addAdmin`
+- `isOperator(address) → bool` — can call `matchOrders`
+- Everyone else — cannot settle
 
-This scenario explores the operator mechanics: EIP-712 signing, order struct, `fillOrder` vs `matchOrders`, and access control.
+This scenario covers V2 EIP-712 signing, the V2 order struct, on-chain order/signature validation, and `matchOrders`.
 
 ### Checklist
 
-- [x] Make Alice an operator via storage manipulation
-- [x] Understand EIP-712 order struct: fields, signatures
-- [x] Test `fillOrder` — operator fills a signed order as counterparty
-- [x] Test `matchOrders` — operator matches Alice SELL + Bob BUY
+- [x] Confirm the dual-collateral model on-chain (`getCtfCollateral`, `getCollateral`)
+- [x] Build + sign V2 orders; self-verify with `hashOrder` + `validateOrderSignature`
+- [x] Settle a trade via `matchOrders` (impersonating a live operator)
 - [x] Verify non-operator access denied
-- [ ] Understand fee calculation on-chain (deferred)
 
-### Results
+### Results (measured on V2 fork)
 
 | Operation | Gas | Notes |
 |-----------|-----|-------|
-| `matchOrders` (1 maker + 1 taker) | ~201k | Neutral: operator just submits |
-| `fillOrder` (operator fills) | ~132k | Operator is the counterparty |
-| Non-operator `fillOrder` | REVERT | Access correctly denied |
+| `matchOrders` (1 maker + 1 taker) | ~210k | Operator submits; pUSD cash ↔ USDC.e-backed YES |
+| `validateOrderSignature` / `hashOrder` | view | Contract confirms our EIP-712 signing is byte-correct |
+| Non-operator `matchOrders` | REVERT | Access correctly denied |
 
-**Status:** PASS
+**Status:** PASS — `matchOrders` moved 30 YES @ 0.50 for $15 pUSD; both order signatures validated by the contract before submitting.
 
-### EIP-712 Order Struct
+### V2 EIP-712 Order Struct
+
+Verified against the SDK (`polymarket.actions.orders.typed_data`) and the on-chain `eip712Domain()`.
 
 ```text
 EIP712Domain {
     name: "Polymarket CTF Exchange"
-    version: "1"
+    version: "2"                  // was "1" in V1
     chainId: 137
-    verifyingContract: 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
+    verifyingContract: 0xE111180000d2663C0091e4f400237545B87B996B   // V2
 }
 
 Order {
-    salt:          uint256    // Random nonce to make orders unique
-    maker:         address    // Order creator
-    signer:        address    // Who signed (usually == maker)
-    taker:         address    // Restricted counterparty (0x0 = anyone)
-    tokenId:       uint256    // CTF token ID (YES or NO)
-    makerAmount:   uint256    // Amount maker provides
-    takerAmount:   uint256    // Amount maker wants
-    expiration:    uint256    // Unix timestamp (0 = no expiry)
-    nonce:         uint256    // For order cancellation
-    feeRateBps:    uint256    // Fee in basis points
+    salt:          uint256
+    maker:         address
+    signer:        address    // == maker (EOA) or deposit wallet (sigtype 3)
+    tokenId:       uint256    // CTF token ID (YES or NO), USDC.e-collateralised
+    makerAmount:   uint256
+    takerAmount:   uint256
     side:          uint8      // 0 = BUY, 1 = SELL
-    signatureType: uint8      // 0 = EOA, 1 = POLY_PROXY, 2 = GNOSIS_SAFE
+    signatureType: uint8      // 0 = EOA, 1 = POLY_PROXY, 2 = GNOSIS_SAFE, 3 = DEPOSIT_WALLET
+    timestamp:     uint256    // NEW — order creation time, milliseconds
+    metadata:      bytes32    // NEW — optional
+    builder:       bytes32    // NEW — optional builder code
 }
 ```
 
-**SELL order:** `makerAmount` = conditional tokens to sell, `takerAmount` = USDC wanted.
-**BUY order:** `makerAmount` = USDC to spend, `takerAmount` = conditional tokens wanted.
+V2 **drops** `taker`, `expiration`, `nonce`, `feeRateBps` and **adds** `timestamp`/`metadata`/`builder`. Fees are now operator-supplied at match time (see `matchOrders`), not baked into the order.
 
-### `fillOrder` vs `matchOrders`
+**SELL order:** `makerAmount` = conditional tokens to sell, `takerAmount` = pUSD wanted.
+**BUY order:** `makerAmount` = pUSD to spend, `takerAmount` = conditional tokens wanted.
 
-**`fillOrder(order, fillAmount)`**
-- `msg.sender` (the operator) becomes the **counterparty**
-- Exchange transfers assets between maker and msg.sender
-- Use case: operator fills an order directly (acts as market maker)
+### `matchOrders` (the only settlement path in V2)
 
-**`matchOrders(takerOrder, makerOrders[], takerFillAmount, makerFillAmounts[])`**
-- Operator is **neutral** — just submits the match
-- Exchange verifies both signatures, transfers assets between the two makers
-- Use case: matching two users' orders (the normal CLOB flow)
+`fillOrder` was **removed** in V2. The sole settlement function is:
 
-### Findings
+```text
+matchOrders(
+    bytes32   conditionId,        // NEW leading arg
+    Order     takerOrder,
+    Order[]   makerOrders,
+    uint256   takerFillAmount,
+    uint256[] makerFillAmounts,
+    uint256   takerFeeAmount,     // NEW — operator-supplied fees
+    uint256[] makerFeeAmounts     // NEW
+)
+```
 
-- **EIP-712 signature verification works end-to-end.** Python `Account.sign_typed_data()` → on-chain `ecrecover` → signature matches maker address. The exchange correctly rejects tampered orders.
-- **`matchOrders` is the production mechanism.** PM's backend collects signed orders from both sides and calls `matchOrders` as operator. The operator never holds user funds.
-- **`fillOrder` makes the operator a participant.** The operator acts as counterparty, so they need token/USDC balances and approvals. In production, this is used less frequently.
+- Operator is **neutral** — verifies both signatures and transfers assets between maker(s) and taker.
+- Cash leg settles in **pUSD** (`getCollateral()`), tokens are **USDC.e-collateralised** CTF positions (`getCtfCollateral()`).
 
-### Storage Layout Discovery
+### Dual-collateral model (verified on-chain)
 
-The CTF Exchange inherits from multiple contracts. The actual storage layout is:
+| Call | Returns | Meaning |
+|------|---------|---------|
+| `getCtfCollateral()` | USDC.e | Conditional tokens are minted against USDC.e (unchanged from V1) |
+| `getCollateral()` | pUSD | Order maker/taker *cash* amounts settle in pUSD |
 
-| Slot | Type | Variable |
-|------|------|----------|
-| 0 | `uint256` | Scalar (likely `_initialized` or similar from parent) |
-| 1 | `mapping(address => uint256)` | `admins` |
-| 2 | `mapping(address => uint256)` | `operators` |
-| 6 | `address` | Unknown (proxy-related?) |
-| 7 | `address` | Unknown (proxy-related?) |
+So a seller splits **USDC.e** → YES+NO to get tradeable tokens; a buyer pays **pUSD**. The exchange bridges the two.
 
-**How we found this:** Brute-force — wrote 1 to `keccak256(abi.encode(Alice, slot))` for slots 0-10, checked which slot made `operators(Alice)` and `admins(Alice)` return 1.
+### Operator access (V2)
 
-### Approval Requirements
+No storage manipulation needed: the legacy operator `0x768408F252d4Ea905E5d4225F4B29FaaBa651579` is still `isOperator() == true` on the V2 exchange, so the script impersonates it to call `matchOrders`. (V2 also exposes `addOperator`/`addAdmin`, gated by `isAdmin`.)
 
-The CTF Exchange needs **three separate approvals** to operate:
+### Approval Requirements (V2)
 
 | From | Token | Approved For | Purpose |
 |------|-------|-------------|---------|
 | Maker/Taker | CTF (ERC-1155) | `setApprovalForAll(Exchange, true)` | Exchange moves conditional tokens |
-| BUY-side | USDC.e (ERC-20) | `approve(Exchange, amount)` | Exchange moves USDC from buyer |
-| SELL-side | USDC.e (ERC-20) | `approve(Exchange, amount)` | Exchange moves USDC to seller (needed for fee deduction) |
+| Both sides | pUSD (ERC-20) | `approve(Exchange, amount)` | Exchange moves the pUSD cash leg |
 
-`setup_accounts.py` only approves USDC.e for CTF + NegRiskAdapter (for splitting). **Exchange USDC approval must be set separately.**
+`setup_accounts.py` sets all of these against the V2 exchanges.
 
 ### Gotchas
 
-- **Storage slots are shifted by parent contracts.** Auth.sol declares `admins` at slot 0 and `operators` at slot 1, but the CTF Exchange's inheritance chain pushes them to slots 1 and 2. Never assume slot indices from a single contract's source — always verify empirically.
-- **`anvil_setStorageAt` requires `0x` prefix.** Python's `HexBytes.hex()` returns raw hex without prefix (e.g., `a3c127...`). Anvil silently accepts it but writes to the wrong slot. **Fix:** Always use `"0x" + slot.hex()`.
-- **Known PM operator `0x768408...` shows `operators=0`** on the CTF Exchange at current block. This address may only be registered on the NegRisk CTF Exchange, or the operator rotates. Don't hard-code operator addresses.
-- **`fillOrder` self-trade trap.** If Alice is both the order maker AND the `msg.sender` calling `fillOrder`, the exchange tries to transfer tokens from Alice to Alice and USDC from Alice to Alice. The USDC `transferFrom` fails unless Alice has approved the exchange. This is a pointless self-trade — always use different addresses for maker and operator/filler.
+- **`fillOrder` is gone.** Any V1 code calling `fillOrder` will fail — there is no such function on the V2 exchange. Use `matchOrders` (a self-trade can be a taker order matched against a single maker order).
+- **`matchOrders` signature changed.** It now takes a leading `conditionId` and trailing `takerFeeAmount` + `makerFeeAmounts[]`. Fees of `0` are accepted for testing.
+- **Domain version must be "2".** Signing with version "1" produces a signature the V2 exchange rejects. Confirm via `eip712Domain()` and self-check with `validateOrderSignature` before submitting.
+- **On-chain cancel was removed.** V2 replaces it with operator `pauseUser` / `unpauseUser` (+ `isUserPaused`); there is no per-order on-chain cancel/`nonce`.
 
-### Code Pattern
+### Code Pattern (V2)
 
 ```python
-# Sign order with EIP-712
-from eth_account import Account
-
+# Sign a V2 order (domain version "2", new struct)
 signed = Account.sign_typed_data(
     private_key,
-    domain_data={"name": "Polymarket CTF Exchange", "version": "1",
-                 "chainId": 137, "verifyingContract": CTF_EXCHANGE},
-    message_types={"Order": [{"name": "salt", "type": "uint256"}, ...]},
+    domain_data={"name": "Polymarket CTF Exchange", "version": "2",
+                 "chainId": 137, "verifyingContract": CTF_EXCHANGE_V2},
+    message_types={"Order": [...]},   # salt..builder, see struct above
     message_data=order_dict,
 )
-signature = signed.signature
 
-# Grant operator role via storage manipulation
-alice_padded = alice.lower().replace("0x", "").zfill(64)
-op_slot = Web3.solidity_keccak(["bytes"], [bytes.fromhex(alice_padded + "0" * 63 + "2")])
-w3.provider.make_request("anvil_setStorageAt", [EXCHANGE, "0x" + op_slot.hex(), ONE])
+# Self-verify against the contract before submitting
+order_hash = exchange.functions.hashOrder(order_tuple).call()
+exchange.functions.validateOrderSignature(order_hash, order_tuple).call()  # reverts if bad
+
+# Settle (operator is impersonated; cash leg is pUSD, tokens are USDC.e-backed)
+exchange.functions.matchOrders(
+    condition_id, taker_order, [maker_order],
+    taker_fill, [maker_fill], 0, [0],   # zero fees
+).transact({"from": operator})
 ```
 
 ### Key Insight
 
-> **All CLOB settlement is operator-gated.** You cannot match orders on-chain without operator permission. However, the operator role is just an access control check — the actual settlement logic (signature verification, token transfers) is transparent and auditable. For self-custody trading without CLOB dependency, use direct transfers (Scenario 2), escrow (Scenario 3), or NegRisk conversion (Scenario 4).
+> **All CLOB settlement is operator-gated.** You cannot match orders on-chain without operator permission. But the operator role is just an access check — signature verification and token transfers are transparent and auditable. V2 streamlined this: one settlement function (`matchOrders`), operator-supplied fees, and a dual-collateral split (USDC.e tokens, pUSD cash). For self-custody trading without CLOB dependency, use direct transfers (Scenario 2), escrow (Scenario 3), or NegRisk conversion (Scenario 4).
 
 ---
 
@@ -665,7 +689,7 @@ The flow:
 1. **Wrapping works perfectly.** `safeTransferFrom` to factory triggers `onERC1155Received` which deploys an ERC-20 proxy and mints 1:1. Round-trip is lossless.
 2. **First wrap is expensive (650k gas)** because it deploys the Wrapped1155 contract inside the callback. Subsequent wraps for the same tokenId cost only 57k. On Polygon this is still cheap (~$0.04 first time, ~$0.003 after).
 3. **Wrapper reuses existing proxies** — each (multiToken, tokenId) pair gets one ERC-20 address. Multiple wraps/unwraps use the same contract.
-4. **On-chain intent settlement works.** `IntentSettlement.fillIntent()` verifies Alice's EIP-712 signature via `ecrecover` and executes an atomic wYES↔USDC swap in ONE transaction. Gas: 140k — comparable to Polymarket's `fillOrder` (132k) but **permissionless**.
+4. **On-chain intent settlement works.** `IntentSettlement.fillIntent()` verifies Alice's EIP-712 signature via `ecrecover` and executes an atomic wYES↔pUSD swap in ONE transaction. Gas: 140k — cheaper than Polymarket's V2 `matchOrders` (~210k) and **permissionless**.
 5. **Security is enforced on-chain.** Replay attacks (nonce increment), tampered signatures (ecrecover mismatch), and expired intents (deadline check) are all rejected by the contract.
 6. **The wrapped token is a standard ERC-20** — `approve`, `transferFrom`, `balanceOf`, `totalSupply` all work. Compatible with any DeFi protocol.
 7. **This is the permissionless equivalent of Polymarket's CLOB.** `fillIntent()` requires no operator whitelist — anyone (human, bot, agent) can be a solver. The contract is the trust layer.
@@ -826,8 +850,7 @@ Intents don't eliminate the counterparty — they replace a **single trusted ope
 
 | Operation | Gas | Cost | Use Case |
 |-----------|-----|------|----------|
-| `matchOrders` | ~201k | ~$0.012 | Match two signed orders |
-| `fillOrder` | ~132k | ~$0.008 | Operator fills order as counterparty |
+| `matchOrders` (V2) | ~210k | ~$0.013 | Match taker + maker order(s); only settlement fn in V2 |
 
 ### Practical Trading Paths (No CLOB)
 
@@ -895,7 +918,7 @@ experiments/onchain-otc/
 ├── 02_transfers.py       # Scenario 2: direct token transfers, edge cases
 ├── 03_escrow.py          # Scenario 3: deploy & test atomic escrow
 ├── 04_negrisk.py         # Scenario 4: convertPositions, PnL analysis
-├── 05_operator.py        # Scenario 5: EIP-712, fillOrder, matchOrders
+├── 05_operator.py        # Scenario 5: V2 EIP-712 signing + matchOrders
 ├── 06_negrisk_trading.py # Scenario 6: NegRisk trading scenarios, break-even proof
 └── 07_intents.py         # Scenario 7: Gnosis wrapper + intent-based trading
 ```
