@@ -28,6 +28,14 @@ LLM_TIMEOUT = 60.0
 LLM_MAX_RETRIES = 3
 
 
+class LLMAuthError(RuntimeError):
+    """OpenRouter rejected the credentials (HTTP 401/403).
+
+    Raised so the pipeline aborts loudly instead of silently producing empty
+    results when OPENROUTER_API_KEY is missing, invalid, or out of credit.
+    """
+
+
 # =============================================================================
 # MODEL LOADERS (Singleton via lru_cache)
 # =============================================================================
@@ -154,7 +162,8 @@ class LLMClient:
                 return data["choices"][0]["message"]["content"]
 
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429:
+                status_code = e.response.status_code
+                if status_code == 429:
                     # Rate limited, wait and retry
                     import asyncio
 
@@ -162,6 +171,14 @@ class LLMClient:
                     logger.warning(f"Rate limited, waiting {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     continue
+                if status_code in (401, 403):
+                    # Bad/missing/expired key or no credit — fail fast and loud.
+                    # Retrying or swallowing this just yields empty results.
+                    raise LLMAuthError(
+                        f"OpenRouter rejected the request for model '{self.model}' "
+                        f"(HTTP {status_code}). Check that OPENROUTER_API_KEY is set "
+                        f"to a valid key with available credit."
+                    ) from e
                 raise
 
             except httpx.RequestError:

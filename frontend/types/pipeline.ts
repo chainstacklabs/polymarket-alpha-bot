@@ -46,4 +46,6 @@ export interface PipelineStatus {
     implications: string
     validation: string
   } | null
+  default_tag: string | null
+  error: string | null
 }

@@ -7,6 +7,7 @@ Extracted from experiments/01_fetch_events.py for production pipeline.
 import asyncio
 import json
 import os
+import re
 from typing import Any
 
 import httpx
@@ -162,22 +163,25 @@ async def enrich_fees(
 
 
 async def fetch_events(
-    tag_slugs: str = TARGET_TAG_SLUG,
+    tag_slugs: str | None = None,
     max_events: int | None = None,
 ) -> list[dict[str, Any]]:
     """
     Fetch all active events from Polymarket API.
 
     Args:
-        tag_slugs: Comma-separated tags to filter events by (OR logic).
-                   E.g., "politics" or "politics,sports,crypto"
+        tag_slugs: Tags to filter events by (OR logic), separated by comma or
+                   semicolon. E.g., "politics" or "politics,sports;crypto".
+                   If None, falls back to the POLYMARKET_TAG env default.
         max_events: Optional limit on number of events to return.
                     If None, returns all events.
 
     Returns:
         List of processed events with active markets
     """
-    tags = [t.strip() for t in tag_slugs.split(",") if t.strip()]
+    tags = [
+        t.strip() for t in re.split(r"[,;]", tag_slugs or TARGET_TAG_SLUG) if t.strip()
+    ]
     if not tags:
         raise ValueError("No valid tags provided")
 

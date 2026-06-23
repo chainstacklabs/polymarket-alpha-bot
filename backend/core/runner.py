@@ -61,6 +61,7 @@ async def run_async(
     max_events: int | None = None,
     implications_model: str | None = None,
     validation_model: str | None = None,
+    tags: str | None = None,
     quiet: bool = False,
 ) -> dict:
     """
@@ -72,6 +73,8 @@ async def run_async(
         max_events: Optional limit on events to fetch (for demo/testing).
         implications_model: Override LLM model for implications.
         validation_model: Override LLM model for validation.
+        tags: Override Polymarket tags to fetch (comma/semicolon separated).
+              If None, uses the POLYMARKET_TAG env default.
         quiet: If True, suppress console output (for API/background runs).
 
     Returns:
@@ -109,7 +112,7 @@ async def run_async(
         # STEP 1: Fetch events from Polymarket
         # =====================================================================
         with tracker.step(1, "Fetch Markets"):
-            all_events = await fetch_events(max_events=max_events)
+            all_events = await fetch_events(tag_slugs=tags, max_events=max_events)
             tracker.update_details(f"Fetched {len(all_events)} events")
 
         # =====================================================================
@@ -323,6 +326,7 @@ def run(
     max_events: int | None = None,
     implications_model: str | None = None,
     validation_model: str | None = None,
+    tags: str | None = None,
     quiet: bool = False,
 ) -> dict:
     """
@@ -334,6 +338,7 @@ def run(
         max_events: Optional limit on events to fetch.
         implications_model: Override LLM model for implications.
         validation_model: Override LLM model for validation.
+        tags: Override Polymarket tags to fetch (comma/semicolon separated).
         quiet: If True, suppress console output (for API/background runs).
 
     Returns:
@@ -346,6 +351,7 @@ def run(
             max_events=max_events,
             implications_model=implications_model,
             validation_model=validation_model,
+            tags=tags,
             quiet=quiet,
         )
     )

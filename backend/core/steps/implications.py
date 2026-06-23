@@ -25,7 +25,7 @@ from typing import Callable
 
 from loguru import logger
 
-from core.models import get_llm_client
+from core.models import LLMAuthError, get_llm_client
 from core.state import PipelineState
 from core.utils import extract_json_from_response
 
@@ -382,6 +382,10 @@ async def extract_implications(
 
             new_implications.append(impl)
 
+        except LLMAuthError:
+            # Credentials failure — abort the whole run so the user sees it
+            # instead of getting an empty "0 opportunities" result.
+            raise
         except Exception as e:
             logger.error(f"  Error extracting implications: {e}")
             # Store empty result
@@ -509,6 +513,9 @@ async def extract_implications_batch(
                         await asyncio.sleep(2**attempt)  # Exponential backoff
                     continue
 
+                except LLMAuthError:
+                    # Credentials failure — don't retry or swallow, abort the run.
+                    raise
                 except Exception as e:
                     logger.error(
                         f"Error (attempt {attempt + 1}/{max_retries}) processing "

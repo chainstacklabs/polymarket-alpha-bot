@@ -72,6 +72,7 @@ export function PipelineDropdown() {
           max_events: maxEvents,
           implications_model: modelSettings.implicationsModel || undefined,
           validation_model: modelSettings.validationModel || undefined,
+          tags: modelSettings.tags.trim() || undefined,
         }),
       })
       if (res.ok) {
@@ -192,33 +193,38 @@ export function PipelineDropdown() {
                 </div>
 
                 {/* Current step */}
-                {currentStep && (() => {
-                  const activeModel =
-                    currentStep.step_number === 4
-                      ? (modelSettings.implicationsModel || status?.default_models?.implications || '')
-                      : currentStep.step_number === 6
-                        ? (modelSettings.validationModel || status?.default_models?.validation || '')
-                        : ''
-                  return (
-                    <div className="flex items-center gap-2 text-xs">
-                      {currentStep.emoji && <span>{currentStep.emoji}</span>}
-                      <span className="text-text-secondary">
-                        {currentStep.step_name}
-                      </span>
-                      {activeModel && (
-                        <span
-                          className="text-[9px] text-cyan/60 truncate max-w-[100px]"
-                          title={activeModel}
-                        >
-                          {activeModel.split('/').pop()}
+                {currentStep &&
+                  (() => {
+                    const activeModel =
+                      currentStep.step_number === 4
+                        ? modelSettings.implicationsModel ||
+                          status?.default_models?.implications ||
+                          ''
+                        : currentStep.step_number === 6
+                          ? modelSettings.validationModel ||
+                            status?.default_models?.validation ||
+                            ''
+                          : ''
+                    return (
+                      <div className="flex items-center gap-2 text-xs">
+                        {currentStep.emoji && <span>{currentStep.emoji}</span>}
+                        <span className="text-text-secondary">
+                          {currentStep.step_name}
                         </span>
-                      )}
-                      <span className="text-text-muted font-mono ml-auto">
-                        {formatElapsed(currentStep.elapsed_seconds)}
-                      </span>
-                    </div>
-                  )
-                })()}
+                        {activeModel && (
+                          <span
+                            className="text-[9px] text-cyan/60 truncate max-w-[100px]"
+                            title={activeModel}
+                          >
+                            {activeModel.split('/').pop()}
+                          </span>
+                        )}
+                        <span className="text-text-muted font-mono ml-auto">
+                          {formatElapsed(currentStep.elapsed_seconds)}
+                        </span>
+                      </div>
+                    )
+                  })()}
               </div>
             )}
 
@@ -242,8 +248,22 @@ export function PipelineDropdown() {
               </div>
             )}
 
+            {/* Error banner (last run failed) */}
+            {!isRunning && (status?.error || lastRun?.status === 'failed') && (
+              <div className="rounded border border-rose/30 bg-rose/10 px-2.5 py-2 space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-rose">
+                  <span>⚠</span>
+                  <span>Pipeline failed</span>
+                </div>
+                <p className="text-[10px] text-rose/90 leading-tight break-words">
+                  {status?.error ||
+                    'The last run failed. Check the backend logs for details.'}
+                </p>
+              </div>
+            )}
+
             {/* No data state */}
-            {!isRunning && !lastRun && (
+            {!isRunning && !lastRun && !status?.error && (
               <p className="text-xs text-text-muted text-center py-2">
                 No pipeline runs yet
               </p>
@@ -253,8 +273,9 @@ export function PipelineDropdown() {
             <div className="pt-2 border-t border-border space-y-1.5">
               {/* LLM cost warning */}
               <p className="text-[10px] text-amber-400/80 leading-tight pb-1.5">
-                ⚠ Pipeline uses LLM tokens. Try Quick Demo or free models
-                first. Free/cheap models may miss opportunities. Budget spend on LLM can exceed hedge profits.
+                ⚠ Pipeline uses LLM tokens. Try Quick Demo or free models first.
+                Free/cheap models may miss opportunities. Budget spend on LLM
+                can exceed hedge profits.
               </p>
               <button
                 onClick={() => runPipeline(false, 50)}
@@ -314,6 +335,27 @@ export function PipelineDropdown() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Market Tags */}
+            <div className="pt-2 border-t border-border space-y-1.5">
+              <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">
+                Market Tags
+              </span>
+              <input
+                type="text"
+                value={modelSettings.tags}
+                onChange={(e) => updateModelSettings({ tags: e.target.value })}
+                placeholder={status?.default_tag || 'politics'}
+                className="w-full px-2 py-1 rounded text-xs bg-surface-elevated border border-border text-text-primary placeholder:text-text-muted/50 focus:outline-none focus:border-cyan/50"
+              />
+              <p className="text-[9px] text-text-muted leading-tight">
+                Polymarket tag slugs. Separate multiple with{' '}
+                <span className="text-text-secondary">,</span> or{' '}
+                <span className="text-text-secondary">;</span> (e.g.{' '}
+                <span className="text-text-secondary">politics, crypto</span>).
+                Leave blank for the default.
+              </p>
             </div>
 
             {/* LLM Models */}

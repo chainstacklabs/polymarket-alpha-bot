@@ -26,7 +26,7 @@ from typing import Callable
 
 from loguru import logger
 
-from core.models import get_llm_client
+from core.models import LLMAuthError, get_llm_client
 from core.state import PipelineState
 from core.utils import extract_json_from_response
 
@@ -460,6 +460,10 @@ async def validate_batch(
 
         return {v["pair_id"]: v for v in result.get("validations", [])}
 
+    except LLMAuthError:
+        # Credentials failure — abort the run instead of marking every pair
+        # invalid and silently producing 0 portfolios.
+        raise
     except Exception as e:
         logger.error(f"Batch {batch_num} error: {e}")
         return {
