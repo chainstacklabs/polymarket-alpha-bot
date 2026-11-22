@@ -9,6 +9,7 @@ from web3 import Web3
 from loguru import logger
 
 from core.markets import outcome_token_ids
+from core.paths import GAMMA_API_BASE_URL
 from core.wallet.manager import WalletManager
 from core.wallet.contracts import CONTRACTS, CTF_ABI
 from server.price_aggregation import price_aggregation
@@ -260,7 +261,7 @@ class PositionService:
         try:
             with httpx.Client(timeout=10.0) as client:
                 resp = client.get(
-                    f"https://gamma-api.polymarket.com/markets/{market_id}"
+                    f"{GAMMA_API_BASE_URL}/markets/{market_id}"
                 )
                 data = resp.json()
                 clob_tokens = outcome_token_ids(data)
@@ -328,7 +329,7 @@ class PositionService:
             self._fee_cache[mid] = {"id": mid, "feesEnabled": False}
 
         with httpx.Client(
-            base_url="https://gamma-api.polymarket.com", timeout=10.0
+            base_url=GAMMA_API_BASE_URL, timeout=10.0
         ) as client:
             for i in range(0, len(uncached), 50):
                 batch = uncached[i : i + 50]

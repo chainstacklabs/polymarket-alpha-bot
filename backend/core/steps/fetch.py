@@ -4,7 +4,6 @@ Fetch events from Polymarket API.
 Extracted from experiments/01_fetch_events.py for production pipeline.
 """
 
-import asyncio
 import json
 import os
 import re
@@ -245,40 +244,3 @@ async def fetch_events(
             logger.info(f"Fetched {len(events)} active events from {len(tags)} tag(s)")
 
         return events
-
-
-def fetch_events_sync(
-    tag_slugs: str = TARGET_TAG_SLUG,
-    max_events: int | None = None,
-) -> list[dict[str, Any]]:
-    """Synchronous wrapper for fetch_events."""
-    return asyncio.run(fetch_events(tag_slugs, max_events=max_events))
-
-
-# =============================================================================
-# PRICE EXTRACTION
-# =============================================================================
-
-
-def extract_prices(events: list[dict[str, Any]]) -> dict[str, float]:
-    """
-    Extract current YES prices for all events.
-
-    Returns:
-        Dict mapping event_id to YES price
-    """
-    prices = {}
-    for event in events:
-        event_id = event.get("id")
-        if not event_id:
-            continue
-
-        markets = event.get("markets", [])
-        if markets:
-            # Use first market's YES price
-            market = markets[0]
-            outcome_prices = market.get("outcomePrices", [])
-            if outcome_prices:
-                prices[event_id] = outcome_prices[0]
-
-    return prices

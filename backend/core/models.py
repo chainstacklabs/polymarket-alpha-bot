@@ -5,7 +5,6 @@ Models are loaded once and reused across all pipeline steps.
 """
 
 import os
-from functools import lru_cache
 
 import httpx
 from loguru import logger
@@ -13,12 +12,6 @@ from loguru import logger
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-
-# GLiNER2 for entity and relation extraction
-GLINER2_MODEL = "fastino/gliner2-base-v1"
-
-# Sentence Transformer for embeddings
-EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
 
 # OpenRouter LLM configuration
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -34,51 +27,6 @@ class LLMAuthError(RuntimeError):
     Raised so the pipeline aborts loudly instead of silently producing empty
     results when OPENROUTER_API_KEY is missing, invalid, or out of credit.
     """
-
-
-# =============================================================================
-# MODEL LOADERS (Singleton via lru_cache)
-# =============================================================================
-
-
-@lru_cache(maxsize=1)
-def get_gliner():
-    """
-    Load GLiNER2 model (singleton).
-
-    Used for:
-    - Entity extraction (03_1)
-    - Relation extraction (03_4)
-
-    Returns:
-        GLiNER2 model instance
-    """
-    from gliner2 import GLiNER2
-
-    logger.info(f"Loading GLiNER2 model: {GLINER2_MODEL}")
-    model = GLiNER2.from_pretrained(GLINER2_MODEL)
-    logger.info("GLiNER2 model loaded")
-    return model
-
-
-@lru_cache(maxsize=1)
-def get_embedder():
-    """
-    Load Sentence Transformer model (singleton).
-
-    Used for:
-    - Event embedding (04_2)
-    - Similarity search for blocking (05_1)
-
-    Returns:
-        SentenceTransformer model instance
-    """
-    from sentence_transformers import SentenceTransformer
-
-    logger.info(f"Loading embedding model: {EMBEDDING_MODEL}")
-    model = SentenceTransformer(EMBEDDING_MODEL)
-    logger.info("Embedding model loaded")
-    return model
 
 
 # =============================================================================
@@ -268,23 +216,7 @@ async def close_all_llm_clients() -> None:
 # =============================================================================
 
 
-def preload_models() -> None:
-    """
-    Preload all models at pipeline start.
-
-    Call this at the beginning of the pipeline to load
-    all models upfront rather than lazily.
-    """
-    logger.info("Preloading models...")
-    get_gliner()
-    get_embedder()
-    # LLM client doesn't need preloading (no local model)
-    logger.info("All models preloaded")
-
-
 def clear_model_cache() -> None:
-    """Clear model caches (for testing)."""
-    get_gliner.cache_clear()
-    get_embedder.cache_clear()
+    """Clear cached LLM clients (for testing)."""
     global _llm_clients
     _llm_clients = {}
