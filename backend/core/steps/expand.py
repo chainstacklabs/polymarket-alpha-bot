@@ -39,43 +39,10 @@ from core.state import PipelineState
 # 0.88 keeps only "necessary" (0.98), filters out lower confidence relationships
 MIN_COVER_PROBABILITY = 0.88
 
-# A "candidate" group is true negRisk (exactly ONE outcome resolves YES) only if
-# its YES prices sum to ~1. Multi-select candidate groups (e.g. "Which cities
-# will Russia enter?" — several can be YES) sum far from 1. We use this to tell
-# the two apart, because a single outcome of a negRisk group cannot form a sound
-# cross-group hedge: the partner can lose via a *sibling* outcome, leaving the
-# position uncovered (e.g. "they meet, but not in Australia").
-NEGRISK_PRICE_SUM_MIN = 0.85
-NEGRISK_PRICE_SUM_MAX = 1.15
-
 
 # =============================================================================
 # MUTUALLY EXCLUSIVE GROUP DETECTION
 # =============================================================================
-
-
-def is_negrisk_exclusive(group: dict) -> bool:
-    """
-    Detect a true negRisk group: multiple mutually-exclusive outcomes where
-    EXACTLY ONE resolves YES (meeting locations, election winners, rate decisions).
-
-    Signal: partition_type == "candidate" AND the outcome YES prices sum to ~1.
-    This distinguishes negRisk events from multi-select "candidate" groups
-    (e.g. "Which cities will Russia enter?") whose prices sum far from 1 because
-    several outcomes can be YES simultaneously.
-
-    A single outcome of such a group is NOT a valid cross-group cover/target:
-    when the partner leg loses, coverage can leak to a sibling outcome.
-    """
-    if group.get("partition_type") != "candidate":
-        return False
-
-    markets = group.get("markets", [])
-    if len(markets) <= 1:
-        return False
-
-    price_sum = sum(m.get("price_yes", 0.0) for m in markets)
-    return NEGRISK_PRICE_SUM_MIN <= price_sum <= NEGRISK_PRICE_SUM_MAX
 
 
 def is_mutually_exclusive_group(group: dict) -> bool:
@@ -182,12 +149,6 @@ def get_cover_markets(
     if not cover_group:
         return []
 
-    # A single outcome of a negRisk group can't reliably cover a cross-group
-    # target: the target can lose via a sibling outcome (the "meet elsewhere"
-    # hole), so the cover fires with P(outcome | partner lost), not ~0.98.
-    if is_negrisk_exclusive(cover_group):
-        return []
-
     probability = cover_info.get("probability", 0.0)
     if probability < MIN_COVER_PROBABILITY:
         return []
@@ -236,15 +197,6 @@ def expand_implication_to_pairs(
     target_group = groups_by_id.get(target_group_id)
 
     if not target_group:
-        return []
-
-    # A single outcome of a negRisk group can't be soundly hedged cross-group
-    # either (symmetric to the cover-side guard): its only valid partners are
-    # its own siblings, which are dropped by the same-group pre-filter anyway.
-    if is_negrisk_exclusive(target_group):
-        logger.debug(
-            f"Skipping negRisk-exclusive target group: {target_group.get('title', '')[:60]}"
-        )
         return []
 
     target_title = impl.get("title", target_group.get("title", ""))

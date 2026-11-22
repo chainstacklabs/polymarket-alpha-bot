@@ -4,6 +4,8 @@
 
 Trades against Polymarket V2 (pUSD collateral, official `polymarket-client` SDK, EIP-712 domain version "2") via per-user deposit wallets (signature type 3): each user supplies an EOA key + a Relayer API key, the deposit wallet is deployed gaslessly, and the relayer pays gas. Legacy V1 was retired on 2026-04-28; for archaeology see the `v1-final` git tag.
 
+Two market protocols trade side by side (Gamma `version`): **v1** CTF markets (trading IDs `clobTokenIds`, balances on the CTF, orders on CTF Exchange V2, domain "2") and **v2** Polymarket Protocol V2 markets from 2026-11-23 (IDs `positionIds`, balances on the PositionManager, orders on ExchangeV3, domain "3"). The SDK routes orders and split/merge for both; pick IDs with `core/markets.py:outcome_token_ids()` and record each leg's `*_protocol` so balances are read from the right ledger.
+
 ## Commands
 
 ```bash
