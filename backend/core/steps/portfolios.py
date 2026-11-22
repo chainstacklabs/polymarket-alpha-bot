@@ -323,6 +323,42 @@ def build_and_save_portfolios(
     return portfolios, summary
 
 
+def merge_and_save_portfolios(
+    new_validated_pairs: list[dict],
+    state: PipelineState,
+    max_cost: float = MAX_COST,
+) -> tuple[list[dict], dict]:
+    """
+    Add portfolios for newly validated pairs to the existing set and save.
+
+    Incremental runs only validate NEW pairs (cached pairs are excluded from
+    expansion), and cached validated pairs carry no prices. So rebuilding
+    from either source alone would wipe every portfolio from earlier runs.
+    Build the new pairs (they carry live prices), keep existing portfolios
+    that aren't superseded, re-sort, and save the union.
+
+    Args:
+        new_validated_pairs: Pairs validated in this run (with prices)
+        state: Pipeline state holding the existing portfolios
+        max_cost: Maximum portfolio cost
+
+    Returns:
+        Tuple of (all portfolios, summary over all of them)
+    """
+    new_portfolios, _ = build_portfolios(new_validated_pairs, max_cost)
+    new_ids = {p["pair_id"] for p in new_portfolios}
+    kept = [p for p in state.get_portfolios() if p.get("pair_id") not in new_ids]
+
+    portfolios = new_portfolios + kept
+    portfolios.sort(key=lambda p: (p["tier"], -p["coverage"]))
+    state.save_portfolios(portfolios)
+
+    logger.info(
+        f"Portfolios: {len(new_portfolios)} new + {len(kept)} kept = {len(portfolios)}"
+    )
+    return portfolios, compute_summary(portfolios)
+
+
 def update_portfolio_prices(
     state: PipelineState,
     price_updates: dict[str, dict],

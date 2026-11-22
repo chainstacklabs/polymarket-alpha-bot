@@ -32,7 +32,10 @@ from core.steps.expand import expand_all_to_pairs, expand_to_pairs
 from core.steps.fetch import fetch_events
 from core.steps.groups import build_groups, extract_markets_from_groups
 from core.steps.implications import extract_implications_batch
-from core.steps.portfolios import build_and_save_portfolios
+from core.steps.portfolios import (
+    build_and_save_portfolios,
+    merge_and_save_portfolios,
+)
 from core.steps.validate import validate_pairs
 
 # =============================================================================
@@ -250,11 +253,17 @@ async def run_async(
         # STEP 7: Build portfolios
         # =====================================================================
         with tracker.step(7, "Build Portfolios"):
-            if validated_pairs:
-                # New valid pairs found — rebuild portfolios from all pairs
-                # (build_and_save_portfolios replaces all existing portfolios)
+            if validated_pairs and full:
+                # Full run: state was reset, so these are all the pairs
                 portfolios, portfolio_summary = build_and_save_portfolios(
                     validated_pairs=validated_pairs,
+                    state=state,
+                )
+            elif validated_pairs:
+                # Incremental: validated_pairs holds only NEW pairs — add them
+                # to the existing portfolios instead of replacing them
+                portfolios, portfolio_summary = merge_and_save_portfolios(
+                    new_validated_pairs=validated_pairs,
                     state=state,
                 )
             elif not full:
