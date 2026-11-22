@@ -14,6 +14,7 @@ import httpx
 from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
+from core.markets import SUPPORTED_MARKET_VERSION, is_supported_version
 from core.paths import GAMMA_API_BASE_URL
 
 # =============================================================================
@@ -89,12 +90,16 @@ def process_events(
     """Process events: filter active, parse JSON fields in markets."""
     json_fields = ["clobTokenIds", "outcomes"]
     processed = []
+    skipped_versions = 0
 
     for event in filter(is_active, events):
         markets = event.get("markets", [])
 
         active_markets = []
         for m in filter(is_active, markets):
+            if not is_supported_version(m):
+                skipped_versions += 1
+                continue
             # Parse JSON string fields
             m = {**m, **{f: parse_json_field(m.get(f)) for f in json_fields if f in m}}
             # Parse outcomePrices as list of floats
@@ -103,6 +108,12 @@ def process_events(
             active_markets.append(m)
 
         processed.append({**event, "markets": active_markets})
+
+    if skipped_versions:
+        logger.info(
+            f"Skipped {skipped_versions} market(s) not on protocol "
+            f"{SUPPORTED_MARKET_VERSION} (Protocol V2 not supported yet)"
+        )
 
     return processed
 

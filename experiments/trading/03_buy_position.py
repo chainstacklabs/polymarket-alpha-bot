@@ -36,6 +36,11 @@ def main() -> None:
     m = httpx.get(
         f"https://gamma-api.polymarket.com/markets/{market_id}", timeout=30
     ).json()
+    # Protocol V2 markets ("v2") use positionIds + ExchangeV3 — not handled here.
+    if m.get("version") != "v1":
+        raise SystemExit(
+            f"Market {market_id} is protocol {m.get('version')!r}; v1 only"
+        )
     tokens = json.loads(m["clobTokenIds"])
     prices = json.loads(m["outcomePrices"])
     condition_id = m["conditionId"]
