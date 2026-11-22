@@ -5,7 +5,7 @@ merge / deploy / approvals) is exercised without network or real funds.
 """
 
 import asyncio
-from unittest.mock import MagicMock, create_autospec, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 from polymarket import SecureClient
 
@@ -91,6 +91,48 @@ def test_buy_skips_sell_below_min_order():
     client.place_market_order.assert_not_called()
     assert result.success is True
     assert "below" in (result.error or "")
+
+
+def _buy(amount: float, market: MarketInfo):
+    wallet = MagicMock(spec=WalletManager)
+    wallet.is_unlocked = True
+    ex = TradingExecutor(wallet)
+    ex.get_market_info = MagicMock(return_value=_async(market))
+    client = _client_for_trading()
+    result = asyncio.run(
+        ex.buy_single_position("m1", "YES", amount=amount, client=client)
+    )
+    return client, result
+
+
+def test_buy_skips_sell_below_market_share_minimum():
+    # $3 split = 3 shares of NO, worth $1.50 (passes $1) but < 5-share minimum
+    client, result = _buy(3.0, _market())
+    client.place_market_order.assert_not_called()
+    assert "5-share minimum" in (result.error or "")
+
+
+def test_buy_skips_sell_below_dollar_minimum():
+    # 6 shares (>= 5) but NO at 0.1 → $0.60 < $1
+    market = MarketInfo(**{**_market().__dict__, "yes_price": 0.9, "no_price": 0.1})
+    client, result = _buy(6.0, market)
+    client.place_market_order.assert_not_called()
+    assert "$1.0 CLOB minimum" in (result.error or "")
+
+
+def test_market_share_minimum_read_from_gamma():
+    ex = TradingExecutor(MagicMock())
+    data = {
+        "version": "v1",
+        "clobTokenIds": '["1", "2"]',
+        "outcomePrices": '["0.5", "0.5"]',
+        "orderMinSize": 15,
+    }
+    with patch(
+        "core.trading.executor.fetch_json_with_retry", AsyncMock(return_value=data)
+    ):
+        info = asyncio.run(ex.get_market_info("m1"))
+    assert info.min_order_shares == 15.0
 
 
 # ── exit: merge via SDK relayer batch ────────────────────────────────────
