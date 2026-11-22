@@ -65,7 +65,7 @@ def main() -> None:
     unwanted_value = amount * unwanted_price
     if unwanted_value >= MIN_ORDER_USD:
         resp = client.place_market_order(
-            token_id=unwanted,
+            asset_id=unwanted,
             side="SELL",
             shares=amount,
             min_price=round(unwanted_price * 0.9, 2),

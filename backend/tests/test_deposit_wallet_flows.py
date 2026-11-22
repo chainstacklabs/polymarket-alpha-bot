@@ -5,9 +5,11 @@ merge / deploy / approvals) is exercised without network or real funds.
 """
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
-from core.trading.executor import TradingExecutor, MarketInfo
+from polymarket import SecureClient
+
+from core.trading.executor import MarketInfo, TradingExecutor
 from core.wallet.manager import WalletManager
 
 
@@ -32,7 +34,8 @@ def _market(condition_id="0xcond", yes="111", no="222") -> MarketInfo:
 
 
 def _client_for_trading() -> MagicMock:
-    client = MagicMock()
+    # Autospec against the real SDK: renamed/removed kwargs fail the tests.
+    client = create_autospec(SecureClient, instance=True)
     client.split_position.return_value.wait.return_value.transaction_hash = "0xsplit"
     client.merge_positions.return_value.wait.return_value.transaction_hash = "0xmerge"
     client.place_market_order.return_value = _accepted_order()
@@ -64,7 +67,7 @@ def test_buy_single_position_splits_then_sells_unwanted():
     # Unwanted side (NO for a YES buy) sold via sigtype-3 market order
     client.place_market_order.assert_called_once()
     sell_kwargs = client.place_market_order.call_args.kwargs
-    assert sell_kwargs["token_id"] == "222"
+    assert sell_kwargs["asset_id"] == "222"
     assert sell_kwargs["side"] == "SELL"
     assert sell_kwargs["order_type"] == "FAK"
 
@@ -88,6 +91,48 @@ def test_buy_skips_sell_below_min_order():
     client.place_market_order.assert_not_called()
     assert result.success is True
     assert "below" in (result.error or "")
+
+
+def _buy(amount: float, market: MarketInfo):
+    wallet = MagicMock(spec=WalletManager)
+    wallet.is_unlocked = True
+    ex = TradingExecutor(wallet)
+    ex.get_market_info = MagicMock(return_value=_async(market))
+    client = _client_for_trading()
+    result = asyncio.run(
+        ex.buy_single_position("m1", "YES", amount=amount, client=client)
+    )
+    return client, result
+
+
+def test_buy_skips_sell_below_market_share_minimum():
+    # $3 split = 3 shares of NO, worth $1.50 (passes $1) but < 5-share minimum
+    client, result = _buy(3.0, _market())
+    client.place_market_order.assert_not_called()
+    assert "5-share minimum" in (result.error or "")
+
+
+def test_buy_skips_sell_below_dollar_minimum():
+    # 6 shares (>= 5) but NO at 0.1 → $0.60 < $1
+    market = MarketInfo(**{**_market().__dict__, "yes_price": 0.9, "no_price": 0.1})
+    client, result = _buy(6.0, market)
+    client.place_market_order.assert_not_called()
+    assert "$1.0 CLOB minimum" in (result.error or "")
+
+
+def test_market_share_minimum_read_from_gamma():
+    ex = TradingExecutor(MagicMock())
+    data = {
+        "version": "v1",
+        "clobTokenIds": '["1", "2"]',
+        "outcomePrices": '["0.5", "0.5"]',
+        "orderMinSize": 15,
+    }
+    with patch(
+        "core.trading.executor.fetch_json_with_retry", AsyncMock(return_value=data)
+    ):
+        info = asyncio.run(ex.get_market_info("m1"))
+    assert info.min_order_shares == 15.0
 
 
 # ── exit: merge via SDK relayer batch ────────────────────────────────────
@@ -156,3 +201,54 @@ def _async(value):
         return value
 
     return _coro()
+
+
+# ── approval status: delegated to the SDK's required set ──────────────────
+
+
+def _manager_with_deposit(deposit: str | None) -> WalletManager:
+    storage = MagicMock()
+    storage.load.return_value = {"address": "0xEOA", "deposit_wallet_address": deposit}
+    return WalletManager(storage, "http://rpc")
+
+
+def _patched_public_client(state=None, error: Exception | None = None):
+    client = MagicMock()
+    if error:
+        client.get_trading_approvals_state.side_effect = error
+    else:
+        client.get_trading_approvals_state.return_value = state
+    cls = MagicMock()
+    cls.return_value.__enter__.return_value = client
+    return patch("polymarket.PublicClient", cls), client
+
+
+def test_check_approvals_uses_sdk_state_for_deposit_wallet():
+    wallet = _manager_with_deposit("0xDeposit")
+    ctx, client = _patched_public_client(state=MagicMock(is_fully_approved=True))
+    with ctx:
+        assert wallet.check_approvals() is True
+    client.get_trading_approvals_state.assert_called_once_with(wallet="0xDeposit")
+
+
+def test_check_approvals_false_when_sdk_reports_missing():
+    wallet = _manager_with_deposit("0xDeposit")
+    ctx, _ = _patched_public_client(state=MagicMock(is_fully_approved=False))
+    with ctx:
+        assert wallet.check_approvals() is False
+
+
+def test_check_approvals_false_on_lookup_error_or_no_deposit_wallet():
+    ctx, _ = _patched_public_client(error=RuntimeError("data api down"))
+    with ctx:
+        assert _manager_with_deposit("0xDeposit").check_approvals() is False
+        assert _manager_with_deposit(None).check_approvals() is False
+
+
+def test_sdk_autospec_rejects_unknown_kwargs():
+    client = _client_for_trading()
+    try:
+        client.place_market_order(bogus_kwarg=1, side="SELL")
+    except TypeError:
+        return
+    raise AssertionError("autospec should reject kwargs the SDK doesn't accept")

@@ -18,6 +18,9 @@ from core.wallet.manager import WalletManager
 
 # Polymarket enforces a $1 minimum CLOB order size.
 MIN_ORDER_USD = 1.0
+# Per-market share minimum (Gamma `orderMinSize`); 5 on every live market
+# checked 2026-11-22. Used when Gamma omits the field.
+DEFAULT_MIN_ORDER_SHARES = 5.0
 
 
 @dataclass
@@ -32,6 +35,7 @@ class MarketInfo:
     neg_risk: bool = False
     fees_enabled: bool = False
     fee_schedule: Optional[dict] = None
+    min_order_shares: float = DEFAULT_MIN_ORDER_SHARES
 
 
 @dataclass
@@ -97,6 +101,9 @@ class TradingExecutor:
             neg_risk=bool(data.get("negRisk", False)),
             fees_enabled=bool(data.get("feesEnabled", False)),
             fee_schedule=data.get("feeSchedule"),
+            min_order_shares=float(
+                data.get("orderMinSize") or DEFAULT_MIN_ORDER_SHARES
+            ),
         )
 
     def _split_position(self, client, condition_id: str, amount_usd: float) -> str:
@@ -181,7 +188,14 @@ class TradingExecutor:
         clob_error = None
 
         if not skip_clob_sell and unwanted_token:
-            if amount * unwanted_price < MIN_ORDER_USD:
+            # A split of $N mints N shares of each side.
+            if amount < market.min_order_shares:
+                clob_error = (
+                    f"Unwanted side {amount:.2f} shares below the market's "
+                    f"{market.min_order_shares:g}-share minimum — skipping sell"
+                )
+                logger.warning(clob_error)
+            elif amount * unwanted_price < MIN_ORDER_USD:
                 clob_error = (
                     f"Unwanted side value ${amount * unwanted_price:.2f} below "
                     f"${MIN_ORDER_USD} CLOB minimum — skipping sell"

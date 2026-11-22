@@ -14,7 +14,7 @@ from web3 import Web3
 from loguru import logger
 
 from core.wallet.storage import WalletStorage
-from core.wallet.contracts import CONTRACTS, ERC20_ABI, CTF_ABI
+from core.wallet.contracts import CONTRACTS, ERC20_ABI
 
 
 @dataclass
@@ -166,8 +166,8 @@ class WalletManager:
                 "Could not init trading client (unlock + relayer key required)"
             )
 
-        # SecureClient.create() already deploys the deposit wallet (b8:
-        # setup_gasless_wallet/is_gasless_ready are deprecated no-ops).
+        # SecureClient.create() already deploys the deposit wallet
+        # (setup_gasless_wallet/is_gasless_ready are deprecated no-ops).
         deposit_address = str(client.wallet)
         self._try_approvals(client)
         self.storage.set_deposit_wallet(deposit_address)
@@ -230,40 +230,27 @@ class WalletManager:
         return WalletBalances(pol=pol, pusd=pusd_balance)
 
     def check_approvals(self) -> bool:
-        """Check trading approvals on the deposit wallet."""
+        """True if the deposit wallet has every approval the SDK trades with.
+
+        Asks the SDK (indexed Data API state, no unlock needed) instead of a
+        hand-kept spender list: the SDK splits via the CollateralAdapters and
+        its required set grows with new contracts (e.g. Protocol V2 modules),
+        which a local list silently misses. Indexed state can lag a fresh
+        grant by a little while.
+        """
         deposit = self.deposit_wallet_address
         if not deposit:
             return False
 
-        w3 = self._get_web3()
-        checksum = Web3.to_checksum_address(deposit)
+        from polymarket import PublicClient
 
-        pusd = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["PUSD"]),
-            abi=ERC20_ABI,
-        )
-        ctf = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["CTF"]),
-            abi=CTF_ABI,
-        )
-
-        collateral_spenders = [
-            CONTRACTS["CTF"],
-            CONTRACTS["CTF_EXCHANGE"],
-            CONTRACTS["NEG_RISK_CTF_EXCHANGE"],
-        ]
-        ctf_operators = [
-            CONTRACTS["CTF_EXCHANGE"],
-            CONTRACTS["NEG_RISK_CTF_EXCHANGE"],
-        ]
-
-        for spender in collateral_spenders:
-            if pusd.functions.allowance(checksum, spender).call() == 0:
-                return False
-        for operator in ctf_operators:
-            if not ctf.functions.isApprovedForAll(checksum, operator).call():
-                return False
-        return True
+        try:
+            with PublicClient() as client:
+                state = client.get_trading_approvals_state(wallet=deposit)
+        except Exception as e:
+            logger.warning(f"Could not read trading approvals for {deposit}: {e}")
+            return False
+        return state.is_fully_approved
 
     def _is_deposit_wallet_deployed(self) -> bool:
         deposit = self.deposit_wallet_address
