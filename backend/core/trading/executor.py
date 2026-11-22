@@ -13,7 +13,7 @@ import httpx
 from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
-from core.markets import is_supported_version
+from core.markets import market_version, outcome_token_ids
 from core.wallet.manager import WalletManager
 
 # Polymarket enforces a $1 minimum CLOB order size.
@@ -36,6 +36,7 @@ class MarketInfo:
     fees_enabled: bool = False
     fee_schedule: Optional[dict] = None
     min_order_shares: float = DEFAULT_MIN_ORDER_SHARES
+    protocol: str = "v1"
 
 
 @dataclass
@@ -54,6 +55,7 @@ class TradeResult:
     unwanted_token_id: str = ""
     ctf_token_ids: Optional[list[str]] = None
     entry_price: float = 0.0
+    protocol: str = "v1"
 
 
 @dataclass
@@ -79,15 +81,16 @@ class TradingExecutor:
                 http, f"https://gamma-api.polymarket.com/markets/{market_id}"
             )
 
-        if not is_supported_version(data):
-            # Protocol V2 markets use positionIds + ExchangeV3; reading
-            # clobTokenIds here would trade the wrong token.
+        version = market_version(data)
+        if version is None:
             raise ValueError(
-                f"Market {market_id} is on protocol {data.get('version')!r}; "
-                "only CTF (v1) markets are supported"
+                f"Market {market_id} is on unsupported protocol "
+                f"{data.get('version')!r}"
             )
 
-        clob_tokens = json.loads(data.get("clobTokenIds", "[]"))
+        # v1: clobTokenIds (CTF), v2: positionIds (PositionManager). The SDK
+        # routes split/merge and order signing for both.
+        clob_tokens = outcome_token_ids(data)
         prices = json.loads(data.get("outcomePrices", "[0.5, 0.5]"))
 
         return MarketInfo(
@@ -104,6 +107,7 @@ class TradingExecutor:
             min_order_shares=float(
                 data.get("orderMinSize") or DEFAULT_MIN_ORDER_SHARES
             ),
+            protocol=version,
         )
 
     def _split_position(self, client, condition_id: str, amount_usd: float) -> str:
@@ -231,6 +235,7 @@ class TradingExecutor:
             unwanted_token_id=unwanted_token_id,
             ctf_token_ids=[t for t in (market.yes_token_id, market.no_token_id) if t],
             entry_price=entry_price,
+            protocol=market.protocol,
         )
 
     async def buy_pair(

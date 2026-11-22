@@ -163,9 +163,8 @@ def process_events(
 
         active_markets = []
         for m in filter(is_active, markets):
-            # Only CTF ("v1") markets; Protocol V2 ("v2") uses positionIds instead
-            # of clobTokenIds. Missing/unknown versions are rejected too.
-            if m.get("version") != "v1":
+            # v1 = CTF markets, v2 = Protocol V2; missing/unknown are rejected.
+            if m.get("version") not in ("v1", "v2"):
                 continue
             m = {**m, **{f: parse_json_field(m.get(f)) for f in json_fields if f in m}}
             # Parse outcomePrices: JSON string → list of floats

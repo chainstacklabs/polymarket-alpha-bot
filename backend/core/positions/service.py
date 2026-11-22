@@ -8,6 +8,7 @@ import httpx
 from web3 import Web3
 from loguru import logger
 
+from core.markets import outcome_token_ids
 from core.wallet.manager import WalletManager
 from core.wallet.contracts import CONTRACTS, CTF_ABI
 from server.price_aggregation import price_aggregation
@@ -156,8 +157,24 @@ class PositionService:
         """
         return self.wallet.deposit_wallet_address
 
-    def _get_balances_batch(self, token_ids: list[str]) -> list[float]:
-        """Query multiple token balances in a single RPC call using Multicall3."""
+    @staticmethod
+    def _ledger_address(protocol: str) -> str:
+        """ERC-1155 contract holding a market's outcome balances.
+
+        v1 (CTF markets) -> Conditional Tokens; v2 (Protocol V2) ->
+        PositionManager. Both expose balanceOf(address,uint256).
+        """
+        key = "POSITION_MANAGER" if protocol == "v2" else "CTF"
+        return Web3.to_checksum_address(CONTRACTS[key])
+
+    def _get_balances_batch(
+        self, token_ids: list[str], protocols: Optional[list[str]] = None
+    ) -> list[float]:
+        """Query multiple token balances in a single RPC call using Multicall3.
+
+        `protocols[i]` ("v1"/"v2", default "v1") picks the ledger for token i.
+        """
+        protocols = protocols or ["v1"] * len(token_ids)
         if not self._token_holder or not token_ids:
             return [0.0] * len(token_ids)
 
@@ -179,13 +196,12 @@ class PositionService:
 
             # Build calldata for each balanceOf call
             calls = []
-            ctf_address = Web3.to_checksum_address(CONTRACTS["CTF"])
-            for token_id in valid_token_ids:
-                # Use the contract function to encode calldata
+            for idx, token_id in zip(valid_indices, valid_token_ids):
+                # Same balanceOf(address,uint256) ABI on both ledgers
                 calldata = ctf.functions.balanceOf(
                     owner, int(token_id)
                 )._encode_transaction_data()
-                calls.append((ctf_address, calldata))
+                calls.append((self._ledger_address(protocols[idx]), calldata))
 
             # Execute multicall
             _, return_data = multicall.functions.aggregate(calls).call()
@@ -201,16 +217,21 @@ class PositionService:
         except Exception as e:
             logger.error(f"Multicall failed, falling back to individual calls: {e}")
             # Fallback to individual calls
-            return [self._get_token_balance_single(tid) for tid in token_ids]
+            return [
+                self._get_token_balance_single(tid, proto)
+                for tid, proto in zip(token_ids, protocols)
+            ]
 
-    def _get_token_balance_single(self, token_id: str) -> float:
+    def _get_token_balance_single(self, token_id: str, protocol: str = "v1") -> float:
         """Query single token balance (fallback)."""
         if not self._token_holder or not token_id:
             return 0.0
 
         try:
-            ctf = self._get_ctf_contract()
-            balance_wei = ctf.functions.balanceOf(
+            ledger = self._get_web3().eth.contract(
+                address=self._ledger_address(protocol), abi=CTF_ABI
+            )
+            balance_wei = ledger.functions.balanceOf(
                 Web3.to_checksum_address(self._token_holder),
                 int(token_id),
             ).call()
@@ -242,7 +263,7 @@ class PositionService:
                     f"https://gamma-api.polymarket.com/markets/{market_id}"
                 )
                 data = resp.json()
-                clob_tokens = json.loads(data.get("clobTokenIds", "[]"))
+                clob_tokens = outcome_token_ids(data)
                 if len(clob_tokens) >= 2:
                     self._token_cache[market_id] = (clob_tokens[0], clob_tokens[1])
                     return (clob_tokens[0], clob_tokens[1])
@@ -474,6 +495,10 @@ class PositionService:
                 tx_key = f"{side}_split_tx"
                 if self._parse_ctf_ids(entry.get(ctf_key, "")) or not entry.get(tx_key):
                     continue
+                # Receipt parsing reads CTF TransferBatch logs; Protocol V2
+                # legs always store their IDs at buy time.
+                if entry.get(f"{side}_protocol") == "v2":
+                    continue
                 # Parse TX receipt for actual CTF token IDs
                 try:
                     tx_hash = entry[tx_key]
@@ -587,8 +612,14 @@ class PositionService:
             token_ids.append(cover_unwanted_id)
             token_id_map.append((i, "cover_unwanted"))
 
+        # Ledger per token: target/cover legs can be on different protocols
+        protocols = []
+        for pos_idx, field in token_id_map:
+            side = "target" if field.startswith("target") else "cover"
+            protocols.append(entries[pos_idx].get(f"{side}_protocol") or "v1")
+
         # Batch query all balances in one RPC call
-        balances = self._get_balances_batch(token_ids)
+        balances = self._get_balances_batch(token_ids, protocols)
 
         # Organize balances by position
         position_balances = [{} for _ in entries]
