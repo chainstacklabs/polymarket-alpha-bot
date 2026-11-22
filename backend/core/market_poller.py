@@ -31,6 +31,7 @@ from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
 from core.incremental import process_new_event
+from core.markets import is_supported_version
 from core.paths import GAMMA_API_BASE_URL
 from core.state import load_state
 
@@ -79,6 +80,12 @@ def process_event_markets(event: dict[str, Any]) -> dict[str, Any]:
 
     processed_markets = []
     for m in filter(is_active, markets):
+        if not is_supported_version(m):
+            logger.info(
+                f"Skipping market {m.get('id')}: protocol {m.get('version')!r} "
+                "not supported yet"
+            )
+            continue
         processed = {**m}
         for field in json_fields:
             if field in processed:

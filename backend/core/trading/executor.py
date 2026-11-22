@@ -13,6 +13,7 @@ import httpx
 from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
+from core.markets import is_supported_version
 from core.wallet.manager import WalletManager
 
 # Polymarket enforces a $1 minimum CLOB order size.
@@ -72,6 +73,14 @@ class TradingExecutor:
         async with httpx.AsyncClient(timeout=30.0) as http:
             data = await fetch_json_with_retry(
                 http, f"https://gamma-api.polymarket.com/markets/{market_id}"
+            )
+
+        if not is_supported_version(data):
+            # Protocol V2 markets use positionIds + ExchangeV3; reading
+            # clobTokenIds here would trade the wrong token.
+            raise ValueError(
+                f"Market {market_id} is on protocol {data.get('version')!r}; "
+                "only CTF (v1) markets are supported"
             )
 
         clob_tokens = json.loads(data.get("clobTokenIds", "[]"))
