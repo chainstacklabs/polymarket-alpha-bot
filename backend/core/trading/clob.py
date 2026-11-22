@@ -51,7 +51,7 @@ def sell_via_clob(
     try:
         min_price = compute_sell_price(price, slippage)
         resp = client.place_market_order(
-            token_id=token_id,
+            asset_id=token_id,
             side="SELL",
             shares=amount,
             min_price=min_price,
