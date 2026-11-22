@@ -82,8 +82,8 @@ def process_event_markets(event: dict[str, Any]) -> dict[str, Any]:
     for m in filter(is_active, markets):
         if not is_supported_version(m):
             logger.info(
-                f"Skipping market {m.get('id')}: protocol {m.get('version')!r} "
-                "not supported yet"
+                f"Skipping market {m.get('id')}: unsupported protocol "
+                f"{m.get('version')!r}"
             )
             continue
         processed = {**m}

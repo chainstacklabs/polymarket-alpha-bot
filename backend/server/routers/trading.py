@@ -155,6 +155,8 @@ async def buy_pair(req: BuyPairRequest):
                     target_clob_filled=result.target.clob_filled,
                     cover_clob_order_id=result.cover.clob_order_id,
                     cover_clob_filled=result.cover.clob_filled,
+                    target_protocol=result.target.protocol,
+                    cover_protocol=result.cover.protocol,
                 )
 
                 storage = PositionStorage()

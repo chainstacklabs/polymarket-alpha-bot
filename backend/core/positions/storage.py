@@ -60,6 +60,10 @@ class PositionEntry:
     selling_target: bool = False
     selling_cover: bool = False
     realized_proceeds: float = 0.0  # USDC recovered from exit sells/merges
+    # Market protocol per leg: "v1" (CTF balances) or "v2" (PositionManager).
+    # Positions recorded before V2 support are all v1.
+    target_protocol: str = "v1"
+    cover_protocol: str = "v1"
 
 
 class PositionStorage:

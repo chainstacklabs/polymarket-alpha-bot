@@ -11,6 +11,9 @@ CONTRACTS = {
     "PUSD_IMPL": "0x6bBCef9f7ef3B6C592c99e0f206a0DE94Ad0925f",
     "COLLATERAL_ONRAMP": "0x93070a847efEf7F70739046A929D47a521F5B8ee",
     "COLLATERAL_OFFRAMP": "0x2957922Eb93258b93368531d39fAcCA3B4dC5854",
+    # Protocol V2 (Gamma version "v2"): outcome balances live on the
+    # PositionManager (ERC-1155, same balanceOf signature as the CTF).
+    "POSITION_MANAGER": "0x006F54F7f9A22e0000CC2AB60031000000ae9fEF",
 }
 
 ERC20_ABI = [

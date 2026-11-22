@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 
 from core.http_retry import PermanentError, TransientError, fetch_json_with_retry
+from core.markets import outcome_token_ids
 from core.paths import GAMMA_API_BASE_URL, LIVE_DIR
 
 # =============================================================================
@@ -158,15 +159,14 @@ class TokenResolver:
                     market = await fetch_json_with_retry(
                         client, f"{GAMMA_API_BASE_URL}/markets/{market_id}"
                     )
-                    clob_token_ids = market.get("clobTokenIds", "[]")
+                    # v1 clobTokenIds / v2 positionIds, chosen by version; the
+                    # market WebSocket takes the same IDs for both
+                    clob_token_ids = outcome_token_ids(market)
 
-                    # Parse JSON string if needed
-                    if isinstance(clob_token_ids, str):
-                        clob_token_ids = json.loads(clob_token_ids)
-
-                    if not clob_token_ids or len(clob_token_ids) < 2:
+                    if len(clob_token_ids) < 2:
                         logger.warning(
-                            f"Market {market_id} has invalid clobTokenIds: {clob_token_ids}"
+                            f"Market {market_id} has no usable token IDs "
+                            f"(version {market.get('version')!r})"
                         )
                         continue
 

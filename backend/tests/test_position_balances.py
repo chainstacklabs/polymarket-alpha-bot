@@ -24,6 +24,9 @@ def _service(deposit: str | None = DEPOSIT) -> tuple[PositionService, MagicMock]
     ctf.functions.balanceOf.return_value.call.return_value = 2_500_000
     ctf.functions.balanceOf.return_value._encode_transaction_data.return_value = b""
     svc._get_ctf_contract = lambda: ctf
+    w3 = MagicMock()
+    w3.eth.contract.return_value = ctf
+    svc._get_web3 = lambda: w3
     return svc, ctf
 
 
@@ -55,3 +58,37 @@ def test_no_deposit_wallet_means_zero_without_rpc():
     assert svc._get_balances_batch(["1", "2"]) == [0.0, 0.0]
     assert svc._get_token_balance_single("1") == 0.0
     ctf.functions.balanceOf.assert_not_called()
+
+
+def test_batch_reads_each_leg_from_its_protocol_ledger():
+    """v1 legs read the CTF, v2 legs read the PositionManager."""
+    from core.wallet.contracts import CONTRACTS
+
+    svc, _ = _service()
+    multicall = MagicMock()
+    multicall.functions.aggregate.return_value.call.return_value = (
+        1,
+        [(1_000_000).to_bytes(32, "big"), (2_000_000).to_bytes(32, "big")],
+    )
+    svc._get_multicall_contract = lambda: multicall
+
+    assert svc._get_balances_batch(["1", "2"], ["v1", "v2"]) == [1.0, 2.0]
+    calls = multicall.functions.aggregate.call_args.args[0]
+    assert [target for target, _ in calls] == [
+        Web3.to_checksum_address(CONTRACTS["CTF"]),
+        Web3.to_checksum_address(CONTRACTS["POSITION_MANAGER"]),
+    ]
+
+
+def test_single_balance_v2_uses_position_manager():
+    from core.wallet.contracts import CONTRACTS
+
+    svc, _ = _service()
+    w3 = MagicMock()
+    w3.eth.contract.return_value.functions.balanceOf.return_value.call.return_value = 5_000_000
+    svc._get_web3 = lambda: w3
+
+    assert svc._get_token_balance_single("9", "v2") == 5.0
+    assert w3.eth.contract.call_args.kwargs["address"] == Web3.to_checksum_address(
+        CONTRACTS["POSITION_MANAGER"]
+    )

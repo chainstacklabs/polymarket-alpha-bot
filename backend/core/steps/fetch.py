@@ -14,7 +14,7 @@ import httpx
 from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
-from core.markets import SUPPORTED_MARKET_VERSION, is_supported_version
+from core.markets import SUPPORTED_MARKET_VERSIONS, is_supported_version
 from core.paths import GAMMA_API_BASE_URL
 
 # =============================================================================
@@ -111,8 +111,8 @@ def process_events(
 
     if skipped_versions:
         logger.info(
-            f"Skipped {skipped_versions} market(s) not on protocol "
-            f"{SUPPORTED_MARKET_VERSION} (Protocol V2 not supported yet)"
+            f"Skipped {skipped_versions} market(s) on an unsupported protocol "
+            f"(supported: {', '.join(SUPPORTED_MARKET_VERSIONS)})"
         )
 
     return processed
