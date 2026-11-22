@@ -24,6 +24,36 @@ MAX_TOKENS_PER_CONNECTION = 500
 
 
 # =============================================================================
+# BOOK PARSING
+# =============================================================================
+
+
+def _level_price(level: object) -> float | None:
+    """Price of one book level: {"price": "0.45", ...}, [price, size] or a bare price."""
+    try:
+        if isinstance(level, dict):
+            return float(level["price"])
+        if isinstance(level, (list, tuple)):
+            return float(level[0])
+        return float(level)  # type: ignore[arg-type]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def best_book_price(levels: list | None, side: str) -> float | None:
+    """Best price on one side of a book snapshot: highest bid or lowest ask.
+
+    Polymarket sends levels worst-to-best (bids ascending, asks descending),
+    so the first entry is the WORST price. Take max/min instead of relying on
+    any ordering.
+    """
+    prices = [p for p in map(_level_price, levels or []) if p is not None]
+    if not prices:
+        return None
+    return max(prices) if side == "bid" else min(prices)
+
+
+# =============================================================================
 # CLOB WEBSOCKET CLIENT
 # =============================================================================
 
@@ -300,18 +330,8 @@ class ClobWebSocketClient:
         bids = data.get("bids", [])
         asks = data.get("asks", [])
 
-        def extract_best_price(orders: list) -> float | None:
-            if not orders:
-                return None
-            first = orders[0]
-            if isinstance(first, list):
-                return float(first[0]) if first else None
-            elif isinstance(first, dict):
-                return float(first.get("price", 0))
-            return float(first) if first else None
-
-        best_bid = extract_best_price(bids)
-        best_ask = extract_best_price(asks)
+        best_bid = best_book_price(bids, "bid")
+        best_ask = best_book_price(asks, "ask")
 
         if best_bid is not None or best_ask is not None:
             try:
