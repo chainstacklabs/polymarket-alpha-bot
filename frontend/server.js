@@ -6,6 +6,7 @@ const { createProxyMiddleware } = require('http-proxy-middleware')
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = 'localhost'
 const port = parseInt(process.env.PORT, 10) || 3000
+const listenHost = process.env.HOST || '127.0.0.1'
 const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
 
 const app = next({ dev, hostname, port })
@@ -57,7 +58,9 @@ app.prepare().then(() => {
     // Don't destroy other sockets - Next.js needs them for HMR
   })
 
-  server.listen(port, () => {
+  // Bind to loopback only: the API behind this proxy can move funds and has
+  // no login. Set HOST=0.0.0.0 only on a trusted network.
+  server.listen(port, listenHost, () => {
     console.log(`> Ready on http://${hostname}:${port}`)
     console.log(`> Backend proxy: ${backendUrl}`)
     console.log(`> WebSocket proxy: /ws/* -> ${backendUrl}/*`)

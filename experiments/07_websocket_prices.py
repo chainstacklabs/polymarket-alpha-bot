@@ -270,19 +270,21 @@ class PolymarketPriceStream:
         asks = data.get("asks", [])
 
         # Handle different formats: [["price", "size"], ...] or [{"price": x}, ...]
-        def extract_price(orders: list) -> float | None:
-            if not orders:
-                return None
-            first = orders[0]
-            if isinstance(first, list):
-                return float(first[0]) if first else None
-            elif isinstance(first, dict):
-                return float(first.get("price", 0))
-            else:
-                return float(first) if first else None
+        # Levels arrive worst-to-best, so take max bid / min ask, not orders[0].
+        def level_prices(orders: list) -> list[float]:
+            out = []
+            for o in orders:
+                if isinstance(o, dict):
+                    out.append(float(o.get("price", 0)))
+                elif isinstance(o, list) and o:
+                    out.append(float(o[0]))
+                elif o:
+                    out.append(float(o))
+            return out
 
-        best_bid = extract_price(bids)
-        best_ask = extract_price(asks)
+        bid_prices, ask_prices = level_prices(bids), level_prices(asks)
+        best_bid = max(bid_prices) if bid_prices else None
+        best_ask = min(ask_prices) if ask_prices else None
 
         self.last_prices[asset_id] = {
             "bid": best_bid,

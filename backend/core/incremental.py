@@ -34,7 +34,7 @@ from core.state import PipelineState, export_live_data, load_state
 from core.steps.expand import expand_to_pairs
 from core.steps.groups import build_group_from_event, extract_markets_from_groups
 from core.steps.implications import extract_implications
-from core.steps.portfolios import build_portfolios
+from core.steps.portfolios import merge_and_save_portfolios
 from core.steps.validate import validate_pairs
 
 # =============================================================================
@@ -205,12 +205,12 @@ async def _handle_new_group(
 
     # Step 4d: Build portfolios
     if validated_pairs:
-        # Get ALL validated pairs (cached + new) to rebuild complete portfolio set
-        all_validated = state.get_all_validated_pairs()
-
-        # Build complete portfolio list
-        portfolios, portfolio_summary = build_portfolios(all_validated)
-        state.save_portfolios(portfolios)
+        # Add the new pairs (they carry live prices) to existing portfolios.
+        # Cached validated pairs have no prices, so rebuilding from them
+        # would drop every portfolio.
+        portfolios, portfolio_summary = merge_and_save_portfolios(
+            validated_pairs, state
+        )
     else:
         portfolios = state.get_portfolios()
         portfolio_summary = {"total_portfolios": len(portfolios)}
@@ -285,9 +285,9 @@ async def _handle_existing_group(
 
     # Rebuild portfolios
     if validated_pairs:
-        all_validated = state.get_all_validated_pairs()
-        portfolios, portfolio_summary = build_portfolios(all_validated)
-        state.save_portfolios(portfolios)
+        portfolios, portfolio_summary = merge_and_save_portfolios(
+            validated_pairs, state
+        )
     else:
         portfolios = state.get_portfolios()
         portfolio_summary = {"total_portfolios": len(portfolios)}

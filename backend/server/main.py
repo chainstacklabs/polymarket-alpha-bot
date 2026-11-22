@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 load_dotenv()  # Load .env before any modules that read env vars at import time
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from core.market_poller import market_poller
@@ -23,6 +22,7 @@ from server.routers import (
     wallet,
     trading,
 )
+from server.security import add_origin_protection
 
 
 @asynccontextmanager
@@ -48,14 +48,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS for Next.js frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for local dev
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS allow-list + refuse writes from foreign browser origins (see security.py)
+add_origin_protection(app)
 
 # Include routers
 app.include_router(data.router, prefix="/data", tags=["data"])

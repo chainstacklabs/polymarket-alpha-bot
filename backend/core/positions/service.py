@@ -147,9 +147,18 @@ class PositionService:
             )
         return self._multicall
 
+    @property
+    def _token_holder(self) -> Optional[str]:
+        """Address that holds the outcome tokens.
+
+        Trades run through the sigtype-3 deposit wallet, so splits land the
+        tokens there — never on the signing EOA (``wallet.address``).
+        """
+        return self.wallet.deposit_wallet_address
+
     def _get_balances_batch(self, token_ids: list[str]) -> list[float]:
         """Query multiple token balances in a single RPC call using Multicall3."""
-        if not self.wallet.address or not token_ids:
+        if not self._token_holder or not token_ids:
             return [0.0] * len(token_ids)
 
         # Filter out empty token IDs but track their positions
@@ -166,7 +175,7 @@ class PositionService:
         try:
             ctf = self._get_ctf_contract()
             multicall = self._get_multicall_contract()
-            owner = Web3.to_checksum_address(self.wallet.address)
+            owner = Web3.to_checksum_address(self._token_holder)
 
             # Build calldata for each balanceOf call
             calls = []
@@ -196,13 +205,13 @@ class PositionService:
 
     def _get_token_balance_single(self, token_id: str) -> float:
         """Query single token balance (fallback)."""
-        if not self.wallet.address or not token_id:
+        if not self._token_holder or not token_id:
             return 0.0
 
         try:
             ctf = self._get_ctf_contract()
             balance_wei = ctf.functions.balanceOf(
-                Web3.to_checksum_address(self.wallet.address),
+                Web3.to_checksum_address(self._token_holder),
                 int(token_id),
             ).call()
             return balance_wei / 1e6
