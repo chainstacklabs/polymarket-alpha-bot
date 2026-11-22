@@ -82,6 +82,7 @@ export function usePortfolioPrices(
   const mountedRef = useRef(true) // Track if component is mounted
   const wsFailedRef = useRef(false) // Track if WS has failed (use polling instead)
   const statusRef = useRef<ConnectionStatus>(status) // Ref for stable callback identity
+  const connectRef = useRef<() => void>(() => {}) // Lets the reconnect timer call the latest connect
 
   // Keep statusRef in sync with status state
   useEffect(() => {
@@ -351,7 +352,7 @@ export function usePortfolioPrices(
         if (mountedRef.current) {
           reconnectTimeoutRef.current = setTimeout(() => {
             console.log('Attempting to reconnect...')
-            connect()
+            connectRef.current()
           }, RECONNECT_DELAY)
         }
       }
@@ -395,6 +396,10 @@ export function usePortfolioPrices(
       startPolling() // Fall back to polling
     }
   }, [startPolling, stopPolling])
+
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   // Initial connection - only run once on mount
   useEffect(() => {

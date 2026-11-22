@@ -25,7 +25,11 @@ export function PipelineDropdown() {
     try {
       const res = await fetch(`${getApiBaseUrl()}/pipeline/status`)
       if (res.ok) {
-        setStatus(await res.json())
+        const data: PipelineStatus = await res.json()
+        setStatus(data)
+        // The server is the source of truth: clear the local "starting" flag
+        // once it reports no run in progress.
+        if (data.running === false) setRunningPipeline(false)
       }
     } catch (error) {
       console.debug('Failed to fetch pipeline status:', error)
@@ -33,18 +37,12 @@ export function PipelineDropdown() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the await, not during the effect
     fetchStatus()
     // Poll more frequently when running
     const interval = setInterval(fetchStatus, status?.running ? 2000 : 10000)
     return () => clearInterval(interval)
   }, [status?.running])
-
-  // Sync local state with server state
-  useEffect(() => {
-    if (status?.running === false && runningPipeline) {
-      setRunningPipeline(false)
-    }
-  }, [status?.running, runningPipeline])
 
   // Close dropdown when clicking outside
   useEffect(() => {

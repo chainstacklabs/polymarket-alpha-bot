@@ -62,9 +62,12 @@ data/               # Pipeline outputs (gitignored)
 | `GET /pipeline/status` | Pipeline state & run history |
 | `POST /pipeline/run/production` | Trigger pipeline run |
 | `POST /pipeline/reset` | Clear pipeline state |
-| `GET,POST /positions` | Position CRUD |
+| `GET,POST /positions` | List positions (with live P&L) / record one |
+| `GET,DELETE /positions/{id}` | One position / delete its record (on-chain tokens untouched) |
+| `PATCH /positions/{id}/notes` | Update position notes |
 | `POST /positions/{id}/sell` | Sell position tokens via CLOB FAK |
-| `POST /positions/{id}/merge` | Merge complementary tokens (CTF mergePositions) |
+| `POST /positions/{id}/merge` | Merge complementary tokens (SDK routes CTF or Router by protocol) |
+| `POST /positions/{id}/retry` | Retry selling leftover unwanted tokens on pending positions |
 | `POST /positions/{id}/exit` | Orchestrated sell + merge fallback |
 | `POST /trading/buy-pair` | Execute covered pair trade |
 | `POST /trading/buy-pair/estimate` | Estimate trade cost |

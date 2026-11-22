@@ -46,11 +46,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install (from package-lock.json)
         run: npm ci
+      - name: Lint (check only, no auto-fix)
+        run: |
+          npx prettier --check .
+          npx eslint .
       - name: Typecheck
         run: npm run typecheck
       - name: Build
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
-      # ESLint is not enforced yet: 5 pre-existing react-hooks (React
-      # Compiler) errors need fixing first.

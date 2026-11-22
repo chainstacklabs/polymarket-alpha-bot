@@ -177,6 +177,7 @@ export default function PositionsPage() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the await, not during the effect
     fetchPositions()
     const interval = setInterval(fetchPositions, 5000)
     return () => clearInterval(interval)
