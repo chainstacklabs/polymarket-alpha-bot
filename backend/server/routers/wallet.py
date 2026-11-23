@@ -194,7 +194,7 @@ async def deploy_deposit_wallet():
         return DepositWalletResponse(
             success=True,
             deposit_wallet_address=deposit_address,
-            message="Deposit wallet deployed and approved. Send pUSD to it to trade.",
+            message="Deposit wallet deployed. Check approvals in the wallet status; send pUSD to it to trade.",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

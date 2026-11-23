@@ -8,9 +8,10 @@ deterministic deposit wallet that is deployed gaslessly on
 trading balance. The relayer pays gas, so you never need POL.
 
 Each user mints their own Relayer API key for their EOA at
-polymarket.com/settings?tab=api-keys (decision B). Approvals are best-effort:
-the relayer may reject some operators, and split/merge/orders recover
-allowances on demand.
+polymarket.com/settings?tab=api-keys (decision B). Trading approvals go out
+in batches of 4: the relayer rejects the SDK's single 17-call batch from
+``setup_trading_approvals()`` (Cloudflare 400). Re-running skips approvals
+already granted.
 
 USAGE (from the repo root):
     POLY_PK=0x.. POLY_RELAYER_API_KEY=.. POLY_RELAYER_ADDRESS=0x.. \
@@ -24,6 +25,32 @@ import os
 
 from polymarket import SecureClient
 from polymarket.auth import RelayerApiKey
+from polymarket.calls import erc20_approval_call, erc1155_set_approval_for_all_call
+
+BATCH_SIZE = 4  # the relayer rejected all 17 approvals in one batch
+
+
+def set_trading_approvals(client: SecureClient) -> int:
+    """Send the missing trading approvals in batches; returns how many."""
+    missing = client.get_trading_approvals_state().missing
+    calls = [
+        erc20_approval_call(
+            token_address=a.token_address, spender=a.spender, amount=a.amount
+        )
+        for a in missing.erc20
+    ] + [
+        erc1155_set_approval_for_all_call(
+            token_address=a.token_address, operator=a.operator, approved=True
+        )
+        for a in missing.erc1155
+    ]
+    for i in range(0, len(calls), BATCH_SIZE):
+        handle = client.execute_transaction(
+            calls=calls[i : i + BATCH_SIZE], metadata="Trading setup approvals"
+        )
+        last = min(i + BATCH_SIZE, len(calls))
+        print(f"  approvals {i + 1}-{last}: {handle.wait().transaction_hash}")
+    return len(calls)
 
 
 def main() -> None:
@@ -41,11 +68,8 @@ def main() -> None:
     print(f"signer EOA:                 {client.signer}")
     print(f"deposit wallet (fund this): {client.wallet}")
 
-    try:
-        client.setup_trading_approvals()
-        print("trading approvals: set")
-    except Exception as e:  # noqa: BLE001
-        print(f"trading approvals: skipped (allowances self-recover) — {e}")
+    sent = set_trading_approvals(client)
+    print(f"trading approvals: {'set ' + str(sent) if sent else 'already in place'}")
 
 
 if __name__ == "__main__":

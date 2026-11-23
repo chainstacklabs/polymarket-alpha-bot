@@ -5,6 +5,8 @@ merge / deploy / approvals) is exercised without network or real funds.
 """
 
 import asyncio
+
+import pytest
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 from polymarket import SecureClient
@@ -172,30 +174,74 @@ def _unlocked_manager() -> WalletManager:
     return wallet
 
 
-def test_deploy_deposit_wallet_persists_and_tries_approvals():
+def _missing_approvals(n_erc20: int, n_erc1155: int) -> MagicMock:
+    state = MagicMock()
+    state.missing.erc20 = tuple(
+        MagicMock(token_address=f"0x{i:040x}", spender=f"0x{i + 1:040x}", amount=1)
+        for i in range(n_erc20)
+    )
+    state.missing.erc1155 = tuple(
+        MagicMock(token_address=f"0x{i:040x}", operator=f"0x{i + 1:040x}")
+        for i in range(n_erc1155)
+    )
+    return state
+
+
+def test_deploy_deposit_wallet_persists_and_sets_approvals():
     wallet = _unlocked_manager()
     client = _client_for_trading()
+    client.get_trading_approvals_state.return_value = _missing_approvals(1, 1)
     with patch("core.trading.secure_client.get_secure_client", return_value=client):
         deposit = wallet.deploy_deposit_wallet()
 
-    # create() auto-deploys; approvals are attempted best-effort
-    client.setup_trading_approvals.assert_called_once()
+    client.execute_transaction.assert_called_once()
+    client.setup_trading_approvals.assert_not_called()
     wallet.storage.set_deposit_wallet.assert_called_once_with("0xDeposit")
     assert deposit == "0xDeposit"
 
 
-def test_deploy_tolerates_relayer_blocked_approvals():
-    """Relayer rejecting an approval operator must not break onboarding."""
+def test_approvals_sent_in_batches_of_four():
+    """The relayer rejects all 17 approvals in one batch (Cloudflare 400)."""
+    client = _client_for_trading()
+    client.get_trading_approvals_state.return_value = _missing_approvals(9, 8)
+
+    assert WalletManager._set_approvals(client) == 17
+
+    sizes = [len(c.kwargs["calls"]) for c in client.execute_transaction.call_args_list]
+    assert sizes == [4, 4, 4, 4, 1]
+    assert client.execute_transaction.return_value.wait.call_count == 5
+
+
+def test_no_approval_transaction_when_fully_approved():
+    client = _client_for_trading()
+    client.get_trading_approvals_state.return_value = _missing_approvals(0, 0)
+
+    assert WalletManager._set_approvals(client) == 0
+    client.execute_transaction.assert_not_called()
+
+
+def test_deploy_tolerates_failed_approvals():
+    """A failed approval batch must not undo onboarding: the wallet stays saved."""
     wallet = _unlocked_manager()
     client = _client_for_trading()
-    client.setup_trading_approvals.side_effect = RuntimeError(
-        "setApprovalForAll operator 0xF3cF... is not in the allowed list"
-    )
+    client.get_trading_approvals_state.return_value = _missing_approvals(4, 0)
+    client.execute_transaction.side_effect = RuntimeError("blocked by Cloudflare")
     with patch("core.trading.secure_client.get_secure_client", return_value=client):
         deposit = wallet.deploy_deposit_wallet()  # must NOT raise
 
     wallet.storage.set_deposit_wallet.assert_called_once_with("0xDeposit")
     assert deposit == "0xDeposit"
+
+
+def test_set_approvals_surfaces_relayer_errors():
+    """The explicit Approve action reports failures instead of hiding them."""
+    wallet = _unlocked_manager()
+    client = _client_for_trading()
+    client.get_trading_approvals_state.return_value = _missing_approvals(4, 0)
+    client.execute_transaction.side_effect = RuntimeError("blocked by Cloudflare")
+    with patch("core.trading.secure_client.get_secure_client", return_value=client):
+        with pytest.raises(RuntimeError, match="Cloudflare"):
+            wallet.set_approvals()
 
 
 def _async(value):

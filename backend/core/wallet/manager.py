@@ -16,6 +16,10 @@ from loguru import logger
 from core.wallet.storage import WalletStorage
 from core.wallet.contracts import CONTRACTS, ERC20_ABI
 
+# Approvals per relayed transaction. The relayer rejected all 17 in one batch
+# (Cloudflare 400) and accepted batches of 4 (2026-11-23, SDK 0.20.0).
+APPROVAL_BATCH_SIZE = 4
+
 
 @dataclass
 class WalletBalances:
@@ -169,28 +173,61 @@ class WalletManager:
         # SecureClient.create() already deploys the deposit wallet
         # (setup_gasless_wallet/is_gasless_ready are deprecated no-ops).
         deposit_address = str(client.wallet)
-        self._try_approvals(client)
+        # Persist first: the wallet exists even if approvals fail, and the
+        # dashboard's Approve button can retry them.
         self.storage.set_deposit_wallet(deposit_address)
+        try:
+            self._set_approvals(client)
+        except Exception as e:
+            logger.warning(
+                f"Trading approvals incomplete for {deposit_address}; "
+                f"retry with POST /wallet/approve-contracts: {e}"
+            )
         logger.info(f"Deposit wallet ready: {deposit_address}")
         return deposit_address
 
     @staticmethod
-    def _try_approvals(client) -> None:
-        """Best-effort trading approvals.
+    def _set_approvals(client) -> int:
+        """Grant the SDK's missing trading approvals in small relayed batches.
 
-        The relayer allowlist may reject some operators in the SDK's approval
-        set, and split/merge/orders recover allowances on demand, so a
-        rejection here must never block onboarding or trading.
+        `setup_trading_approvals()` sends every missing approval (17 on a new
+        wallet) as one relayed batch, which the relayer rejects (Cloudflare
+        400). Batches of APPROVAL_BATCH_SIZE go through. Raises on the first
+        failed batch; already-granted approvals are skipped on a retry.
+        Returns the number of approvals sent.
         """
-        try:
-            client.setup_trading_approvals()
-        except Exception as e:
-            logger.warning(
-                f"setup_trading_approvals skipped (allowances self-recover): {e}"
+        from polymarket.calls import (
+            erc20_approval_call,
+            erc1155_set_approval_for_all_call,
+        )
+
+        missing = client.get_trading_approvals_state().missing
+        calls = [
+            erc20_approval_call(
+                token_address=a.token_address, spender=a.spender, amount=a.amount
             )
+            for a in missing.erc20
+        ] + [
+            erc1155_set_approval_for_all_call(
+                token_address=a.token_address, operator=a.operator, approved=True
+            )
+            for a in missing.erc1155
+        ]
+        batches = [
+            calls[i : i + APPROVAL_BATCH_SIZE]
+            for i in range(0, len(calls), APPROVAL_BATCH_SIZE)
+        ]
+        for n, batch in enumerate(batches, 1):
+            client.execute_transaction(
+                calls=batch, metadata=f"Trading setup approvals {n}/{len(batches)}"
+            ).wait()
+        return len(calls)
 
     def set_approvals(self) -> str:
-        """Best-effort trading approvals on the deposit wallet via the relayer."""
+        """Set trading approvals on the deposit wallet via the relayer.
+
+        Raises if a batch fails, so the caller sees the relayer's error.
+        """
         from core.trading.secure_client import get_secure_client
 
         client = get_secure_client(self)
@@ -198,9 +235,9 @@ class WalletManager:
             raise ValueError(
                 "Could not init trading client (unlock + relayer key required)"
             )
-        self._try_approvals(client)
         deposit_address = str(client.wallet)
         self.storage.set_deposit_wallet(deposit_address)
+        self._set_approvals(client)
         return deposit_address
 
     # ── on-chain reads (deposit wallet; no unlock needed) ────────────────
