@@ -22,7 +22,7 @@ class SellResult:
     amount: float
     order_id: Optional[str]
     filled: bool
-    recovered_value: float  # Approximate USDC recovered
+    recovered_value: float  # pUSD received, as reported by the exchange
     error: Optional[str] = None
 
 
@@ -45,7 +45,7 @@ class SideExitResult:
     merge_tx: Optional[str] = None
     sold_wanted: float = 0.0  # Wanted tokens sold via CLOB
     sold_unwanted: float = 0.0  # Unwanted tokens sold via CLOB
-    recovered: float = 0.0  # Estimated total pUSD recovered
+    recovered: float = 0.0  # pUSD recovered: merged pairs + sale proceeds
     error: Optional[str] = None
 
 
@@ -109,6 +109,44 @@ class PositionManager:
             logger.error(f"Merge error: {error_msg}")
             return None, error_msg
 
+    def _start_tracking(self, position_id: str) -> Optional[str]:
+        """Older positions: seed sale proceeds from the current balances.
+
+        Their cost used to be estimated from entry prices. Seeding it before
+        the first sell/merge (from the unwanted tokens already gone) keeps
+        today's P&L and lets each later sale be recorded exactly. The
+        balances are read strictly: a failed read must not pass for "all
+        sold", so it returns an error and the caller changes nothing.
+        """
+        entry = self.storage.get(position_id)
+        if not entry or (
+            entry.get("target_sell_proceeds") is not None
+            and entry.get("cover_sell_proceeds") is not None
+        ):
+            return None
+        from core.positions.service import legacy_sale_estimate
+
+        estimates = {}
+        for side in ("target", "cover"):
+            if not entry.get(f"{side}_split_tx"):
+                estimates[side] = 0.0  # no split, nothing was sold
+                continue
+            try:
+                unwanted = self.service.read_token_balance(
+                    self.service.unwanted_token_id(entry, side),
+                    entry.get(f"{side}_protocol", "v1"),
+                )
+            except Exception as e:
+                return (
+                    f"Couldn't read the {side} balance to set up this position's "
+                    f"cost ({e}). Nothing was changed; try again."
+                )
+            estimates[side] = legacy_sale_estimate(entry, side, unwanted)
+        self.storage.start_tracking_proceeds(
+            position_id, estimates["target"], estimates["cover"]
+        )
+        return None
+
     async def sell_position_tokens(
         self,
         position_id: str,
@@ -128,6 +166,18 @@ class PositionManager:
                 filled=False,
                 recovered_value=0,
                 error="Position not found",
+            )
+
+        tracking_error = self._start_tracking(position_id)
+        if tracking_error:
+            return SellResult(
+                success=False,
+                token_id="",
+                amount=0,
+                order_id=None,
+                filled=False,
+                recovered_value=0,
+                error=tracking_error,
             )
 
         # Determine which tokens to sell
@@ -185,28 +235,26 @@ class PositionManager:
 
         from core.trading.clob import sell_via_clob
 
-        order_id, filled_size, error = sell_via_clob(
-            client, token_id, balance, price, slippage=slippage
-        )
+        sale = sell_via_clob(client, token_id, balance, price, slippage=slippage)
+        filled = sale.filled > 0
 
-        filled = filled_size > 0
-
-        # Estimate recovered value: use market price (not slippage floor)
-        # FAK fills at best available prices, typically near market price
-        recovered = filled_size * price
-
-        # Update storage if selling unwanted tokens
+        # Record what the exchange paid, so P&L sees the cash that replaced
+        # the tokens. Wanted tokens -> realized; unwanted -> the leg's sale
+        # proceeds (lowers its cost), as at buy time.
         if filled and token_type == "unwanted":
-            self.storage.update_clob_status(position_id, side, order_id, True)
+            self.storage.update_clob_status(position_id, side, sale.order_id, True)
+            self.storage.add_sell_proceeds(position_id, side, sale.proceeds)
+        elif filled:
+            self.storage.add_realized_proceeds(position_id, sale.proceeds)
 
         return SellResult(
             success=filled,
             token_id=token_id,
-            amount=filled_size,
-            order_id=order_id,
+            amount=sale.filled,
+            order_id=sale.order_id,
             filled=filled,
-            recovered_value=round(recovered, 2),
-            error=error,
+            recovered_value=round(sale.proceeds, 4),
+            error=sale.error,
         )
 
     async def merge_position_tokens(
@@ -224,6 +272,16 @@ class PositionManager:
                 merged_amount=0,
                 tx_hash=None,
                 error="Position not found",
+            )
+
+        tracking_error = self._start_tracking(position_id)
+        if tracking_error:
+            return MergeResult(
+                success=False,
+                market_id="",
+                merged_amount=0,
+                tx_hash=None,
+                error=tracking_error,
             )
 
         # Get balances for merge
@@ -279,6 +337,9 @@ class PositionManager:
                 tx_hash=None,
                 error=error,
             )
+
+        # Each merged YES+NO pair returns exactly 1 pUSD.
+        self.storage.add_realized_proceeds(position_id, int(mergeable * 1e6) / 1e6)
 
         return MergeResult(
             success=True,
@@ -379,12 +440,9 @@ class PositionManager:
             slippage,
         )
 
+        # Each merge and sale already recorded its own proceeds.
         total = round(target_result.recovered + cover_result.recovered, 4)
         any_success = target_result.recovered > 0 or cover_result.recovered > 0
-
-        # Record realized proceeds for accurate P&L
-        if total > 0:
-            self.storage.add_realized_proceeds(position_id, total)
 
         messages = []
         if target_result.merged > 0:

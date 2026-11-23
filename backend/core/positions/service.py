@@ -41,6 +41,34 @@ MULTICALL3_ABI = [
 ]
 
 
+def legacy_sale_estimate(entry: dict, side: str, unwanted_balance: float) -> float:
+    """Estimated pUSD a leg's unwanted side sold for, for positions recorded
+    before sale proceeds were tracked: whatever unwanted tokens are gone are
+    assumed sold at (1 - entry price). No split, no sale.
+    """
+    if not entry.get(f"{side}_split_tx"):
+        return 0.0
+    gone = max(entry["entry_amount_per_side"] - unwanted_balance, 0.0)
+    return round(gone * (1 - entry[f"{side}_entry_price"]), 6)
+
+
+def entry_cost(
+    entry: dict, target_unwanted: float, cover_unwanted: float
+) -> tuple[float, bool]:
+    """(cost, estimated): split pUSD minus what the unwanted sides sold for."""
+    sold = {
+        "target": entry.get("target_sell_proceeds"),
+        "cover": entry.get("cover_sell_proceeds"),
+    }
+    unwanted = {"target": target_unwanted, "cover": cover_unwanted}
+    estimated = bool(entry.get("cost_estimated"))
+    for side, value in sold.items():
+        if value is None:
+            sold[side] = legacy_sale_estimate(entry, side, unwanted[side])
+            estimated = True
+    return entry["entry_total_cost"] - sold["target"] - sold["cover"], estimated
+
+
 @dataclass
 class LivePosition:
     """Position enriched with live data."""
@@ -89,8 +117,8 @@ class LivePosition:
 
     # Derived state
     state: str  # active, pending, partial, complete
-    entry_net_cost: float  # Actual cost after selling unwanted tokens
-    realized_proceeds: float  # USDC recovered from exit sells/merges
+    entry_net_cost: float  # Cost after selling unwanted tokens
+    realized_proceeds: float  # pUSD back from selling wanted tokens / merges
     current_value: float
     pnl: float
     pnl_pct: float
@@ -98,6 +126,10 @@ class LivePosition:
     # Selling in progress flags (persisted across page refresh)
     selling_target: bool
     selling_cover: bool
+
+    # True for positions recorded before sale proceeds were tracked: their
+    # entry_net_cost is estimated from entry prices.
+    cost_estimated: bool = False
 
 
 class PositionService:
@@ -223,23 +255,42 @@ class PositionService:
                 for tid, proto in zip(token_ids, protocols)
             ]
 
+    def read_token_balance(self, token_id: str, protocol: str = "v1") -> float:
+        """Token balance of the deposit wallet. Raises if it can't be read."""
+        if not self._token_holder:
+            raise ValueError("No deposit wallet to read balances from")
+        if not token_id:
+            raise ValueError("Unknown token ID")
+        ledger = self._get_web3().eth.contract(
+            address=self._ledger_address(protocol), abi=CTF_ABI
+        )
+        balance_wei = ledger.functions.balanceOf(
+            Web3.to_checksum_address(self._token_holder),
+            int(token_id),
+        ).call()
+        return balance_wei / 1e6
+
     def _get_token_balance_single(self, token_id: str, protocol: str = "v1") -> float:
-        """Query single token balance (fallback)."""
+        """Query single token balance (fallback). 0.0 on any failure."""
         if not self._token_holder or not token_id:
             return 0.0
 
         try:
-            ledger = self._get_web3().eth.contract(
-                address=self._ledger_address(protocol), abi=CTF_ABI
-            )
-            balance_wei = ledger.functions.balanceOf(
-                Web3.to_checksum_address(self._token_holder),
-                int(token_id),
-            ).call()
-            return balance_wei / 1e6
+            return self.read_token_balance(token_id, protocol)
         except Exception as e:
             logger.error(f"Failed to query token balance for {token_id}: {e}")
             return 0.0
+
+    def unwanted_token_id(self, entry: dict, side: str) -> str:
+        """Token ID of a leg's unwanted side (on-chain IDs from the split first)."""
+        ctf = self._parse_ctf_ids(entry.get(f"{side}_ctf_token_ids", ""))
+        position = entry[f"{side}_position"]
+        if ctf:
+            return ctf[1] if position == "YES" else ctf[0]
+        stored = entry.get(f"{side}_unwanted_token_id", "")
+        return stored or self._get_unwanted_token_id(
+            entry[f"{side}_market_id"], position
+        )
 
     def get_market_token_ids(self, market_id: str) -> tuple[str, str]:
         """Get YES and NO token IDs for a market. Returns (yes_token_id, no_token_id)."""
@@ -394,8 +445,7 @@ class PositionService:
 
     def _calculate_pnl(
         self,
-        gross_cost: float,
-        net_cost: float,
+        cost: float,
         realized_proceeds: float,
         target_wanted: float,
         target_unwanted: float,
@@ -407,19 +457,14 @@ class PositionService:
     ) -> tuple[float, float, float]:
         """Calculate current value, P&L, and P&L percentage.
 
-        current_value = token_holdings_value + realized_proceeds (from exit sells/merges).
-        effective_cost = gross_cost if unwanted tokens remain, else net_cost.
-        exit_fees: estimated taker fees if selling at current prices (unrealized
-            P&L only -- realized proceeds from the CLOB already net fees).
-
-        V2 note (#36): under V2 the on-chain taker fee is computed at match
-        time via ``getClobMarketInfo()`` rather than baked into the signed
-        order. The estimate from ``feeSchedule`` is still the right
-        approximation for *unrealized* exit-fee projection here -- it matches
-        what V2 will charge as long as we're on the same fee schedule. Realized
-        P&L is derived from balance deltas (``realized_proceeds``) which
-        already nets the actual fee charged on-chain, so no V2 change is
-        needed for the realized side.
+        current_value = token holdings at current prices + realized_proceeds
+            (pUSD from selling wanted tokens and merging pairs) - exit_fees.
+        cost: split pUSD - what the unwanted sides sold for (see
+            `entry_cost`). Leftover unwanted tokens are valued at market.
+        exit_fees: estimated taker fees if the holdings were sold at current
+            prices (unrealized side only). Fees are computed at match time
+            from the market's ``feeSchedule``; realized amounts are what the
+            order response reported.
         """
         target_mergeable = min(target_wanted, target_unwanted)
         cover_mergeable = min(cover_wanted, cover_unwanted)
@@ -443,11 +488,8 @@ class PositionService:
 
         current_value = merge_value + market_value + realized_proceeds - exit_fees
 
-        has_significant_unwanted = (target_unwanted > 0.01) or (cover_unwanted > 0.01)
-        effective_cost = gross_cost if has_significant_unwanted else net_cost
-
-        pnl = current_value - effective_cost
-        pnl_pct = (pnl / effective_cost * 100) if effective_cost > 0 else 0
+        pnl = current_value - cost
+        pnl_pct = (pnl / cost * 100) if cost > 0 else 0
 
         return round(current_value, 4), round(pnl, 4), round(pnl_pct, 2)
 
@@ -585,32 +627,9 @@ class PositionService:
             token_id_map.append((i, "cover_wanted"))
 
             # Unwanted tokens
-            if target_ctf:
-                target_unwanted_id = (
-                    target_ctf[1]
-                    if entry["target_position"] == "YES"
-                    else target_ctf[0]
-                )
-            else:
-                target_unwanted_id = entry.get(
-                    "target_unwanted_token_id", ""
-                ) or self._get_unwanted_token_id(
-                    entry["target_market_id"], entry["target_position"]
-                )
-            token_ids.append(target_unwanted_id)
+            token_ids.append(self.unwanted_token_id(entry, "target"))
             token_id_map.append((i, "target_unwanted"))
-
-            if cover_ctf:
-                cover_unwanted_id = (
-                    cover_ctf[1] if entry["cover_position"] == "YES" else cover_ctf[0]
-                )
-            else:
-                cover_unwanted_id = entry.get(
-                    "cover_unwanted_token_id", ""
-                ) or self._get_unwanted_token_id(
-                    entry["cover_market_id"], entry["cover_position"]
-                )
-            token_ids.append(cover_unwanted_id)
+            token_ids.append(self.unwanted_token_id(entry, "cover"))
             token_id_map.append((i, "cover_unwanted"))
 
         # Ledger per token: target/cover legs can be on different protocols
@@ -663,12 +682,8 @@ class PositionService:
                 target_wanted, target_unwanted, cover_wanted, cover_unwanted
             )
 
-            gross_cost = entry["entry_total_cost"]
-            amount = entry["entry_amount_per_side"]
-            net_cost = amount * (
-                entry["target_entry_price"] + entry["cover_entry_price"]
-            )
             realized_proceeds = entry.get("realized_proceeds", 0.0)
+            cost, cost_estimated = entry_cost(entry, target_unwanted, cover_unwanted)
 
             # Estimate exit fees at current prices (unrealized P&L only --
             # realized P&L uses actual CLOB proceeds which already net fees).
@@ -687,8 +702,7 @@ class PositionService:
             ) + compute_fee(cover_value, cover_price, cover_fee_stub)
 
             current_value, pnl, pnl_pct = self._calculate_pnl(
-                gross_cost,
-                net_cost,
+                cost,
                 realized_proceeds,
                 target_wanted,
                 target_unwanted,
@@ -732,13 +746,14 @@ class PositionService:
                     target_unwanted_balance=round(target_unwanted, 4),
                     cover_unwanted_balance=round(cover_unwanted, 4),
                     state=state,
-                    entry_net_cost=round(net_cost, 4),
+                    entry_net_cost=round(cost, 4),
                     realized_proceeds=realized_proceeds,
                     current_value=current_value,
                     pnl=pnl,
                     pnl_pct=pnl_pct,
                     selling_target=entry.get("selling_target", False),
                     selling_cover=entry.get("selling_cover", False),
+                    cost_estimated=cost_estimated,
                 )
             )
 

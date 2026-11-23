@@ -5,6 +5,7 @@ The deposit-wallet (sigtype-3) client posts orders signed with ERC-1271
 enforces a $1 minimum order size — callers should not sell dust.
 """
 
+from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
@@ -24,14 +25,24 @@ def compute_sell_price(price: float, slippage: float, tick_size: float = 0.01) -
     return round(max(raw, tick_size), decimals)
 
 
+@dataclass
+class ClobSell:
+    """Outcome of a FAK sell. Amounts are what the exchange reported for the fill."""
+
+    order_id: Optional[str] = None
+    filled: float = 0.0  # shares sold (making_amount)
+    proceeds: float = 0.0  # pUSD received (taking_amount)
+    error: Optional[str] = None
+
+
 def sell_via_clob(
     client,
     token_id: str,
     amount: float,
     price: float,
     slippage: float = 10,
-) -> tuple[Optional[str], float, Optional[str]]:
-    """Sell tokens via a sigtype-3 FAK market order. Returns (order_id, filled_shares, error).
+) -> ClobSell:
+    """Sell tokens via a sigtype-3 FAK market order.
 
     `client` is a polymarket SecureClient. `min_price` acts as the worst-price
     floor. Partial fills are acceptable when offloading the unwanted side.
@@ -46,7 +57,7 @@ def sell_via_clob(
     if amount <= 0 or price <= 0:
         msg = f"Invalid sell params: amount={amount}, price={price}"
         logger.error(msg)
-        return None, 0.0, msg
+        return ClobSell(error=msg)
 
     try:
         min_price = compute_sell_price(price, slippage)
@@ -62,22 +73,25 @@ def sell_via_clob(
         if not getattr(resp, "ok", False):
             msg = getattr(resp, "message", None) or "Order rejected by CLOB"
             logger.error(f"CLOB sell rejected: {msg}")
-            return None, 0.0, msg
+            return ClobSell(error=msg)
 
-        # AcceptedOrder — making_amount is the shares we sold (matched).
+        # AcceptedOrder — for a SELL, making_amount is the shares sold and
+        # taking_amount the pUSD received.
         order_id = resp.order_id
         filled = float(resp.making_amount)
+        proceeds = float(resp.taking_amount)
         logger.info(
-            f"CLOB sigtype-3 sell (min_price={min_price}): {order_id} filled={filled}"
+            f"CLOB sigtype-3 sell (min_price={min_price}): {order_id} "
+            f"filled={filled} proceeds={proceeds}"
         )
         if filled < amount:
             logger.warning(
                 f"FAK partial fill: {filled:.4f}/{amount:.4f} for {order_id}"
             )
-        return order_id, filled, None
+        return ClobSell(order_id=order_id, filled=filled, proceeds=proceeds)
     except Exception as e:
         msg = str(e)
         if "restricted" in msg.lower() or ("403" in msg and "blocked" in msg.lower()):
             msg = "Trading restricted in your region — backend must run from an allowed region"
         logger.error(f"CLOB sell error: {msg}")
-        return None, 0.0, msg
+        return ClobSell(error=msg)

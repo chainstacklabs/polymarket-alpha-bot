@@ -105,8 +105,16 @@ export function PositionTableRow({
 
         {/* Entry */}
         <td className="px-3 py-2.5">
-          <span className="text-sm font-mono text-text-secondary">
-            ${(p.entry_net_cost ?? p.entry_total_cost).toFixed(0)}
+          <span
+            className="text-sm font-mono text-text-secondary"
+            title={
+              p.cost_estimated
+                ? 'Estimated from entry prices (opened before sale proceeds were recorded)'
+                : undefined
+            }
+          >
+            {p.cost_estimated ? '~' : ''}$
+            {(p.entry_net_cost ?? p.entry_total_cost).toFixed(0)}
           </span>
         </td>
 

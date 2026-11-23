@@ -59,7 +59,16 @@ class PositionEntry:
     notes: Optional[str] = None
     selling_target: bool = False
     selling_cover: bool = False
-    realized_proceeds: float = 0.0  # USDC recovered from exit sells/merges
+    # pUSD back from selling wanted tokens and merging pairs after entry.
+    realized_proceeds: float = 0.0
+    # pUSD each leg's unwanted side sold for (at buy time, plus later
+    # retries/exits). None = recorded before these were tracked: cost is
+    # then estimated from entry prices.
+    target_sell_proceeds: Optional[float] = None
+    cover_sell_proceeds: Optional[float] = None
+    # True when the sale proceeds above started from an estimate (see
+    # PositionManager._start_tracking).
+    cost_estimated: bool = False
     # Market protocol per leg: "v1" (CTF balances) or "v2" (PositionManager).
     # Positions recorded before V2 support are all v1.
     target_protocol: str = "v1"
@@ -172,6 +181,48 @@ class PositionStorage:
                         f"Added ${amount:.4f} realized proceeds for {position_id} "
                         f"(total: ${p['realized_proceeds']:.4f})"
                     )
+                    return True
+            return False
+
+    def start_tracking_proceeds(
+        self, position_id: str, target_estimate: float, cover_estimate: float
+    ) -> bool:
+        """Seed untracked legs' sale proceeds with an estimate (older positions).
+
+        Called before the first sell/merge on such a position, so every later
+        sale can be recorded exactly. Marks the cost as estimated.
+        """
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") == position_id:
+                    for side, est in (
+                        ("target", target_estimate),
+                        ("cover", cover_estimate),
+                    ):
+                        if p.get(f"{side}_sell_proceeds") is None:
+                            p[f"{side}_sell_proceeds"] = est
+                            p["cost_estimated"] = True
+                    self.save_all(positions)
+                    return True
+            return False
+
+    def add_sell_proceeds(self, position_id: str, side: str, amount: float) -> bool:
+        """Add unwanted-side sale proceeds to a leg tracked since entry.
+
+        Returns False (and records nothing) for positions recorded before
+        sale proceeds were tracked: their cost estimate already assumes the
+        unwanted side was sold.
+        """
+        key = f"{side}_sell_proceeds"
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") == position_id:
+                    if p.get(key) is None:
+                        return False
+                    p[key] = round(p[key] + amount, 6)
+                    self.save_all(positions)
                     return True
             return False
 

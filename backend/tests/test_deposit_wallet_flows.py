@@ -13,11 +13,14 @@ from core.trading.executor import MarketInfo, TradingExecutor
 from core.wallet.manager import WalletManager
 
 
-def _accepted_order(making: float = 10.0, order_id: str = "0xorder") -> MagicMock:
+def _accepted_order(
+    making: float = 10.0, order_id: str = "0xorder", taking: float = 4.8
+) -> MagicMock:
     r = MagicMock()
     r.ok = True
     r.order_id = order_id
     r.making_amount = making
+    r.taking_amount = taking
     return r
 
 
@@ -74,6 +77,7 @@ def test_buy_single_position_splits_then_sells_unwanted():
     assert result.success is True
     assert result.split_tx == "0xsplit"
     assert result.clob_filled is True
+    assert result.clob_proceeds == 4.8  # what the exchange paid, for the P&L cost
     assert result.wanted_token_id == "111"
 
 
