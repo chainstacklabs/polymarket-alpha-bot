@@ -12,7 +12,7 @@ Key fields in each position:
 | Field | Meaning |
 |---|---|
 | `state` | `active` (both filled), `pending` (unwanted tokens remain), `partial` (one side sold), `complete` (fully exited) |
-| `target_balance` / `cover_balance` | Current balance of the wanted token on each side |
+| `target_balance` / `cover_balance` | This position's wanted tokens on each side. Positions on the same market share one wallet balance, split by the shares each holds |
 | `target_unwanted_balance` / `cover_unwanted_balance` | Residual unwanted token — non-zero means a pending sell failed |
 | `entry_net_cost` | What the position cost: split pUSD minus what the unwanted sides sold for (as the exchange reported) |
 | `cost_estimated` | `true` for positions opened before sale proceeds were recorded: `entry_net_cost` is then estimated from entry prices |
