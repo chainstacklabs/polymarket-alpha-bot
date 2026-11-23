@@ -157,7 +157,7 @@ def generate_pair_id(
     components = (
         f"{target_market_id}:{target_position}:{cover_market_id}:{cover_position}"
     )
-    return hashlib.md5(components.encode(), usedforsecurity=False).hexdigest()[:16]
+    return hashlib.md5(components.encode()).hexdigest()[:16]
 
 
 # =============================================================================
