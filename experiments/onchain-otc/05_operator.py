@@ -13,7 +13,7 @@ V2 NOTES (verified on-chain 2026-06-22 against the Sourcify ABI)
       So sellers split USDC.e to get tradeable tokens; buyers pay pUSD.
     - V2 order struct DROPS taker/expiration/nonce/feeRateBps and ADDS
       timestamp (ms) / metadata (bytes32) / builder (bytes32). Verified against
-      the SDK (`polymarket.actions.orders.typed_data`) and the on-chain ABI.
+      the SDK (`polymarket._internal.actions.orders.typed_data`) and the on-chain ABI.
     - **`fillOrder` was REMOVED in V2** — `matchOrders` is the only settlement
       path. Its signature gained a leading `conditionId` and trailing
       `takerFeeAmount` / `makerFeeAmounts` (fees are operator-supplied, not in
@@ -189,13 +189,34 @@ def order_tuple(o):
     )
 
 
+def gamma_pages(path: str, limit: int, max_pages: int = 10):
+    """Yield active Gamma results by 24h volume, one page at a time.
+
+    Protocol V2 results are skipped by the callers, so a whole page can hold
+    nothing usable; keep paging until a match or the results run out.
+    """
+    for page in range(max_pages):
+        items = httpx.get(
+            f"{GAMMA_API}/{path}",
+            params={
+                "closed": "false",
+                "active": "true",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=15.0,
+        ).json()
+        if not items:
+            return
+        yield from items
+
+
 def fetch_active_market() -> dict:
-    resp = httpx.get(
-        f"{GAMMA_API}/markets",
-        params={"closed": "false", "active": "true", "limit": 50, "order": "volume24hr", "ascending": "false"},
-        timeout=15.0,
-    )
-    for m in resp.json():
+    for m in gamma_pages("markets", limit=50):
+        if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
+            continue
         cid = m.get("conditionId", "")
         tokens = m.get("clobTokenIds")
         neg_risk = m.get("negRisk", False)

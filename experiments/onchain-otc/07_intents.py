@@ -102,23 +102,41 @@ def revert(w3: Web3, snap_id: str):
         raise RuntimeError(f"Failed to revert snapshot {snap_id}")
 
 
+def gamma_pages(path: str, limit: int, max_pages: int = 10):
+    """Yield active Gamma results by 24h volume, one page at a time.
+
+    Protocol V2 results are skipped by the callers, so a whole page can hold
+    nothing usable; keep paging until a match or the results run out.
+    """
+    for page in range(max_pages):
+        items = httpx.get(
+            f"{GAMMA_API}/{path}",
+            params={
+                "closed": "false",
+                "active": "true",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=15.0,
+        ).json()
+        if not items:
+            return
+        yield from items
+
+
 def fetch_negrisk_event() -> dict:
     """Find a live NegRisk market with 3+ outcomes and parse token IDs."""
-    resp = httpx.get(
-        f"{GAMMA_API}/events",
-        params={
-            "closed": "false",
-            "active": "true",
-            "limit": 30,
-            "order": "volume24hr",
-            "ascending": "false",
-        },
-        timeout=15.0,
-    )
-    for e in resp.json():
+    for e in gamma_pages("events", limit=30):
         if not e.get("negRisk"):
             continue
         markets = e.get("markets", [])
+        # Protocol V2 markets don't trade on the CTF; skip events with any.
+        if any(m.get("version") != "v1" for m in markets):
+            continue
+        if not markets or not markets[0].get("negRiskMarketID"):
+            continue
         if len(markets) < 3:
             continue
 
@@ -170,6 +188,7 @@ def main():
     accounts = w3.eth.accounts
     alice = accounts[0]
     bob = accounts[1]
+    # Anvil's public default key for accounts[0] - a test key, never a real one.
     alice_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
     usdc = w3.eth.contract(address=Web3.to_checksum_address(USDC_E), abi=ERC20_ABI)
@@ -224,7 +243,7 @@ def main():
     ).transact({"from": alice, "gas": 1_000_000})
     receipt = w3.eth.wait_for_transaction_receipt(tx)
     assert receipt["status"] == 1, "Wrap failed"
-    log.info("Wrap OK (gas: %d) — first wrap deploys ERC-20 proxy", receipt["gasUsed"])
+    log.info("Wrap OK (gas: %d) — first wrap deploys the ERC-20 wrapper", receipt["gasUsed"])
 
     # Get the wrapper address
     wrapper_addr = factory.functions.getWrapped(
@@ -481,7 +500,7 @@ def main():
     log.info("No CLOB. No operator. No whitelist. Anyone can be a solver.")
     log.info("")
     log.info("Gas costs:")
-    log.info("  Wrap (first, deploys proxy): ~650k")
+    log.info("  Wrap (first, deploys the wrapper): ~650k")
     log.info("  Wrap (subsequent):           ~57k")
     log.info("  fillIntent (on-chain):       %d  ← ecrecover + atomic swap", receipt_fill["gasUsed"])
     log.info("  Unwrap:                      ~48k")

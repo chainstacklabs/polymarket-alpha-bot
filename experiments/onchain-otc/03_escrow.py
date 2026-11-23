@@ -61,13 +61,34 @@ def load_escrow_abi_and_bytecode():
     return artifact["abi"], artifact["bytecode"]["object"]
 
 
+def gamma_pages(path: str, limit: int, max_pages: int = 10):
+    """Yield active Gamma results by 24h volume, one page at a time.
+
+    Protocol V2 results are skipped by the callers, so a whole page can hold
+    nothing usable; keep paging until a match or the results run out.
+    """
+    for page in range(max_pages):
+        items = httpx.get(
+            f"{GAMMA_API}/{path}",
+            params={
+                "closed": "false",
+                "active": "true",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=15.0,
+        ).json()
+        if not items:
+            return
+        yield from items
+
+
 def fetch_active_market() -> dict:
-    resp = httpx.get(
-        f"{GAMMA_API}/markets",
-        params={"closed": "false", "active": "true", "limit": 20, "order": "volume24hr", "ascending": "false"},
-        timeout=15.0,
-    )
-    for m in resp.json():
+    for m in gamma_pages("markets", limit=20):
+        if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
+            continue
         cid = m.get("conditionId", "")
         tokens = m.get("clobTokenIds")
         neg_risk = m.get("negRisk", False)
@@ -169,7 +190,7 @@ def main():
     print_state("After", ctf, usdc, alice, bob, yes_id)
 
     # Verify offer is no longer active
-    # Offer struct: (maker, erc1155, tokenId, amount, erc20, price, taker, deadline, active)
+    # Offer struct: (maker, taker, erc1155Token, tokenId, tokenAmount, erc20Token, price, deadline, active)
     offer = escrow.functions.getOffer(offer_id).call()
     log.info("  Offer active: %s", offer[8])
     assert not offer[8], "Offer should be inactive after fill"
@@ -255,15 +276,15 @@ def main():
     tx = usdc.functions.approve(escrow_addr, 2**256 - 1).transact({"from": charlie})
     w3.eth.wait_for_transaction_receipt(tx)
 
+    # Simulate the call so the revert reason is visible: Charlie holds no
+    # USDC.e, so only "not authorized" proves the taker check fired.
     try:
-        tx = escrow.functions.fillOffer(restricted_offer_id).transact({"from": charlie, "gas": 200_000})
-        receipt = w3.eth.wait_for_transaction_receipt(tx)
-        if receipt["status"] == 0:
-            log.info("  Charlie rejected as expected (reverted on-chain)")
-        else:
-            log.error("  Charlie fill: UNEXPECTEDLY SUCCEEDED")
-    except (ContractLogicError, Web3RPCError):
-        log.info("  Charlie rejected as expected")
+        escrow.functions.fillOffer(restricted_offer_id).call({"from": charlie})
+    except (ContractLogicError, Web3RPCError) as e:
+        assert "not authorized" in str(e), f"Rejected for the wrong reason: {e}"
+        log.info("  Charlie rejected as expected: not authorized")
+    else:
+        raise AssertionError("Charlie filled an offer restricted to Bob")
 
     # Bob fills successfully
     tx = escrow.functions.fillOffer(restricted_offer_id).transact({"from": bob})

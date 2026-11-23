@@ -78,13 +78,34 @@ CTF_ABI = json.loads("""[
 ]""")
 
 
+def gamma_pages(path: str, limit: int, max_pages: int = 10):
+    """Yield active Gamma results by 24h volume, one page at a time.
+
+    Protocol V2 results are skipped by the callers, so a whole page can hold
+    nothing usable; keep paging until a match or the results run out.
+    """
+    for page in range(max_pages):
+        items = httpx.get(
+            f"{GAMMA_API}/{path}",
+            params={
+                "closed": "false",
+                "active": "true",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=15.0,
+        ).json()
+        if not items:
+            return
+        yield from items
+
+
 def fetch_active_market() -> dict:
-    resp = httpx.get(
-        f"{GAMMA_API}/markets",
-        params={"closed": "false", "active": "true", "limit": 20, "order": "volume24hr", "ascending": "false"},
-        timeout=15.0,
-    )
-    for m in resp.json():
+    for m in gamma_pages("markets", limit=20):
+        if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
+            continue
         condition_id = m.get("conditionId", "")
         clob_tokens = m.get("clobTokenIds")
         neg_risk = m.get("negRisk", False)
