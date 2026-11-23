@@ -1,43 +1,44 @@
 """
-07: Test Polymarket CLOB WebSocket for Real-Time Price Streaming.
+07: Stream Real-Time Prices from the Polymarket CLOB WebSocket.
 
 WHAT IT DOES
-    Connects to Polymarket's CLOB WebSocket API to receive real-time price
-    updates instead of polling the REST API every 10 seconds.
+    Subscribes to the market WebSocket for the tokens in our portfolios and
+    logs book snapshots, best bid/ask changes and trades. Mirrors
+    backend/server/token_resolver.py + clob_websocket.py.
 
 WHY WE NEED THIS
-    Current price_cache.py polls Gamma API every 10 seconds. WebSocket provides
-    near-instant price updates when market prices change, enabling:
-    - Faster alpha detection (prices update within ~100ms vs 10s)
-    - Lower API load (one persistent connection vs repeated requests)
-    - Real-time portfolio value tracking
+    Polling REST prices is slow and heavy; one WebSocket pushes best
+    bid/ask changes within ~100ms, which keeps portfolio prices live.
 
 HOW IT WORKS
-    1. Read portfolios.json to get market IDs we care about
-    2. Fetch clobTokenIds from Gamma API for each market
-    3. Connect to wss://ws-subscriptions-clob.polymarket.com/ws/market
-    4. Subscribe to token IDs and listen for price_change events
-    5. Log price updates with latency measurements
+    1. Market IDs from data/_live/portfolios.json (top 200 portfolios);
+       if none resolve, the top --sample markets by 24h volume
+    2. Gamma /markets/{id} → token IDs by protocol version (v2 positionIds,
+       v1 clobTokenIds, other versions skipped); keep markets with 2 IDs
+    3. Connect to the market WebSocket, subscribe, PING every 10s
+    4. Best price from a book snapshot = max bid / min ask (levels arrive
+       worst-to-best, so the first level is NOT the best)
 
 CLOB WEBSOCKET API
     Endpoint: wss://ws-subscriptions-clob.polymarket.com/ws/market
-    Subscribe: {"assets_ids": ["token_id1", "token_id2"], "type": "market"}
-    Events:
-        - book: Full order book snapshot (bids/asks)
-        - price_change: Incremental best bid/ask updates
-        - last_trade_price: Trade executions
-    Keepalive: Send "PING" every 10 seconds
+    Subscribe: {"assets_ids": [...], "type": "market"} (max 500 per connection)
+    Events: book, price_change, last_trade_price, tick_size_change
+
+INPUT
+    data/_live/portfolios.json (optional), Gamma API (public)
+
+OUTPUT
+    Logs only
 
 USAGE
-    uv run --frozen --project backend experiments/07_websocket_prices.py
-    uv run --frozen --project backend experiments/07_websocket_prices.py --duration 60  # Run for 60s
+    uv run --frozen --project backend experiments/07_websocket_prices.py --duration 30
 """
 
 import asyncio
 import json
 import logging
+import argparse
 import signal
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -60,6 +61,9 @@ PORTFOLIOS_PATH = LIVE_DIR / "portfolios.json"
 PING_INTERVAL_SECONDS = 10
 MAX_TOKENS_PER_CONNECTION = 500  # Polymarket limit
 REQUEST_TIMEOUT = 10.0
+MAX_PORTFOLIOS = 200  # same cap as production token_resolver
+DEFAULT_SAMPLE_MARKETS = 5
+SUPPORTED_MARKET_VERSIONS = ("v1", "v2")
 
 # Logging
 logging.basicConfig(
@@ -67,6 +71,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-7s | %(message)s",
     datefmt="%H:%M:%S",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 
@@ -76,7 +81,7 @@ log = logging.getLogger(__name__)
 
 
 def load_market_ids_from_portfolios() -> list[str]:
-    """Load unique market IDs from portfolios.json."""
+    """Unique target/cover market IDs from the top portfolios."""
     if not PORTFOLIOS_PATH.exists():
         log.warning(f"Portfolios file not found: {PORTFOLIOS_PATH}")
         return []
@@ -85,7 +90,7 @@ def load_market_ids_from_portfolios() -> list[str]:
     portfolios = data.get("portfolios", []) if isinstance(data, dict) else data
 
     market_ids = set()
-    for p in portfolios:
+    for p in portfolios[:MAX_PORTFOLIOS]:
         if target_id := p.get("target_market_id"):
             market_ids.add(str(target_id))
         if cover_id := p.get("cover_market_id"):
@@ -95,51 +100,87 @@ def load_market_ids_from_portfolios() -> list[str]:
     return list(market_ids)
 
 
-async def fetch_token_ids_for_markets(market_ids: list[str]) -> dict[str, dict]:
-    """
-    Fetch clobTokenIds from Gamma API for each market.
+def outcome_token_ids(market: dict) -> list[str]:
+    """Trading IDs [YES, NO] chosen by the market's protocol version.
 
-    Returns: {token_id: {"market_id": str, "question": str, "side": "YES"|"NO"}}
+    v2 → positionIds, v1 → clobTokenIds (Gamma may send both; the version
+    decides). Missing/unknown versions give []. Copy of core/markets.py.
     """
+    version = market.get("version")
+    if version not in SUPPORTED_MARKET_VERSIONS:
+        return []
+    if version == "v2":
+        raw = market.get("positionIds") or []
+    else:
+        raw = market.get("clobTokenIds") or "[]"
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    return [str(i) for i in raw if str(i).isdigit()]
+
+
+def add_market_tokens(token_map: dict[str, dict], market: dict) -> bool:
+    """Map a market's YES/NO token IDs to display metadata. False if unusable."""
+    token_ids = outcome_token_ids(market)
+    if len(token_ids) < 2:
+        log.warning(
+            f"Market {market.get('id')} has no usable token IDs (version {market.get('version')!r})"
+        )
+        return False
+
+    outcomes = market.get("outcomes", ["Yes", "No"])
+    if isinstance(outcomes, str):
+        outcomes = json.loads(outcomes)
+    question = market.get("question", "")
+    for i, token_id in enumerate(token_ids[:2]):
+        token_map[token_id] = {
+            "market_id": str(market.get("id")),
+            "question": question,
+            "side": outcomes[i] if i < len(outcomes) else ("Yes", "No")[i],
+        }
+    return True
+
+
+async def fetch_token_map(market_ids: list[str]) -> dict[str, dict]:
+    """Resolve market IDs to {token_id: {market_id, question, side}}."""
     token_map: dict[str, dict] = {}
-
-    # Group markets by event to batch requests
-    # For now, fetch each market individually (can optimize later)
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         for market_id in market_ids:
             try:
                 resp = await client.get(f"{GAMMA_API_BASE_URL}/markets/{market_id}")
-                if resp.status_code != 200:
-                    log.warning(
-                        f"Failed to fetch market {market_id}: {resp.status_code}"
-                    )
-                    continue
-
+                resp.raise_for_status()
                 market = resp.json()
-                clob_token_ids = market.get("clobTokenIds", "[]")
-
-                # Parse JSON string if needed
-                if isinstance(clob_token_ids, str):
-                    clob_token_ids = json.loads(clob_token_ids)
-
-                question = market.get("question", "Unknown")
-                outcomes = market.get("outcomes", ["Yes", "No"])
-                if isinstance(outcomes, str):
-                    outcomes = json.loads(outcomes)
-
-                # Map each token ID to its metadata
-                for i, token_id in enumerate(clob_token_ids):
-                    side = outcomes[i] if i < len(outcomes) else f"Outcome{i}"
-                    token_map[token_id] = {
-                        "market_id": market_id,
-                        "question": question,
-                        "side": side,
-                    }
-
-            except Exception as e:
-                log.error(f"Error fetching market {market_id}: {e}")
+            except (httpx.HTTPError, json.JSONDecodeError) as e:
+                log.warning(f"Error fetching market {market_id}: {e}")
+                continue
+            if market.get("closed") or not market.get("active"):
+                continue  # closed markets have no live book
+            add_market_tokens(token_map, market)
 
     log.info(f"Resolved {len(token_map)} token IDs from {len(market_ids)} markets")
+    return token_map
+
+
+async def fetch_sample_token_map(count: int) -> dict[str, dict]:
+    """Fallback: tokens of the top active markets by 24h volume."""
+    params = {
+        "active": "true",
+        "closed": "false",
+        "order": "volume24hr",
+        "ascending": "false",
+        "limit": count,
+    }
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.get(f"{GAMMA_API_BASE_URL}/markets/keyset", params=params)
+        resp.raise_for_status()
+        markets = resp.json().get("markets", [])
+
+    token_map: dict[str, dict] = {}
+    for market in markets:
+        add_market_tokens(token_map, market)
+    log.info(f"Sample: {len(token_map)} token IDs from {len(markets)} top-volume markets")
     return token_map
 
 
@@ -295,7 +336,8 @@ class PolymarketPriceStream:
         question = meta.get("question", "?")[:40]
         side = meta.get("side", "?")
         log.info(
-            f"📖 BOOK | {side:3} | bid={best_bid or 'N/A':>6} ask={best_ask or 'N/A':>6} | {question}"
+            f"📖 BOOK | {side:3} | bid={best_bid or 'N/A':>6} ask={best_ask or 'N/A':>6} "
+            f"| {question}"
         )
 
     def _handle_price_change(self, data: dict, receive_time: datetime) -> None:
@@ -349,8 +391,12 @@ class PolymarketPriceStream:
         question = meta.get("question", "?")[:40]
         outcome = meta.get("side", "?")
 
+        if price is None:
+            log.debug(f"Trade event without price: {data}")
+            return
         log.info(
-            f"🔄 TRADE | {outcome:3} | price={price:>6} size={size:>8} side={side:4} | {question}"
+            f"🔄 TRADE | {outcome:3} | price={price:>6} size={size or '?':>8} side={side:4} "
+            f"| {question}"
         )
 
     def stop(self) -> None:
@@ -372,46 +418,22 @@ class PolymarketPriceStream:
 # =============================================================================
 
 
-async def main(duration: int | None = None) -> None:
-    """
-    Main entry point.
-
-    Args:
-        duration: Optional duration in seconds. None = run until interrupted.
-    """
-    log.info("=" * 60)
-    log.info("POLYMARKET CLOB WEBSOCKET PRICE STREAMING TEST")
-    log.info("=" * 60)
-
-    # Load market IDs from portfolios
-    market_ids = load_market_ids_from_portfolios()
-    if not market_ids:
-        # Use some example markets for testing
-        log.warning("No portfolios found. Using example market IDs.")
-        market_ids = ["610381", "610380"]  # Ukraine election markets
-
-    # Fetch token IDs from Gamma API
-    token_map = await fetch_token_ids_for_markets(market_ids)
+async def main(duration: int | None, sample: int) -> None:
+    """Resolve tokens, then stream until Ctrl+C or --duration seconds."""
+    token_map = await fetch_token_map(load_market_ids_from_portfolios())
+    if not token_map:
+        log.warning("No live portfolio tokens; using top-volume markets instead")
+        token_map = await fetch_sample_token_map(sample)
     if not token_map:
         log.error("No token IDs resolved. Cannot proceed.")
         return
 
-    # Create and run WebSocket client
     client = PolymarketPriceStream(token_map)
-
-    # Handle graceful shutdown
-    shutdown_event = asyncio.Event()
-
-    def signal_handler():
-        log.info("\nShutdown signal received...")
-        client.stop()
-        shutdown_event.set()
-
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
+    main_task = asyncio.current_task()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, signal_handler)
+        loop.add_signal_handler(sig, main_task.cancel)
 
-    # Run with optional timeout
     try:
         if duration:
             log.info(f"Running for {duration} seconds...")
@@ -423,17 +445,20 @@ async def main(duration: int | None = None) -> None:
         log.info(f"Duration limit ({duration}s) reached.")
         client.stop()
     except asyncio.CancelledError:
-        pass
+        log.info("Shutdown signal received.")
+        client.stop()
 
     client.print_summary()
 
 
 if __name__ == "__main__":
-    # Parse optional --duration argument
-    duration = None
-    if len(sys.argv) > 1:
-        for i, arg in enumerate(sys.argv):
-            if arg == "--duration" and i + 1 < len(sys.argv):
-                duration = int(sys.argv[i + 1])
-
-    asyncio.run(main(duration))
+    parser = argparse.ArgumentParser(description="Stream CLOB prices over WebSocket")
+    parser.add_argument("--duration", type=int, help="Stop after N seconds")
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=DEFAULT_SAMPLE_MARKETS,
+        help="Top-volume markets to use when portfolios give no live tokens",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(args.duration, args.sample))
