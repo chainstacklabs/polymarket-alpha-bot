@@ -89,8 +89,8 @@ class LivePosition:
 
     # Derived state
     state: str  # active, pending, partial, complete
-    entry_net_cost: float  # Actual cost after selling unwanted tokens
-    realized_proceeds: float  # USDC recovered from exit sells/merges
+    entry_net_cost: float  # Cost after selling unwanted tokens
+    realized_proceeds: float  # pUSD back from selling wanted tokens / merges
     current_value: float
     pnl: float
     pnl_pct: float
@@ -98,6 +98,10 @@ class LivePosition:
     # Selling in progress flags (persisted across page refresh)
     selling_target: bool
     selling_cover: bool
+
+    # True for positions recorded before sale proceeds were tracked: their
+    # entry_net_cost is estimated from entry prices.
+    cost_estimated: bool = False
 
 
 class PositionService:
@@ -404,22 +408,20 @@ class PositionService:
         target_price: float,
         cover_price: float,
         exit_fees: float = 0.0,
+        actual_cost: Optional[float] = None,
     ) -> tuple[float, float, float]:
         """Calculate current value, P&L, and P&L percentage.
 
-        current_value = token_holdings_value + realized_proceeds (from exit sells/merges).
-        effective_cost = gross_cost if unwanted tokens remain, else net_cost.
-        exit_fees: estimated taker fees if selling at current prices (unrealized
-            P&L only -- realized proceeds from the CLOB already net fees).
-
-        V2 note (#36): under V2 the on-chain taker fee is computed at match
-        time via ``getClobMarketInfo()`` rather than baked into the signed
-        order. The estimate from ``feeSchedule`` is still the right
-        approximation for *unrealized* exit-fee projection here -- it matches
-        what V2 will charge as long as we're on the same fee schedule. Realized
-        P&L is derived from balance deltas (``realized_proceeds``) which
-        already nets the actual fee charged on-chain, so no V2 change is
-        needed for the realized side.
+        current_value = token holdings at current prices + realized_proceeds
+            (pUSD from selling wanted tokens and merging pairs) - exit_fees.
+        cost: `actual_cost` (split pUSD - what the unwanted sides sold for,
+            exchange-reported) when known. Older positions don't have it:
+            gross_cost if unwanted tokens remain, else the entry-price
+            estimate `net_cost`.
+        exit_fees: estimated taker fees if the holdings were sold at current
+            prices (unrealized side only). Fees are computed at match time
+            from the market's ``feeSchedule``; realized amounts are what the
+            order response reported.
         """
         target_mergeable = min(target_wanted, target_unwanted)
         cover_mergeable = min(cover_wanted, cover_unwanted)
@@ -443,8 +445,13 @@ class PositionService:
 
         current_value = merge_value + market_value + realized_proceeds - exit_fees
 
-        has_significant_unwanted = (target_unwanted > 0.01) or (cover_unwanted > 0.01)
-        effective_cost = gross_cost if has_significant_unwanted else net_cost
+        if actual_cost is not None:
+            effective_cost = actual_cost
+        else:
+            has_significant_unwanted = (target_unwanted > 0.01) or (
+                cover_unwanted > 0.01
+            )
+            effective_cost = gross_cost if has_significant_unwanted else net_cost
 
         pnl = current_value - effective_cost
         pnl_pct = (pnl / effective_cost * 100) if effective_cost > 0 else 0
@@ -669,6 +676,12 @@ class PositionService:
                 entry["target_entry_price"] + entry["cover_entry_price"]
             )
             realized_proceeds = entry.get("realized_proceeds", 0.0)
+            target_sold = entry.get("target_sell_proceeds")
+            cover_sold = entry.get("cover_sell_proceeds")
+            cost_estimated = target_sold is None or cover_sold is None
+            actual_cost = (
+                None if cost_estimated else gross_cost - target_sold - cover_sold
+            )
 
             # Estimate exit fees at current prices (unrealized P&L only --
             # realized P&L uses actual CLOB proceeds which already net fees).
@@ -697,6 +710,7 @@ class PositionService:
                 target_price,
                 cover_price,
                 exit_fees=exit_fees,
+                actual_cost=actual_cost,
             )
 
             results.append(
@@ -732,13 +746,16 @@ class PositionService:
                     target_unwanted_balance=round(target_unwanted, 4),
                     cover_unwanted_balance=round(cover_unwanted, 4),
                     state=state,
-                    entry_net_cost=round(net_cost, 4),
+                    entry_net_cost=round(
+                        net_cost if actual_cost is None else actual_cost, 4
+                    ),
                     realized_proceeds=realized_proceeds,
                     current_value=current_value,
                     pnl=pnl,
                     pnl_pct=pnl_pct,
                     selling_target=entry.get("selling_target", False),
                     selling_cover=entry.get("selling_cover", False),
+                    cost_estimated=cost_estimated,
                 )
             )
 

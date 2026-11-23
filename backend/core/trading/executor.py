@@ -55,8 +55,10 @@ class TradeResult:
     wanted_token_id: str = ""
     unwanted_token_id: str = ""
     ctf_token_ids: Optional[list[str]] = None
-    entry_price: float = 0.0
+    entry_price: float = 0.0  # Gamma price at buy time (display only)
     protocol: str = "v1"
+    # pUSD the unwanted side sold for at buy time (exchange-reported).
+    clob_proceeds: float = 0.0
 
 
 @dataclass
@@ -191,6 +193,7 @@ class TradingExecutor:
         clob_order_id = None
         clob_filled = False
         clob_error = None
+        clob_proceeds = 0.0
 
         if not skip_clob_sell and unwanted_token:
             # A split of $N mints N shares of each side.
@@ -209,10 +212,12 @@ class TradingExecutor:
             else:
                 from core.trading.clob import sell_via_clob
 
-                clob_order_id, clob_filled_size, clob_error = sell_via_clob(
+                sale = sell_via_clob(
                     client, unwanted_token, amount, unwanted_price, slippage=slippage
                 )
-                clob_filled = clob_filled_size > 0
+                clob_order_id, clob_error = sale.order_id, sale.error
+                clob_filled = sale.filled > 0
+                clob_proceeds = sale.proceeds
 
         wanted_token_id = (
             market.yes_token_id if position == "YES" else (market.no_token_id or "")
@@ -237,6 +242,7 @@ class TradingExecutor:
             ctf_token_ids=[t for t in (market.yes_token_id, market.no_token_id) if t],
             entry_price=entry_price,
             protocol=market.protocol,
+            clob_proceeds=clob_proceeds,
         )
 
     async def buy_pair(

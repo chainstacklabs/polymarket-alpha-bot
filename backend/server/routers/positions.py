@@ -113,8 +113,8 @@ class PositionResponse(BaseModel):
 
     # Derived
     state: str
-    entry_net_cost: float  # Actual cost after selling unwanted tokens
-    realized_proceeds: float  # USDC recovered from exit sells/merges
+    entry_net_cost: float  # Cost after selling unwanted tokens
+    realized_proceeds: float  # pUSD back from selling wanted tokens / merges
     current_value: float
     pnl: float
     pnl_pct: float
@@ -122,6 +122,9 @@ class PositionResponse(BaseModel):
     # Selling in progress flags
     selling_target: bool
     selling_cover: bool
+
+    # Cost estimated from entry prices (positions from before proceeds were tracked)
+    cost_estimated: bool = False
 
 
 class PositionsListResponse(BaseModel):

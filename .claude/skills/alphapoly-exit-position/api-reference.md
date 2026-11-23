@@ -14,8 +14,11 @@ Key fields in each position:
 | `state` | `active` (both filled), `pending` (unwanted tokens remain), `partial` (one side sold), `complete` (fully exited) |
 | `target_balance` / `cover_balance` | Current balance of the wanted token on each side |
 | `target_unwanted_balance` / `cover_unwanted_balance` | Residual unwanted token — non-zero means a pending sell failed |
-| `current_value` | Live estimated value of the position |
-| `pnl` / `pnl_pct` | Unrealized profit/loss |
+| `entry_net_cost` | What the position cost: split pUSD minus what the unwanted sides sold for (as the exchange reported) |
+| `cost_estimated` | `true` for positions opened before sale proceeds were recorded: `entry_net_cost` is then estimated from entry prices |
+| `realized_proceeds` | pUSD already back from selling wanted tokens and merging pairs |
+| `current_value` | Holdings at current prices + `realized_proceeds` − estimated exit fees |
+| `pnl` / `pnl_pct` | `current_value` − cost (realized + unrealized) |
 
 ---
 

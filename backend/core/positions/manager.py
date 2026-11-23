@@ -22,7 +22,7 @@ class SellResult:
     amount: float
     order_id: Optional[str]
     filled: bool
-    recovered_value: float  # Approximate USDC recovered
+    recovered_value: float  # pUSD received, as reported by the exchange
     error: Optional[str] = None
 
 
@@ -45,7 +45,7 @@ class SideExitResult:
     merge_tx: Optional[str] = None
     sold_wanted: float = 0.0  # Wanted tokens sold via CLOB
     sold_unwanted: float = 0.0  # Unwanted tokens sold via CLOB
-    recovered: float = 0.0  # Estimated total pUSD recovered
+    recovered: float = 0.0  # pUSD recovered: merged pairs + sale proceeds
     error: Optional[str] = None
 
 
@@ -185,28 +185,26 @@ class PositionManager:
 
         from core.trading.clob import sell_via_clob
 
-        order_id, filled_size, error = sell_via_clob(
-            client, token_id, balance, price, slippage=slippage
-        )
+        sale = sell_via_clob(client, token_id, balance, price, slippage=slippage)
+        filled = sale.filled > 0
 
-        filled = filled_size > 0
-
-        # Estimate recovered value: use market price (not slippage floor)
-        # FAK fills at best available prices, typically near market price
-        recovered = filled_size * price
-
-        # Update storage if selling unwanted tokens
+        # Record what the exchange paid, so P&L sees the cash that replaced
+        # the tokens. Wanted tokens -> realized; unwanted -> the leg's sale
+        # proceeds (lowers its cost), as at buy time.
         if filled and token_type == "unwanted":
-            self.storage.update_clob_status(position_id, side, order_id, True)
+            self.storage.update_clob_status(position_id, side, sale.order_id, True)
+            self.storage.add_sell_proceeds(position_id, side, sale.proceeds)
+        elif filled:
+            self.storage.add_realized_proceeds(position_id, sale.proceeds)
 
         return SellResult(
             success=filled,
             token_id=token_id,
-            amount=filled_size,
-            order_id=order_id,
+            amount=sale.filled,
+            order_id=sale.order_id,
             filled=filled,
-            recovered_value=round(recovered, 2),
-            error=error,
+            recovered_value=round(sale.proceeds, 4),
+            error=sale.error,
         )
 
     async def merge_position_tokens(
@@ -279,6 +277,9 @@ class PositionManager:
                 tx_hash=None,
                 error=error,
             )
+
+        # Each merged YES+NO pair returns exactly 1 pUSD.
+        self.storage.add_realized_proceeds(position_id, int(mergeable * 1e6) / 1e6)
 
         return MergeResult(
             success=True,
@@ -379,12 +380,9 @@ class PositionManager:
             slippage,
         )
 
+        # Each merge and sale already recorded its own proceeds.
         total = round(target_result.recovered + cover_result.recovered, 4)
         any_success = target_result.recovered > 0 or cover_result.recovered > 0
-
-        # Record realized proceeds for accurate P&L
-        if total > 0:
-            self.storage.add_realized_proceeds(position_id, total)
 
         messages = []
         if target_result.merged > 0:
