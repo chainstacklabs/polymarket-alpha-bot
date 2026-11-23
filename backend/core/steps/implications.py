@@ -46,9 +46,6 @@ IMPLIES_MULTIPLIER = 1.0
 
 IMPLICATION_PROMPT = """Find ONLY logically necessary relationships between prediction market events.
 
-## TARGET EVENT:
-"{target_title}"
-
 ## AVAILABLE EVENTS:
 {group_titles_text}
 
@@ -139,6 +136,13 @@ When in doubt, use "all". Using "match" incorrectly on timeframe groups will DIS
 3. Correlations are NOT implications - "A often leads to B" is NOT "A guarantees B"
 4. Political/social predictions are almost NEVER necessary (humans are unpredictable)
 5. When in doubt, LEAVE IT OUT
+
+## TARGET EVENT
+Find the necessary relationships between the TARGET event below and the AVAILABLE EVENTS listed above. Use the exact titles from the AVAILABLE EVENTS list.
+
+TARGET: "{target_title}"
+
+Output ONLY the JSON described in OUTPUT FORMAT above.
 """
 
 
