@@ -506,6 +506,19 @@ class PositionService:
         self._payout_cache[key] = (time.time(), rates)
         return rates
 
+    def leg_holders(self, market_id: str) -> list[tuple[dict, str]]:
+        """(entry, side) of every position leg on this market that takes part
+        in sharing wallet balances (see `_token_refs`)."""
+        ids = {c[0] for claims in self._token_refs().values() for c in claims}
+        return [
+            (entry, side)
+            for entry in self.storage.load_all()
+            if entry["position_id"] in ids
+            for side in ("target", "cover")
+            if entry.get(f"{side}_market_id") == market_id
+            and entry.get(f"{side}_split_tx")
+        ]
+
     def _resolved_rates(self, entry: dict, side: str) -> Optional[tuple[float, float]]:
         """leg_payout_rates, treating a failed read as unresolved."""
         try:
@@ -866,8 +879,6 @@ class PositionService:
                 _open(cover_unwanted, cover_rates, 1),
             )
 
-            realized_proceeds = entry.get("realized_proceeds", 0.0)
-            cost, cost_estimated = entry_cost(entry, target_unwanted, cover_unwanted)
             value_tw, value_tu, value_cw, value_cu = (
                 target_wanted,
                 target_unwanted,
@@ -882,6 +893,11 @@ class PositionService:
                 value_cw = share_claim(entry, "cover", "wanted")[0]
                 value_cu = share_claim(entry, "cover", "unwanted")[0]
                 cover_price = cover_rates[0]
+
+            realized_proceeds = entry.get("realized_proceeds", 0.0)
+            # Same holdings for cost as for value: on a resolved leg an empty
+            # wallet doesn't mean the unwanted side was sold (auto-redeem).
+            cost, cost_estimated = entry_cost(entry, value_tu, value_cu)
 
             # Estimate exit fees at current prices (unrealized P&L only --
             # realized P&L uses actual CLOB proceeds which already net fees).

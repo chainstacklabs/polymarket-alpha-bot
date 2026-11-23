@@ -574,31 +574,30 @@ class PositionManager:
     def _market_credits(
         self, market_id: str, own: dict, own_balances: dict
     ) -> list[tuple[str, str, float]]:
-        """Every stored leg on this market: (position_id, side, payout).
+        """Every listed leg on this market: (position_id, side, payout).
 
         One redeem pays out the wallet's whole balance of the market, so each
         position sharing it is credited its own allocated part.
         """
         credits = []
-        for entry in self.storage.load_all():
-            mine = entry["position_id"] == own["position_id"]
-            for side in ("target", "cover"):
-                if entry.get(f"{side}_market_id") != market_id:
+        for entry, side in self.service.leg_holders(market_id):
+            if entry["position_id"] == own["position_id"]:
+                balances = own_balances
+            else:
+                try:
+                    balances = self.service.allocated_balances(entry)
+                except Exception as e:
+                    logger.warning(f"Redeem skips {entry['position_id']}: {e}")
                     continue
-                if not entry.get(f"{side}_split_tx"):
-                    continue
-                balances = (
-                    own_balances if mine else self.service.allocated_balances(entry)
-                )
-                wanted = balances[f"{side}_wanted"]
-                unwanted = balances[f"{side}_unwanted"]
-                if wanted + unwanted < 0.01:
-                    continue
-                rates = self.service.leg_payout_rates(entry, side)
-                if rates is None:
-                    continue
-                payout = wanted * rates[0] + unwanted * rates[1]
-                credits.append((entry["position_id"], side, payout))
+            wanted = balances[f"{side}_wanted"]
+            unwanted = balances[f"{side}_unwanted"]
+            if wanted + unwanted < 0.01:
+                continue
+            rates = self.service.leg_payout_rates(entry, side)
+            if rates is None:
+                continue
+            payout = wanted * rates[0] + unwanted * rates[1]
+            credits.append((entry["position_id"], side, payout))
         return credits
 
     async def redeem_position(self, position_id: str) -> RedeemResult:

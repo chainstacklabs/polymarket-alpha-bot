@@ -80,6 +80,12 @@ def _manager(tmp_path, entries, balances, rates):
     service = MagicMock()
     service.allocated_balances.side_effect = lambda e: balances[e["position_id"]]
     service.condition_id.side_effect = lambda market_id: f"0xcond-{market_id}"
+    service.leg_holders.side_effect = lambda market_id: [
+        (e, side)
+        for e in storage.load_all()
+        for side in ("target", "cover")
+        if e.get(f"{side}_market_id") == market_id and e.get(f"{side}_split_tx")
+    ]
     service.leg_payout_rates.side_effect = lambda entry, side: rates[
         entry[f"{side}_market_id"]
     ]
@@ -310,3 +316,56 @@ def test_unredeemed_winner_keeps_position_open(tmp_path):
         {"target": (0.0, 1.0), "cover": (1.0, 0.0)},
     )
     assert svc.get_position("pos").state != "complete"
+
+
+def test_redeem_credits_only_listed_positions(tmp_path):
+    # Another wallet's position on the same market (not listed by the
+    # service) must not be credited from this wallet's redeem.
+    pm, storage, _ = _manager(
+        tmp_path,
+        [_entry("a"), _entry("other")],
+        {"a": _bal(5, 0), "other": _bal(5, 0)},
+        {"m1": (1.0, 0.0)},
+    )
+    pm.service.leg_holders.side_effect = lambda market_id: [
+        (storage.get("a"), "target")
+    ]
+    asyncio.run(pm.redeem_position("a"))
+    assert storage.get("a")["realized_proceeds"] == pytest.approx(5.0)
+    assert storage.get("other")["realized_proceeds"] == 0.0
+    assert storage.get("other")["target_wanted_shares"] == 5.0
+
+
+def test_leg_holders_follow_token_refs(tmp_path):
+    from core.positions.service import PositionService
+
+    storage = PositionStorage(tmp_path / "positions.json")
+    storage.save_all([_entry("a"), _entry("b")])
+    svc = PositionService(storage=storage, wallet=MagicMock())
+    svc._token_refs = lambda: {"111": [("a", "target", "wanted", 5.0, True)]}
+    assert [(e["position_id"], s) for e, s in svc.leg_holders("m1")] == [
+        ("a", "target")
+    ]
+
+
+def test_legacy_unsold_leftover_is_not_counted_as_sold(tmp_path):
+    # Older position (no tracked shares or sale proceeds); the unwanted sale
+    # never filled. NO won and auto-redeem emptied the wallet: true P&L is 0.
+    entry = _pair(
+        entry_amount_per_side=10.0,
+        entry_total_cost=20.0,
+        target_sell_proceeds=None,
+        cover_sell_proceeds=None,
+        target_wanted_shares=None,
+        target_unwanted_shares=None,
+        cover_wanted_shares=None,
+        cover_unwanted_shares=None,
+        target_clob_filled=False,
+        cover_clob_filled=False,
+    )
+    svc = _service(
+        tmp_path, entry, [0.0] * 4, {"target": (0.0, 1.0), "cover": (0.0, 1.0)}
+    )
+    p = svc.get_position("pos")
+    assert p.current_value == pytest.approx(20.0)
+    assert p.pnl == pytest.approx(0.0)
