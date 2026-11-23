@@ -4,7 +4,7 @@
 
 Trades against Polymarket V2 (pUSD collateral, official `polymarket-client` SDK, EIP-712 domain version "2") via per-user deposit wallets (signature type 3): each user supplies an EOA key + a Relayer API key, the deposit wallet is deployed gaslessly, and the relayer pays gas. Legacy V1 was retired on 2026-04-28; for archaeology see the `v1-final` git tag.
 
-Two market protocols trade side by side (Gamma `version`): **v1** CTF markets (trading IDs `clobTokenIds`, balances on the CTF, orders on CTF Exchange V2, domain "2") and **v2** Polymarket Protocol V2 markets from 2026-11-23 (IDs `positionIds`, balances on the PositionManager, orders on ExchangeV3, domain "3"). The SDK routes orders and split/merge for both; pick IDs with `core/markets.py:outcome_token_ids()` and record each leg's `*_protocol` so balances are read from the right ledger.
+Two market protocols trade side by side (Gamma `version`): **v1** CTF markets (trading IDs `clobTokenIds`, balances on the CTF, orders on CTF Exchange V2, domain "2") and **v2** Polymarket Protocol V2 markets from 2026-11-23 (IDs `positionIds`, balances on the PositionManager, orders on ExchangeV3, domain "3"). The SDK routes orders and split/merge for both; pick IDs with `core/markets.py:outcome_token_ids()` and record each leg's `*_protocol` so balances are read from the right ledger. Positions on the same market share one wallet balance: each leg's `*_shares` decides its part (`allocate_shared` in `core/positions/service.py`).
 
 ## Commands
 
@@ -36,6 +36,7 @@ cd frontend && npm run typecheck  # TypeScript check (not in Makefile)
 - **Experiments are independent** — no imports from `backend/`
 - **Run backend Python from `backend/`** — `cd backend && uv run ...`
 - **`load_dotenv()` before imports** in `server/main.py` (E402 ignored by ruff for this file)
+- **Bump `VALIDATION_PROMPT_VERSION`** in `core/steps/validate.py` when the validation prompt changes, so cached verdicts are re-checked
 
 ## Project Structure
 
@@ -108,7 +109,7 @@ OPENROUTER_API_KEY=sk-...          # Required: LLM access
 IMPLICATIONS_MODEL=...             # Required: model for implication extraction
 VALIDATION_MODEL=...               # Required: model for validation
 POLYMARKET_TAG=politics             # Optional: market filter
-MARKET_POLLING_ENABLED=false        # Optional: background polling
+MARKET_POLLING_ENABLED=true         # Optional (default true): poll for new markets
 CHAINSTACK_NODE=https://...         # Optional: Polygon RPC for on-chain trades
 ```
 
