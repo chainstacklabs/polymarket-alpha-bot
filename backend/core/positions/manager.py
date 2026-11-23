@@ -109,6 +109,27 @@ class PositionManager:
             logger.error(f"Merge error: {error_msg}")
             return None, error_msg
 
+    def _start_tracking(self, position_id: str, position) -> None:
+        """Older positions: seed sale proceeds from the current balances.
+
+        Their cost used to be estimated from entry prices. Seeding it before
+        the first sell/merge (from the unwanted tokens already gone) keeps
+        today's P&L and lets each later sale be recorded exactly.
+        """
+        entry = self.storage.get(position_id)
+        if not entry or (
+            entry.get("target_sell_proceeds") is not None
+            and entry.get("cover_sell_proceeds") is not None
+        ):
+            return
+        from core.positions.service import legacy_sale_estimate
+
+        self.storage.start_tracking_proceeds(
+            position_id,
+            legacy_sale_estimate(entry, "target", position.target_unwanted_balance),
+            legacy_sale_estimate(entry, "cover", position.cover_unwanted_balance),
+        )
+
     async def sell_position_tokens(
         self,
         position_id: str,
@@ -129,6 +150,8 @@ class PositionManager:
                 recovered_value=0,
                 error="Position not found",
             )
+
+        self._start_tracking(position_id, position)
 
         # Determine which tokens to sell
         if side == "target":
@@ -223,6 +246,8 @@ class PositionManager:
                 tx_hash=None,
                 error="Position not found",
             )
+
+        self._start_tracking(position_id, position)
 
         # Get balances for merge
         if side == "target":

@@ -7,6 +7,7 @@
 """
 
 import asyncio
+from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import MagicMock, create_autospec, patch
 
@@ -14,7 +15,7 @@ import pytest
 from polymarket import SecureClient
 
 from core.positions.manager import PositionManager
-from core.positions.service import PositionService
+from core.positions.service import PositionService, entry_cost
 from core.positions.storage import PositionEntry, PositionStorage
 
 
@@ -159,11 +160,10 @@ def _async(value):
 # ── P&L cost ─────────────────────────────────────────────────────────────
 
 
-def _pnl(**kwargs):
+def _pnl(cost: float, **kwargs):
     svc = PositionService(storage=MagicMock(), wallet=MagicMock())
     args = dict(
-        gross_cost=20.0,
-        net_cost=9.0,  # entry-price estimate: 10 x (0.6 + 0.3)
+        cost=cost,
         realized_proceeds=0.0,
         target_wanted=10.0,
         target_unwanted=0.0,
@@ -176,20 +176,64 @@ def _pnl(**kwargs):
     return svc._calculate_pnl(**args)
 
 
-def test_actual_cost_replaces_the_estimate():
-    # Paid 20, unwanted sides brought back 3.8 + 6.9: cost 9.3, value 9.0
-    value, pnl, _ = _pnl(actual_cost=9.3)
+def test_cost_is_split_minus_recorded_sales():
+    # Paid 20, unwanted sides brought back 3.8 + 6.9
+    cost, estimated = entry_cost(asdict(_entry()), 0.0, 0.0)
+    assert (round(cost, 6), estimated) == (9.3, False)
+    value, pnl, _ = _pnl(cost)
     assert value == 9.0
-    assert pnl == round(9.0 - 9.3, 4)
+    assert pnl == round(9.0 - cost, 4)
 
 
-def test_actual_cost_holds_with_unsold_unwanted_tokens():
-    # The estimate would jump to the gross 20.00 here; the actual cost doesn't.
-    value, pnl, _ = _pnl(actual_cost=13.1, target_unwanted=10.0)
+def test_leftover_unwanted_tokens_are_valued_not_charged():
+    # Old logic jumped to the gross 20.00 here; cost stays what was paid.
+    value, pnl, _ = _pnl(13.1, target_unwanted=10.0)
     assert value == round(9.0 + 10 * 0.4, 4)
     assert pnl == round(value - 13.1, 4)
 
 
-def test_legacy_positions_keep_the_estimate():
-    _, pnl, _ = _pnl()
-    assert pnl == 0.0  # value 9.0 - net estimate 9.0
+def _legacy(**overrides) -> dict:
+    return asdict(
+        _entry(target_sell_proceeds=None, cover_sell_proceeds=None, **overrides)
+    )
+
+
+def test_legacy_cost_matches_the_old_net_estimate_when_unwanted_are_gone():
+    # Old: net cost = 10 x (0.6 + 0.3) = 9
+    cost, estimated = entry_cost(_legacy(), 0.0, 0.0)
+    assert (round(cost, 6), estimated) == (9.0, True)
+
+
+def test_legacy_cost_matches_the_old_gross_when_nothing_sold():
+    cost, _ = entry_cost(_legacy(), 10.0, 10.0)
+    assert cost == 20.0
+
+
+def test_legacy_leg_without_split_sold_nothing():
+    # Target split failed: only the cover leg (10) was paid for.
+    cost, _ = entry_cost(_legacy(target_split_tx="", entry_total_cost=10.0), 0.0, 0.0)
+    assert round(cost, 6) == round(10 - 10 * (1 - 0.3), 6)
+
+
+# ── older positions: a fair-value sale leaves P&L unchanged ─────────────
+
+
+def test_legacy_unwanted_sale_keeps_pnl(tmp_path):
+    s = PositionStorage(tmp_path / "p.json")
+    s.add(_entry(target_sell_proceeds=None, cover_sell_proceeds=None))
+    # 10 target-unwanted left (worth 0.4 each), cover's all sold at buy time
+    live = _live(target_unwanted_balance=10.0)
+    before, _ = entry_cost(s.get("pos1"), 10.0, 0.0)
+
+    pm, client = _manager(s, live)
+    client.place_market_order.return_value = MagicMock(
+        ok=True, order_id="0xo", making_amount=5.0, taking_amount=2.0
+    )
+    _run(pm.sell_position_tokens("pos1", "target", "unwanted"), client)
+
+    saved = s.get("pos1")
+    assert saved["cost_estimated"] is True
+    after, estimated = entry_cost(saved, 5.0, 0.0)
+    assert estimated
+    # Cost fell by the 2.00 received; the 5 tokens sold were worth 5 x 0.4 = 2.00
+    assert round(before - after, 6) == 2.0

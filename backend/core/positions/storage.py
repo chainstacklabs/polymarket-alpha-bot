@@ -66,6 +66,9 @@ class PositionEntry:
     # then estimated from entry prices.
     target_sell_proceeds: Optional[float] = None
     cover_sell_proceeds: Optional[float] = None
+    # True when the sale proceeds above started from an estimate (see
+    # PositionManager._start_tracking).
+    cost_estimated: bool = False
     # Market protocol per leg: "v1" (CTF balances) or "v2" (PositionManager).
     # Positions recorded before V2 support are all v1.
     target_protocol: str = "v1"
@@ -178,6 +181,29 @@ class PositionStorage:
                         f"Added ${amount:.4f} realized proceeds for {position_id} "
                         f"(total: ${p['realized_proceeds']:.4f})"
                     )
+                    return True
+            return False
+
+    def start_tracking_proceeds(
+        self, position_id: str, target_estimate: float, cover_estimate: float
+    ) -> bool:
+        """Seed untracked legs' sale proceeds with an estimate (older positions).
+
+        Called before the first sell/merge on such a position, so every later
+        sale can be recorded exactly. Marks the cost as estimated.
+        """
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") == position_id:
+                    for side, est in (
+                        ("target", target_estimate),
+                        ("cover", cover_estimate),
+                    ):
+                        if p.get(f"{side}_sell_proceeds") is None:
+                            p[f"{side}_sell_proceeds"] = est
+                            p["cost_estimated"] = True
+                    self.save_all(positions)
                     return True
             return False
 

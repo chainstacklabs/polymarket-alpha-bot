@@ -41,6 +41,34 @@ MULTICALL3_ABI = [
 ]
 
 
+def legacy_sale_estimate(entry: dict, side: str, unwanted_balance: float) -> float:
+    """Estimated pUSD a leg's unwanted side sold for, for positions recorded
+    before sale proceeds were tracked: whatever unwanted tokens are gone are
+    assumed sold at (1 - entry price). No split, no sale.
+    """
+    if not entry.get(f"{side}_split_tx"):
+        return 0.0
+    gone = max(entry["entry_amount_per_side"] - unwanted_balance, 0.0)
+    return round(gone * (1 - entry[f"{side}_entry_price"]), 6)
+
+
+def entry_cost(
+    entry: dict, target_unwanted: float, cover_unwanted: float
+) -> tuple[float, bool]:
+    """(cost, estimated): split pUSD minus what the unwanted sides sold for."""
+    sold = {
+        "target": entry.get("target_sell_proceeds"),
+        "cover": entry.get("cover_sell_proceeds"),
+    }
+    unwanted = {"target": target_unwanted, "cover": cover_unwanted}
+    estimated = bool(entry.get("cost_estimated"))
+    for side, value in sold.items():
+        if value is None:
+            sold[side] = legacy_sale_estimate(entry, side, unwanted[side])
+            estimated = True
+    return entry["entry_total_cost"] - sold["target"] - sold["cover"], estimated
+
+
 @dataclass
 class LivePosition:
     """Position enriched with live data."""
@@ -398,8 +426,7 @@ class PositionService:
 
     def _calculate_pnl(
         self,
-        gross_cost: float,
-        net_cost: float,
+        cost: float,
         realized_proceeds: float,
         target_wanted: float,
         target_unwanted: float,
@@ -408,16 +435,13 @@ class PositionService:
         target_price: float,
         cover_price: float,
         exit_fees: float = 0.0,
-        actual_cost: Optional[float] = None,
     ) -> tuple[float, float, float]:
         """Calculate current value, P&L, and P&L percentage.
 
         current_value = token holdings at current prices + realized_proceeds
             (pUSD from selling wanted tokens and merging pairs) - exit_fees.
-        cost: `actual_cost` (split pUSD - what the unwanted sides sold for,
-            exchange-reported) when known. Older positions don't have it:
-            gross_cost if unwanted tokens remain, else the entry-price
-            estimate `net_cost`.
+        cost: split pUSD - what the unwanted sides sold for (see
+            `entry_cost`). Leftover unwanted tokens are valued at market.
         exit_fees: estimated taker fees if the holdings were sold at current
             prices (unrealized side only). Fees are computed at match time
             from the market's ``feeSchedule``; realized amounts are what the
@@ -445,16 +469,8 @@ class PositionService:
 
         current_value = merge_value + market_value + realized_proceeds - exit_fees
 
-        if actual_cost is not None:
-            effective_cost = actual_cost
-        else:
-            has_significant_unwanted = (target_unwanted > 0.01) or (
-                cover_unwanted > 0.01
-            )
-            effective_cost = gross_cost if has_significant_unwanted else net_cost
-
-        pnl = current_value - effective_cost
-        pnl_pct = (pnl / effective_cost * 100) if effective_cost > 0 else 0
+        pnl = current_value - cost
+        pnl_pct = (pnl / cost * 100) if cost > 0 else 0
 
         return round(current_value, 4), round(pnl, 4), round(pnl_pct, 2)
 
@@ -670,18 +686,8 @@ class PositionService:
                 target_wanted, target_unwanted, cover_wanted, cover_unwanted
             )
 
-            gross_cost = entry["entry_total_cost"]
-            amount = entry["entry_amount_per_side"]
-            net_cost = amount * (
-                entry["target_entry_price"] + entry["cover_entry_price"]
-            )
             realized_proceeds = entry.get("realized_proceeds", 0.0)
-            target_sold = entry.get("target_sell_proceeds")
-            cover_sold = entry.get("cover_sell_proceeds")
-            cost_estimated = target_sold is None or cover_sold is None
-            actual_cost = (
-                None if cost_estimated else gross_cost - target_sold - cover_sold
-            )
+            cost, cost_estimated = entry_cost(entry, target_unwanted, cover_unwanted)
 
             # Estimate exit fees at current prices (unrealized P&L only --
             # realized P&L uses actual CLOB proceeds which already net fees).
@@ -700,8 +706,7 @@ class PositionService:
             ) + compute_fee(cover_value, cover_price, cover_fee_stub)
 
             current_value, pnl, pnl_pct = self._calculate_pnl(
-                gross_cost,
-                net_cost,
+                cost,
                 realized_proceeds,
                 target_wanted,
                 target_unwanted,
@@ -710,7 +715,6 @@ class PositionService:
                 target_price,
                 cover_price,
                 exit_fees=exit_fees,
-                actual_cost=actual_cost,
             )
 
             results.append(
@@ -746,9 +750,7 @@ class PositionService:
                     target_unwanted_balance=round(target_unwanted, 4),
                     cover_unwanted_balance=round(cover_unwanted, 4),
                     state=state,
-                    entry_net_cost=round(
-                        net_cost if actual_cost is None else actual_cost, 4
-                    ),
+                    entry_net_cost=round(cost, 4),
                     realized_proceeds=realized_proceeds,
                     current_value=current_value,
                     pnl=pnl,

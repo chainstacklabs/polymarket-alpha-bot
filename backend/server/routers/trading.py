@@ -132,7 +132,9 @@ async def buy_pair(req: BuyPairRequest):
                     pair_id=req.pair_id,
                     entry_time=datetime.utcnow().isoformat() + "Z",
                     entry_amount_per_side=req.amount_per_position,
-                    entry_total_cost=req.amount_per_position * 2,
+                    # Only legs whose split went through cost anything.
+                    entry_total_cost=req.amount_per_position
+                    * (bool(result.target.split_tx) + bool(result.cover.split_tx)),
                     target_market_id=req.target_market_id,
                     target_position=req.target_position,
                     target_token_id=result.target.wanted_token_id,
