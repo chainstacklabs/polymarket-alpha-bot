@@ -7,6 +7,7 @@ approvals are submitted gaslessly via the polymarket-client SDK.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from eth_account import Account
@@ -141,6 +142,20 @@ class WalletManager:
         self._unlocked_key = None
         self._relayer_key = None
         logger.info("Wallet locked")
+
+    def replace(self) -> Path:
+        """Set the current wallet aside so a new one can be generated or imported.
+
+        For a lost password: needs none, and keeps the encrypted file (renamed
+        next to it), so the old key is still recoverable with its password.
+        """
+        if not self.storage.exists():
+            raise ValueError("No wallet to replace")
+        self.lock()
+        self._address = None
+        backup = self.storage.archive()
+        logger.info(f"Wallet set aside as {backup.name}")
+        return backup
 
     def get_unlocked_key(self) -> str:
         """Get the unlocked EOA private key (for signing)."""

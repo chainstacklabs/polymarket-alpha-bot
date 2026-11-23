@@ -175,6 +175,24 @@ async def unlock_wallet(req: PasswordRequest):
         raise HTTPException(status_code=401, detail="Invalid password")
 
 
+@router.post("/replace")
+async def replace_wallet():
+    """Set the wallet aside (lost password) so a new one can be added.
+
+    Needs no password. The encrypted file is renamed, not deleted.
+    """
+    manager = get_wallet_manager()
+    try:
+        backup = manager.replace()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "replaced": True,
+        "backup": backup.name,
+        "message": "Wallet set aside. Generate or import a new one.",
+    }
+
+
 @router.post("/lock")
 async def lock_wallet():
     """Lock wallet (clear secrets from memory)."""

@@ -31,6 +31,15 @@ class WalletStorage:
         """Check if wallet file exists."""
         return self.path.exists()
 
+    def archive(self) -> Path:
+        """Move the wallet file aside (never deleted); returns the backup path."""
+        from datetime import datetime, timezone
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = self.path.with_name(f"{self.path.name}.replaced-{stamp}")
+        self.path.rename(backup)
+        return backup
+
     def load(self) -> WalletData | None:
         """Load wallet data (without decrypting)."""
         if not self.exists():
