@@ -8,114 +8,126 @@
   • <a target="_blank" href="https://chainstack.com/">Homepage</a> •
   <a target="_blank" href="https://chainstack.com/protocols/">Supported protocols</a> •
   <a target="_blank" href="https://chainstack.com/blog/">Chainstack blog</a> •
-  <a target="_blank" href="https://docs.chainstack.com/quickstart/">Blockchain API reference</a> • <br> 
+  <a target="_blank" href="https://docs.chainstack.com/quickstart/">Blockchain API reference</a> • <br>
   • <a target="_blank" href="https://console.chainstack.com/user/account/create">Start for free</a> •
 </p>
 
+**Alphapoly** finds hedging pairs across correlated **Polymarket** markets and lets you trade them from a dashboard. An LLM pipeline groups related markets and finds where one outcome logically implies another; rule-based checks and a second LLM pass then reject pairs where both legs could lose. The dashboard streams live prices, buys a pair after showing its total cost against your balance, and tracks the P&L of your positions.
 
-# Alphapoly - Polymarket alpha detection platform
-
-> Trades against Polymarket V2 (pUSD collateral). The legacy V1 (USDC.e) stack was retired on 2026-04-28 — `git checkout v1-final` to inspect it. If you hold USDC.e, wrap it to pUSD with [`experiments/trading/02_wrap_to_pusd.py`](experiments/trading/02_wrap_to_pusd.py) before trading.
-
-Find covering portfolios across correlated prediction markets using predefined rules and LLM decisions. The system detects relationships between markets, classifies them to identify hedging pairs, and tracks their prices. The platform offers a smooth UI for entering detected pairs when profit opportunities exist and tracking your positions.
-
-For a good experience, you'll need to add an LLM from OpenRouter and an RPC node (see `.env.example`).
-
-**Trading** runs through per-user deposit wallets (signature type 3). You supply an EOA signing key plus a Relayer API key (minted at `polymarket.com/settings?tab=api-keys`); the app deploys a deposit wallet gaslessly and the relayer pays gas — fund the deposit wallet with pUSD, no POL needed. Bare EOAs can't trade directly (they're blocked by the V2 CLOB allowlist).
-
-
-
-![Dashboard Screenshot](assets/dashboard-screenshot.png)
-
-## How It Works
-
-1. **Groups** - Fetches markets from Polymarket (e.g., "Presidential Election Winner")
-2. **Implications** *(LLM)* - Extracts logical relationships between groups
-3. **Validation** - Rule-based checks reject pairs where some outcome makes both legs lose (e.g. number ladders) and skip pairs costing $1 or more; an LLM then validates the rest at the individual market level, looking for a both-lose scenario
-4. **Portfolios** - Computes cost and expected profit for validated pairs using live market prices
-5. **Positions** - Tracks your purchased position pairs
-
-## Prerequisites
-
-- [uv](https://docs.astral.sh/uv/) (manages Python automatically)
-- **Node.js 20.9+** (required by Next.js 16) via [fnm](https://github.com/Schniz/fnm), nvm, or brew
-
-## Quick Start
-
-```bash
-cp .env.example .env
-
-# With make
-make install && make dev
-
-# Without make
-cd backend && uv sync
-cd frontend && npm install
-cd backend && uv run python -m uvicorn server.main:app --port 8000 &
-cd frontend && npm run dev
-```
-
-Dashboard: http://localhost:3000 · API: http://localhost:8000/docs
-
-## Commands
-
-**With make** (auto-detects fnm/nvm/volta):
-```bash
-make install    # Install deps
-make dev        # Start both servers
-make pipeline   # Run ML pipeline (incremental, also available in UI)
-make lint       # Auto-fix: ruff + prettier + eslint
-```
-
-**Without make**:
-```bash
-# Backend
-cd backend && uv sync
-cd backend && uv run python -m uvicorn server.main:app --reload --port 8000
-
-# Frontend
-cd frontend && npm install
-cd frontend && npm run dev
-```
-
-## Agentic Coding
-
-This repo is configured for AI coding agents via the `.claude/` directory:
-
-- **`CLAUDE.md`** — project context, commands, conventions, and API routes
-- **`hooks/`** — auto-lint on edit, guard against writing secrets *(Claude Code only)*
-- **`skills/`** — workflows for pipeline management, trading, and feature development
-
-### Skills
-
-The `.claude/skills/` directory contains [Agent Skills](https://agentskills.io/home) — an open standard for extending AI coding agents with reusable, modular capabilities. Each skill is a directory with a `SKILL.md` file (YAML frontmatter + natural-language instructions) that teaches an agent how to perform a domain-specific workflow.
-
-| Skill | Purpose |
-|-------|---------|
-| `alphapoly-pipeline` | Run, debug, and manage the ML pipeline |
-| `alphapoly-portfolios` | Fetch and display portfolio opportunities |
-| `alphapoly-enter-position` | Execute a covered pair trade |
-| `alphapoly-exit-position` | Exit or manage an open position |
-| `alphapoly-feature` | Add features following stack conventions |
-| `alphapoly-experiment` | Scaffold standalone experiment scripts |
-
-To use the skills in this repo with a different agent, point it at `.claude/skills/` or copy the skill directories into the agent's expected location (e.g., `~/.codex/skills/` for Codex CLI).
-
-### Instructions file
-
-`CLAUDE.md` is read natively by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and by [GitHub Copilot in VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-a-claudemd-file) (opt-in via `chat.useClaudeMdFile`). For broader cross-agent compatibility, [`AGENTS.md`](https://agents.md/) is also provided as a symlink to `CLAUDE.md` — an open format supported by Codex, Cursor, Copilot, and others.
-
-## Experiments
-
-Standalone research scripts (no imports from `backend/`). Four groups:
-
-| Folder | Description |
-|--------|-------------|
-| [`experiments/`](experiments/) | Pipeline-step learning examples — fetch events, build groups, extract implications, validate, score portfolios, stream prices. Mirrors what `backend/core/runner.py` orchestrates, one stage per file. |
-| [`experiments/trading/`](experiments/trading/) | Wallet + funding + position helpers. Set up a per-user deposit wallet (sigtype-3, deployed gaslessly via a Relayer API key), wrap USDC.e ↔ pUSD via Polymarket's CollateralOnramp/Offramp (1:1, gas-only, no slippage), buy a position, transfer tokens. |
-| [`experiments/onchain-otc/`](experiments/onchain-otc/) | On-chain OTC trading without the CLOB — split/merge, P2P transfers, atomic escrow, NegRisk conversions, and intent-based settlement on an Anvil fork of Polygon. Forked-chain research; uses USDC.e collateral (the fork's frozen state predates Polymarket V2 / pUSD). |
-| [`experiments/verify/`](experiments/verify/) | Verification probes for the deposit-wallet path. `03_sigtype3_spike.py` walks the official `polymarket-client` SDK from L1 auth → deposit-wallet derivation → relayer deploy → a non-filling order, confirming the sigtype-3 allowlist gate is cleared. Reach for it when onboarding breaks. |
+> **Also by Chainstack**
+> - [**polyclaw**](https://github.com/chainstacklabs/polyclaw) — agent skill that lets an AI assistant browse and trade Polymarket from chat.
 
 ---
 
-**Disclaimer:** This software is provided as-is for educational and research purposes only. It is not financial advice. Trading prediction markets involves risk—you may lose money. Use at your own discretion.
+**🚨 Scam alert:** scam bots post in Issues with links to sites that drain your wallet. Never share your private key, and don't follow links in issue comments. Deleted comments were scams; genuine contributors are welcome.
+
+**⚠️ Not for production:** this code is for learning, it isn't audited, and it isn't financial advice. Trading spends real funds. Polymarket restricts trading in some regions; check that you're allowed to trade where you are.
+
+---
+
+![Dashboard screenshot](assets/dashboard-screenshot.png)
+
+## How it works
+
+1. **Groups** — fetches Polymarket events and groups their markets
+2. **Implications** *(LLM)* — finds groups where one outcome logically implies another
+3. **Validation** — rules reject pairs where some outcome makes both legs lose and skip pairs costing $1 or more; an LLM checks the rest market by market
+4. **Portfolios** — cost, coverage, and expected profit for each valid pair at live prices
+5. **Positions** — the pairs you bought, with P&L from what the exchange actually paid
+
+## Getting started
+
+### 1. Prerequisites
+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) — it handles Python, no separate install needed
+- **Node.js 20.9+**, via [fnm](https://github.com/Schniz/fnm), nvm, or brew
+- An [OpenRouter API key](https://openrouter.ai/settings/keys) for the pipeline
+- A Polygon RPC endpoint for balances and trading — deploy a Polygon node on [Chainstack](https://console.chainstack.com/user/account/create)
+
+### 2. Install and run
+
+```bash
+cp .env.example .env      # then fill in the variables below
+make install
+make dev
+```
+
+Dashboard: http://localhost:3000 · API docs: http://localhost:8000/docs
+
+### 3. Configure `.env`
+
+| Variable | Needed | Purpose |
+|---|---|---|
+| `OPENROUTER_API_KEY` | Yes | LLM access |
+| `IMPLICATIONS_MODEL` | Yes | OpenRouter model that finds implications |
+| `VALIDATION_MODEL` | Yes | OpenRouter model that validates pairs; a stronger model rejects far more bad pairs |
+| `CHAINSTACK_NODE` | For trading | Polygon RPC endpoint |
+| `POLYMARKET_TAG` | No | Market category to scan; defaults to `politics` |
+| `MARKET_POLLING_ENABLED` | No | Poll for new markets in the background; defaults to `true` |
+| `POLL_INTERVAL_SECONDS` | No | Polling interval; defaults to `60` |
+| `ALLOWED_ORIGINS` | No | Origins allowed to call the API; defaults to the local dashboard |
+
+### 4. Find pairs
+
+Run the pipeline from the dashboard, or:
+
+```bash
+make pipeline         # new markets only, reuses cached LLM results
+make pipeline-full    # everything from scratch (more LLM calls)
+```
+
+### 5. Set up trading
+
+Polymarket trades from a **deposit wallet**: a smart wallet owned by your signing key, with gas paid by Polymarket's relayer. In the dashboard's wallet menu:
+
+1. Generate or import a signing key. It's stored encrypted with your password.
+2. Add a Relayer API key, created at polymarket.com/settings?tab=api-keys while signed in with that key's wallet.
+3. Deploy the deposit wallet (free), then send pUSD to it.
+
+Holding USDC.e? Wrap it 1:1 into pUSD with [`experiments/trading/02_wrap_to_pusd.py`](experiments/trading/02_wrap_to_pusd.py).
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `make install` | Install backend and frontend dependencies |
+| `make dev` / `make stop` | Start or stop both servers (`make backend`, `make frontend` for one) |
+| `make pipeline` / `make pipeline-full` | Run the pipeline incrementally or from scratch |
+| `make export-seed` / `make import-seed` | Save the pipeline state as seed data, or reset to it |
+| `make lint` | Fix with ruff, prettier, and eslint |
+
+Without `make`: `cd backend && uv sync && uv run python -m uvicorn server.main:app --port 8000`, and `cd frontend && npm install && npm run dev`.
+
+## Agentic coding
+
+- **[`CLAUDE.md`](CLAUDE.md)** — project context, commands, conventions, and API routes. [`AGENTS.md`](AGENTS.md) links to it for Codex, Cursor, Copilot, and others.
+- **`.claude/hooks/`** — Claude Code hooks: lint on every edit, and a block on edits to `.env`, `data/`, and key files.
+- **`.claude/skills/`** — [Agent Skills](https://agentskills.io/home) for working with the app:
+
+| Skill | Purpose |
+|---|---|
+| `alphapoly-pipeline` | Run, debug, and manage the pipeline |
+| `alphapoly-portfolios` | List current hedging pairs |
+| `alphapoly-enter-position` | Buy a pair |
+| `alphapoly-exit-position` | Sell, merge, or exit a position |
+| `alphapoly-feature` | Add a feature following the stack's conventions |
+| `alphapoly-experiment` | Start a standalone experiment script |
+
+## Experiments
+
+Standalone scripts that don't import from `backend/`:
+
+| Folder | What's there |
+|---|---|
+| [`experiments/`](experiments/) | One script per pipeline step, from fetching events to streaming prices |
+| [`experiments/trading/`](experiments/trading/) | Deposit wallet setup, USDC.e ↔ pUSD wrapping, buying, token transfers |
+| [`experiments/onchain-otc/`](experiments/onchain-otc/) | Trading without the order book (split/merge, escrow, intents) on a Polygon fork; uses USDC.e, from before pUSD |
+| [`experiments/verify/`](experiments/verify/) | Probes for the deposit-wallet flow, for when onboarding breaks |
+
+## Contributing
+
+Open an **Issue** for feedback or bugs. CI runs ruff and pytest on the backend, and prettier, eslint, typecheck, and a build on the frontend; `make lint` and `cd backend && uv run pytest` cover the same locally.
+
+## License
+
+[Apache 2.0](LICENSE)
