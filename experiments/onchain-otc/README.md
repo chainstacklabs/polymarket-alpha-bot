@@ -53,8 +53,8 @@ Ours, in `contracts/` (experiments, not audited): `OTCEscrow.sol`, `IntentSettle
 - **Split and merge are lossless.** The CTF charges no fee; only gas.
 - **Positions are still USDC.e-backed after the pUSD upgrade.** `getCtfCollateral()` is USDC.e, `getCollateral()` is pUSD. Splitting with pUSD on the CTF mints token IDs no order book knows.
 - **Direct OTC works.** A transfer costs ~$0.003, but it needs trust; the escrow makes the swap atomic for ~$0.02.
-- **The NegRisk break-even trap.** Split + convert leaves YES on every outcome, which pays exactly $1 whatever wins. Directional exposure needs selling the unwanted side to someone.
-- **`convertPositions` uses the on-chain question order,** which isn't Gamma's `markets[]` order. Split all questions before converting. k NOs converted return (k − 1) × amount in collateral.
+- **The NegRisk break-even trap.** Split + convert leaves YES on every outcome, which pays exactly $1 when one question resolves YES (and $0 if all resolve NO). Directional exposure needs selling the unwanted side to someone.
+- **`convertPositions` uses the on-chain question order,** which isn't Gamma's `markets[]` order. Split all questions before converting. With no conversion fee, k NOs converted return (k − 1) × amount in collateral; a market's fee cuts both the collateral and the YES tokens received.
 - **The V2 exchange is operator-only.** `fillOrder` is gone; `matchOrders` takes a leading `conditionId` and operator-set fees. Domain version "2", 11-field order struct, no on-chain cancel (`pauseUser` instead).
 - **Intents need no operator.** Wrapped positions plus EIP-712 intents settle permissionlessly. Finding counterparties is the missing piece.
 

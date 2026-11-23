@@ -61,13 +61,32 @@ def load_escrow_abi_and_bytecode():
     return artifact["abi"], artifact["bytecode"]["object"]
 
 
+def gamma_pages(path: str, limit: int, max_pages: int = 10):
+    """Yield active Gamma results by 24h volume, one page at a time.
+
+    Protocol V2 results are skipped by the callers, so a whole page can hold
+    nothing usable; keep paging until a match or the results run out.
+    """
+    for page in range(max_pages):
+        items = httpx.get(
+            f"{GAMMA_API}/{path}",
+            params={
+                "closed": "false",
+                "active": "true",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=15.0,
+        ).json()
+        if not items:
+            return
+        yield from items
+
+
 def fetch_active_market() -> dict:
-    resp = httpx.get(
-        f"{GAMMA_API}/markets",
-        params={"closed": "false", "active": "true", "limit": 20, "order": "volume24hr", "ascending": "false"},
-        timeout=15.0,
-    )
-    for m in resp.json():
+    for m in gamma_pages("markets", limit=20):
         if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
             continue
         cid = m.get("conditionId", "")
@@ -261,10 +280,11 @@ def main():
     # USDC.e, so only "not authorized" proves the taker check fired.
     try:
         escrow.functions.fillOffer(restricted_offer_id).call({"from": charlie})
-        log.error("  Charlie fill: UNEXPECTEDLY SUCCEEDED")
     except (ContractLogicError, Web3RPCError) as e:
         assert "not authorized" in str(e), f"Rejected for the wrong reason: {e}"
         log.info("  Charlie rejected as expected: not authorized")
+    else:
+        raise AssertionError("Charlie filled an offer restricted to Bob")
 
     # Bob fills successfully
     tx = escrow.functions.fillOffer(restricted_offer_id).transact({"from": bob})

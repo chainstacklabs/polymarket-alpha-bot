@@ -66,24 +66,35 @@ CTF_ABI = json.loads("""[
 TRANSFER_BATCH_TOPIC = "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb"
 
 
+def gamma_pages(path: str, limit: int, max_pages: int = 10):
+    """Yield active Gamma results by 24h volume, one page at a time.
+
+    Protocol V2 results are skipped by the callers, so a whole page can hold
+    nothing usable; keep paging until a match or the results run out.
+    """
+    for page in range(max_pages):
+        items = httpx.get(
+            f"{GAMMA_API}/{path}",
+            params={
+                "closed": "false",
+                "active": "true",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=15.0,
+        ).json()
+        if not items:
+            return
+        yield from items
+
+
 def fetch_active_market() -> dict:
     """Find a real active binary market from Gamma API."""
     log.info("Fetching active markets from Gamma API...")
-    resp = httpx.get(
-        f"{GAMMA_API}/markets",
-        params={
-            "closed": "false",
-            "active": "true",
-            "limit": 20,
-            "order": "volume24hr",
-            "ascending": "false",
-        },
-        timeout=15.0,
-    )
-    markets = resp.json()
-
     # Find a binary market with a condition ID
-    for m in markets:
+    for m in gamma_pages("markets", limit=20):
         if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
             continue
         condition_id = m.get("conditionId", "")

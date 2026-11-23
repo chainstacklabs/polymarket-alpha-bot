@@ -189,13 +189,32 @@ def order_tuple(o):
     )
 
 
+def gamma_pages(path: str, limit: int, max_pages: int = 10):
+    """Yield active Gamma results by 24h volume, one page at a time.
+
+    Protocol V2 results are skipped by the callers, so a whole page can hold
+    nothing usable; keep paging until a match or the results run out.
+    """
+    for page in range(max_pages):
+        items = httpx.get(
+            f"{GAMMA_API}/{path}",
+            params={
+                "closed": "false",
+                "active": "true",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=15.0,
+        ).json()
+        if not items:
+            return
+        yield from items
+
+
 def fetch_active_market() -> dict:
-    resp = httpx.get(
-        f"{GAMMA_API}/markets",
-        params={"closed": "false", "active": "true", "limit": 50, "order": "volume24hr", "ascending": "false"},
-        timeout=15.0,
-    )
-    for m in resp.json():
+    for m in gamma_pages("markets", limit=50):
         if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
             continue
         cid = m.get("conditionId", "")
