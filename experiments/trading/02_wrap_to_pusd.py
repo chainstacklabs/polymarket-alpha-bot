@@ -2,40 +2,27 @@
 Wrap USDC.e -> pUSD on Polygon  (lossless: 1:1 + gas only)
 ==========================================================
 
-Polymarket V2 (post-2026-04-28 cutover) settles in pUSD. The
-CollateralOnramp contract converts USDC.e -> pUSD at exactly 1:1 — no
-slippage, no spread, no fees. You pay only Polygon gas (~$0.003 at
-current rates).
+Polymarket trades in pUSD. The CollateralOnramp converts USDC.e -> pUSD at
+exactly 1:1 (no slippage, no fee; you pay only Polygon gas). Reverse
+direction: ``02_unwrap_to_usdc_e.py``.
 
-This is the V2 collateral entry point. The Polymarket app's swap UI
-runs through DEX routers and charges slippage; this contract path
-doesn't. Reverse direction: ``02_unwrap_to_usdc_e.py``.
+The signing key (POLY_PK) pays the USDC.e and the gas; the pUSD goes to
+WRAP_TO. To fund trading, set WRAP_TO to your **deposit wallet** (printed by
+``01_setup_wallet.py``): pUSD on the signing key isn't buying power.
 
-Order of ops for new users:
+USAGE (from the repo root):
+    POLY_PK=0x.. WRAP_TO=0x<deposit wallet> \
+      uv run --frozen --project backend experiments/trading/02_wrap_to_pusd.py
 
-    01_setup_wallet.py   -> 02_swap_to_usdc_e.py (only if starting from native USDC)
-                         -> 02_wrap_to_pusd.py   (wrap into pUSD for V2)
-                         -> 03_buy_position.py
-
-WHAT IT DOES:
-    1. Reads USDC.e balance.
-    2. Approves CollateralOnramp to pull USDC.e.
-    3. Calls ``wrap(asset=USDC.e, to, amount)``; receives pUSD 1:1.
-
-USAGE:
-    uv run --frozen --project backend experiments/trading/02_wrap_to_pusd.py
+    WRAP_AMOUNT_USD=5 ...   # partial amount (default: full USDC.e balance)
 
 PREREQUISITES:
-    - Wallet created (01_setup_wallet.py).
-    - USDC.e in wallet (run 02_swap_to_usdc_e.py first if needed).
-    - POL for gas.
+    - USDC.e and a little POL on the signing key.
+    - CHAINSTACK_NODE (Polygon RPC) in .env.
 
-ABI verified against Polygonscan source 2026-04-27 (BUSL-1.1, Solidity 0.8.34).
-``wrap(address asset, address to, uint256 amount)`` requires a prior
-``approve`` on the source token and is gated by an `onlyUnpaused` modifier
-— this script reads ``Onramp.paused(asset)`` first and aborts on true.
-
-Set ``WRAP_AMOUNT_USD=<decimal>`` to wrap a partial balance (default: full).
+``wrap(address asset, address to, uint256 amount)`` needs a prior ``approve``
+on the source token and is ``onlyUnpaused``; the script checks
+``Onramp.paused(asset)`` first. ABI verified against Polygonscan 2026-04-27.
 
 Native USDC support is staged but paused
 ----------------------------------------
@@ -52,11 +39,9 @@ The explicit pause on native USDC means Polymarket has staged direct
 native-USDC -> pUSD support and is gating it behind a feature flag. When
 they lift the pause, you can flip this script to native USDC by setting
 ``WRAP_ASSET=native`` (handled below) — no contract change, no DEX hop,
-no slippage. Until then, native USDC users still need ``02_swap_to_usdc_e.py``
-first to pick up USDC.e (which is a DEX swap with ~0.05–0.3% slippage).
+no slippage. Until then, native USDC has to be swapped to USDC.e on a DEX first.
 """
 
-import json
 import sys
 import time
 from pathlib import Path
@@ -69,8 +54,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 import os  # noqa: E402  (load_dotenv must run first)
 
-WALLET_PATH = Path(__file__).parent / ".wallet.local.json"
-RPC_URL = os.environ["CHAINSTACK_NODE"]
+RPC_URL = os.environ.get("CHAINSTACK_NODE", "")
 
 # Polygon mainnet addresses (confirmed 2026-04-26 against Polymarket V2 docs).
 USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
@@ -158,14 +142,21 @@ ONRAMP_ABI = [
 def get_web3():
     from web3 import Web3
 
+    if not RPC_URL:
+        print("ERROR: set CHAINSTACK_NODE (Polygon RPC) in .env or the environment")
+        sys.exit(1)
     return Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={"timeout": 60}))
 
 
 def load_wallet() -> dict:
-    if not WALLET_PATH.exists():
-        print("ERROR: Wallet not found. Run 01_setup_wallet.py first")
+    """Signing key from POLY_PK, as in 01_setup_wallet.py and 03_buy_position.py."""
+    from eth_account import Account
+
+    pk = os.environ.get("POLY_PK")
+    if not pk:
+        print("ERROR: set POLY_PK (the signing key)")
         sys.exit(1)
-    return json.loads(WALLET_PATH.read_text())
+    return {"address": Account.from_key(pk).address, "private_key": pk}
 
 
 def retry_call(fn, retries=3, delay=3):
@@ -196,11 +187,18 @@ def main():
         return
     src_addr, src_label = _WRAP_ASSET_MAP[asset_choice]
 
+    wrap_to = os.environ.get("WRAP_TO", "").strip()
+    if not wrap_to:
+        print("ERROR: set WRAP_TO to the address that receives the pUSD (your deposit wallet)")
+        return
+    to_address = Web3.to_checksum_address(wrap_to)
+
     print("=" * 60)
     print(f"WRAP: {src_label} -> pUSD (Polymarket V2 collateral)")
     print("=" * 60)
     print(f"\nWallet: {address}")
     print(f"Source: {src_label} ({src_addr})")
+    print(f"pUSD to: {to_address}{'' if to_address != address else ' (the signing key itself)'}")
 
     w3 = get_web3()
     account = w3.eth.account.from_key(private_key)
@@ -212,20 +210,20 @@ def main():
     )
 
     bal_src_pre = retry_call(lambda: src.functions.balanceOf(address).call())
-    bal_pusd_pre = retry_call(lambda: pusd.functions.balanceOf(address).call())
+    bal_pusd_pre = retry_call(lambda: pusd.functions.balanceOf(to_address).call())
     pol_pre_wei = retry_call(lambda: w3.eth.get_balance(address))
     pol_balance = w3.from_wei(pol_pre_wei, "ether")
 
     print("\nCurrent balances:")
     print(f"  POL:    {pol_balance:.4f}")
     print(f"  {src_label:<6} ${bal_src_pre / 1e6:.2f}")
-    print(f"  pUSD:   ${bal_pusd_pre / 1e6:.2f}")
+    print(f"  pUSD at recipient: ${bal_pusd_pre / 1e6:.2f}")
 
     if bal_src_pre == 0:
         if asset_choice in ("native", "usdc"):
             print(f"\nNo {src_label} to wrap. Bridge or buy native USDC first.")
         else:
-            print(f"\nNo {src_label} to wrap. Run 02_swap_to_usdc_e.py first.")
+            print(f"\nNo {src_label} to wrap on the signing key.")
         return
 
     if pol_balance < 0.01:
@@ -295,7 +293,7 @@ def main():
     print("\n[2/2] Calling wrap(asset, to, amount)...")
     wrap_tx = onramp.functions.wrap(
         Web3.to_checksum_address(src_addr),
-        address,
+        to_address,
         amount,
     ).build_transaction(
         {
@@ -321,7 +319,7 @@ def main():
 
     time.sleep(2)
     bal_src_post = retry_call(lambda: src.functions.balanceOf(address).call())
-    bal_pusd_post = retry_call(lambda: pusd.functions.balanceOf(address).call())
+    bal_pusd_post = retry_call(lambda: pusd.functions.balanceOf(to_address).call())
 
     src_delta = (bal_src_post - bal_src_pre) / 1e6
     pusd_delta = (bal_pusd_post - bal_pusd_pre) / 1e6

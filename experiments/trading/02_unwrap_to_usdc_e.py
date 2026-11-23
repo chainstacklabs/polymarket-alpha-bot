@@ -6,8 +6,9 @@ The reverse of ``02_wrap_to_pusd.py``. Uses Polymarket's CollateralOfframp
 to convert pUSD back to USDC.e at exactly 1:1 — no slippage, no spread,
 no fees. You pay only Polygon gas (~$0.003 at current rates).
 
-This is the on-ramp flow's exit path. The Polymarket app's swap UI runs
-through DEX routers and charges slippage; this contract path doesn't.
+It unwraps pUSD held by the signing key (POLY_PK) itself. pUSD in the
+deposit wallet has to be moved out first (the SDK's ``transfer_erc20``);
+this script doesn't do that.
 
 WHAT IT DOES:
     1. Reads pUSD balance.
@@ -36,7 +37,6 @@ being burned. Pass USDC.e to get USDC.e back; passing pUSD reverts with
 ``InvalidAsset()`` (selector 0xc891add2).
 """
 
-import json
 import sys
 import time
 from pathlib import Path
@@ -49,8 +49,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 import os  # noqa: E402  (load_dotenv must run first)
 
-WALLET_PATH = Path(__file__).parent / ".wallet.local.json"
-RPC_URL = os.environ["CHAINSTACK_NODE"]
+RPC_URL = os.environ.get("CHAINSTACK_NODE", "")
 
 # Polygon mainnet addresses (confirmed 2026-04-26 against Polymarket V2 docs).
 USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
@@ -114,14 +113,21 @@ OFFRAMP_ABI = [
 def get_web3():
     from web3 import Web3
 
+    if not RPC_URL:
+        print("ERROR: set CHAINSTACK_NODE (Polygon RPC) in .env or the environment")
+        sys.exit(1)
     return Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={"timeout": 60}))
 
 
 def load_wallet() -> dict:
-    if not WALLET_PATH.exists():
-        print("ERROR: Wallet not found. Run 01_setup_wallet.py first")
+    """Signing key from POLY_PK, as in 01_setup_wallet.py and 03_buy_position.py."""
+    from eth_account import Account
+
+    pk = os.environ.get("POLY_PK")
+    if not pk:
+        print("ERROR: set POLY_PK (the signing key)")
         sys.exit(1)
-    return json.loads(WALLET_PATH.read_text())
+    return {"address": Account.from_key(pk).address, "private_key": pk}
 
 
 def retry_call(fn, retries=3, delay=3):
@@ -167,7 +173,8 @@ def main():
     print(f"  USDC.e: ${bal_usdce_pre / 1e6:.2f}")
 
     if bal_pusd_pre == 0:
-        print("\nNo pUSD to unwrap. Run 02_wrap_to_pusd.py first.")
+        print("\nNo pUSD on the signing key. Move pUSD out of the deposit wallet first")
+        print("(SDK transfer_erc20), or wrap with WRAP_TO set to the signing key.")
         return
 
     if pol_pre_wei < int(0.01 * 1e18):
