@@ -41,6 +41,39 @@ MULTICALL3_ABI = [
 ]
 
 
+_TRANSFER_EVENTS = {
+    bytes(Web3.keccak(text="TransferSingle(address,address,address,uint256,uint256)")),
+    bytes(
+        Web3.keccak(text="TransferBatch(address,address,address,uint256[],uint256[])")
+    ),
+}
+
+
+def split_receivers(receipt) -> set[str]:
+    """Addresses that received ERC-1155 outcome tokens in a tx (lowercase).
+
+    v1 deposit-wallet splits mint to an adapter that forwards to the wallet,
+    so every recipient counts, not just the mint's.
+    """
+    out = set()
+    for log in receipt["logs"]:
+        topics = log["topics"]
+        if len(topics) == 4 and bytes(topics[0]) in _TRANSFER_EVENTS:
+            out.add("0x" + bytes(topics[3])[-20:].hex())
+    return out
+
+
+def holder_of(receivers: set[str], current: str) -> str:
+    """Which wallet a split filled: the current one if it got tokens, else
+    the only recipient, else "" (can't tell)."""
+    current = current.lower()
+    if current and current in receivers:
+        return current
+    if len(receivers) == 1:
+        return next(iter(receivers))
+    return ""
+
+
 LEG_ROLES = (
     ("target", "wanted"),
     ("target", "unwanted"),
@@ -356,7 +389,7 @@ class PositionService:
         """token_id -> every stored position leg that holds it:
         (position_id, side, role, claim, tracked)."""
         refs: dict[str, list] = {}
-        for entry in self.storage.load_all():
+        for entry in self._mine(self.storage.load_all()):
             for side, role in LEG_ROLES:
                 token_id = self.leg_token_id(entry, side, role)
                 if token_id:
@@ -629,6 +662,8 @@ class PositionService:
             return self._positions_cache
 
         entries = self.storage.load_all()
+        self._tag_wallets(entries)
+        entries = self._mine(entries)
         if not entries:
             self._positions_cache = []
             self._positions_cache_time = now
@@ -638,6 +673,48 @@ class PositionService:
         self._positions_cache = positions
         self._positions_cache_time = now
         return positions
+
+    def _current_wallet(self) -> str:
+        return (self.wallet.deposit_wallet_address or "").lower()
+
+    def _mine(self, entries: list[dict]) -> list[dict]:
+        """Positions of the current deposit wallet, plus ones of unknown wallet.
+
+        Positions from another wallet (an earlier import) stay on disk and
+        show again if that wallet is imported back.
+        """
+        current = self._current_wallet()
+        if not current:
+            return entries
+        return [e for e in entries if not e.get("wallet") or e["wallet"] == current]
+
+    def _split_receivers(self, tx_hash: str) -> set[str]:
+        if not tx_hash.startswith("0x"):
+            tx_hash = f"0x{tx_hash}"
+        receipt = self._get_web3().eth.get_transaction_receipt(tx_hash)
+        return split_receivers(receipt) if receipt else set()
+
+    def _tag_wallets(self, entries: list[dict]) -> None:
+        """Record which wallet each untagged position's split filled (once)."""
+        current = self._current_wallet()
+        if not current:
+            return
+        tags: dict[str, str] = {}
+        for entry in entries:
+            if entry.get("wallet") is not None:
+                continue
+            txs = [entry.get(f"{s}_split_tx") for s in ("target", "cover")]
+            txs = [t for t in txs if t]
+            if not txs:
+                continue
+            try:
+                receivers = set().union(*(self._split_receivers(t) for t in txs))
+            except Exception as e:
+                logger.warning(f"Wallet tag failed for {entry['position_id']}: {e}")
+                continue
+            entry["wallet"] = tags[entry["position_id"]] = holder_of(receivers, current)
+        if tags:
+            self.storage.set_wallets(tags)
 
     def invalidate_cache(self) -> None:
         """Invalidate the positions cache (call after mutations)."""
