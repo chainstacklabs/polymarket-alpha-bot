@@ -18,13 +18,14 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # from .env (read on its own; the rest of .env isn't exported to anvil).
 FORK_URL="${FORK_URL:-${CHAINSTACK_NODE:-}}"
 if [[ -z "$FORK_URL" && -f "$ROOT_DIR/.env" ]]; then
-    FORK_URL="$(grep -E '^CHAINSTACK_NODE=' "$ROOT_DIR/.env" | tail -n 1 | cut -d= -f2- | tr -d '"'"'" || true)"
+    FORK_URL="$(grep -E '^(export[[:space:]]+)?CHAINSTACK_NODE=' "$ROOT_DIR/.env" | tail -n 1 | cut -d= -f2- | tr -d '"'"'" || true)"
 fi
 : "${FORK_URL:?Set CHAINSTACK_NODE in .env or FORK_URL (archive Polygon RPC)}"
 
-# Chainstack keys live in the URL path, so print the host only.
+# Keys can sit in the path, query or userinfo, so print the host only.
 RPC_HOST="${FORK_URL#*://}"
-RPC_HOST="${RPC_HOST%%/*}"
+RPC_HOST="${RPC_HOST%%[/?#]*}"
+RPC_HOST="${RPC_HOST##*@}"
 
 echo "=== Anvil Polygon fork ==="
 echo "Forking:   $RPC_HOST"
