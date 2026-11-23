@@ -194,6 +194,15 @@ class PipelineState:
             self.conn.commit()
             logger.info("Migration: Added is_valid column to validated_pairs")
 
+        # Migration 2: prompt_version, so verdicts from an older validation
+        # prompt are re-checked (NULL = before versioning).
+        if "prompt_version" not in columns:
+            self.conn.execute(
+                "ALTER TABLE validated_pairs ADD COLUMN prompt_version INTEGER"
+            )
+            self.conn.commit()
+            logger.info("Migration: Added prompt_version column to validated_pairs")
+
     # =========================================================================
     # RUN MANAGEMENT
     # =========================================================================
@@ -491,7 +500,7 @@ class PipelineState:
             SELECT pair_id, target_group_id, target_market_id, target_position,
                    cover_group_id, cover_market_id, cover_position,
                    cover_probability, viability_score, is_valid, validation_reason,
-                   validated_at, llm_model
+                   validated_at, llm_model, prompt_version
             FROM validated_pairs WHERE pair_id = ?
             """,
             (pair_id,),
@@ -512,6 +521,7 @@ class PipelineState:
                 "validation_reason": row[10],
                 "validated_at": row[11],
                 "llm_model": row[12],
+                "prompt_version": row[13],
             }
         return None
 
@@ -546,11 +556,13 @@ class PipelineState:
             for row in cursor.fetchall()
         ]
 
-    def add_validated_pairs(self, pairs: list[dict], llm_model: str) -> None:
+    def add_validated_pairs(
+        self, pairs: list[dict], llm_model: str, prompt_version: int | None = None
+    ) -> None:
         """
         Add LLM-validated pairs (CACHED).
 
-        These are immutable - once validated, they never change.
+        Reused until the validation prompt version changes.
         """
         now = datetime.now(timezone.utc).isoformat()
         self.conn.executemany(
@@ -559,8 +571,8 @@ class PipelineState:
             (pair_id, target_group_id, target_market_id, target_position,
              cover_group_id, cover_market_id, cover_position,
              cover_probability, viability_score, is_valid, validation_reason,
-             validated_at, llm_model)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             validated_at, llm_model, prompt_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -577,6 +589,7 @@ class PipelineState:
                     p.get("validation_reason", ""),
                     now,
                     llm_model,
+                    prompt_version,
                 )
                 for p in pairs
             ],

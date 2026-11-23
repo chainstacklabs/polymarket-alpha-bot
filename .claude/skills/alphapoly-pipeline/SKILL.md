@@ -30,7 +30,7 @@ run(
 3. Detect new groups (incremental check)
 4. Extract implications (LLM, cached)
 5. Expand to market-level pairs
-6. Validate pairs (LLM, cached)
+6. Validate pairs: no-LLM checks on every pair (same market/group, deadlines, numeric ladders where both legs can lose), then the LLM for new pairs costing under $1 (cached until the prompt version changes)
 7. Build portfolios with tier metrics
 8. Export to `data/_live/`
 
