@@ -129,7 +129,7 @@ def generate_pair_id(
     target_id: str, target_pos: str, cover_id: str, cover_pos: str
 ) -> str:
     components = f"{target_id}:{target_pos}:{cover_id}:{cover_pos}"
-    return hashlib.md5(components.encode()).hexdigest()[:16]
+    return hashlib.md5(components.encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 # =============================================================================
