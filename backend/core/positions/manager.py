@@ -7,6 +7,7 @@ import httpx
 from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
+from core.paths import GAMMA_API_BASE_URL
 from core.positions.service import PositionService
 from core.positions.storage import PositionStorage
 from core.wallet.manager import WalletManager
@@ -40,11 +41,11 @@ class MergeResult:
 class SideExitResult:
     """Result of exiting one side of a position."""
 
-    merged: float = 0.0  # Tokens merged back to USDC.e
+    merged: float = 0.0  # Tokens merged back to pUSD
     merge_tx: Optional[str] = None
     sold_wanted: float = 0.0  # Wanted tokens sold via CLOB
     sold_unwanted: float = 0.0  # Unwanted tokens sold via CLOB
-    recovered: float = 0.0  # Estimated total USDC.e recovered
+    recovered: float = 0.0  # Estimated total pUSD recovered
     error: Optional[str] = None
 
 
@@ -76,7 +77,7 @@ class PositionManager:
         """Fetch market info from Polymarket API."""
         async with httpx.AsyncClient(timeout=30.0) as http:
             return await fetch_json_with_retry(
-                http, f"https://gamma-api.polymarket.com/markets/{market_id}"
+                http, f"{GAMMA_API_BASE_URL}/markets/{market_id}"
             )
 
     def _merge_tokens(
@@ -300,14 +301,14 @@ class PositionManager:
         THRESHOLD = 0.01
         mergeable = min(wanted_balance, unwanted_balance)
 
-        # Step 1: Merge YES+NO → USDC.e (on-chain, no CLOB needed)
+        # Step 1: Merge YES+NO → pUSD (gasless via the SDK, no CLOB needed)
         if mergeable >= THRESHOLD:
             merge = await self.merge_position_tokens(position_id, side)
             if merge.success:
                 result.merged = merge.merged_amount
                 result.merge_tx = merge.tx_hash
                 result.recovered = merge.merged_amount
-                logger.info(f"Exit {side}: merged {merge.merged_amount:.2f} → USDC.e")
+                logger.info(f"Exit {side}: merged {merge.merged_amount:.2f} → pUSD")
                 # Invalidate cache so sell steps see post-merge balances
                 self.service.invalidate_cache()
             else:

@@ -38,7 +38,7 @@ For a good experience, you'll need to add an LLM from OpenRouter and an RPC node
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) (manages Python automatically)
-- **Node.js 18+** via [fnm](https://github.com/Schniz/fnm), nvm, or brew
+- **Node.js 20.9+** (required by Next.js 16) via [fnm](https://github.com/Schniz/fnm), nvm, or brew
 
 ## Quick Start
 

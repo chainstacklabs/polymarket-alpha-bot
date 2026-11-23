@@ -80,6 +80,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [apiBase])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the await, not during the effect
     refresh()
     const interval = setInterval(refresh, 30000)
     return () => clearInterval(interval)

@@ -17,15 +17,31 @@ export function PipelineDropdown() {
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetting, setResetting] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  // A start request is in flight. Status replies requested before it settled
+  // (startGen changed) may predate the run, so they must not clear the flag.
+  const startPendingRef = useRef(false)
+  const startGenRef = useRef(0)
   const { settings: modelSettings, update: updateModelSettings } =
     useModelSettings()
 
   // Fetch pipeline status
   async function fetchStatus() {
+    const gen = startGenRef.current
+    const startPending = startPendingRef.current
     try {
       const res = await fetch(`${getApiBaseUrl()}/pipeline/status`)
       if (res.ok) {
-        setStatus(await res.json())
+        const data: PipelineStatus = await res.json()
+        setStatus(data)
+        // Clear the local "starting" flag only from a reply requested after
+        // the last start request settled.
+        if (
+          data.running === false &&
+          !startPending &&
+          gen === startGenRef.current
+        ) {
+          setRunningPipeline(false)
+        }
       }
     } catch (error) {
       console.debug('Failed to fetch pipeline status:', error)
@@ -33,18 +49,12 @@ export function PipelineDropdown() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the await, not during the effect
     fetchStatus()
     // Poll more frequently when running
     const interval = setInterval(fetchStatus, status?.running ? 2000 : 10000)
     return () => clearInterval(interval)
   }, [status?.running])
-
-  // Sync local state with server state
-  useEffect(() => {
-    if (status?.running === false && runningPipeline) {
-      setRunningPipeline(false)
-    }
-  }, [status?.running, runningPipeline])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -63,6 +73,9 @@ export function PipelineDropdown() {
   // Run pipeline
   async function runPipeline(full: boolean = true, maxEvents?: number) {
     setRunningPipeline(true)
+    startPendingRef.current = true
+    startGenRef.current += 1
+    let started = false
     try {
       const res = await fetch(`${getApiBaseUrl()}/pipeline/run/production`, {
         method: 'POST',
@@ -75,13 +88,16 @@ export function PipelineDropdown() {
           tags: modelSettings.tags.trim() || undefined,
         }),
       })
-      if (res.ok) {
-        fetchStatus()
-      } else {
-        setRunningPipeline(false)
-      }
+      started = res.ok
     } catch (error) {
       console.error('Failed to run pipeline:', error)
+    } finally {
+      startPendingRef.current = false
+      startGenRef.current += 1
+    }
+    if (started) {
+      fetchStatus()
+    } else {
       setRunningPipeline(false)
     }
   }

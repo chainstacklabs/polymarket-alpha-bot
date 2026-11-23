@@ -58,11 +58,6 @@ def compute_fee(notional: float, price: float, market: dict[str, Any]) -> float:
     return notional * rate * (price**exponent) * ((1.0 - price) ** exponent)
 
 
-# Public alias matching the issue #36 vocabulary. `compute_fee` is the existing
-# name used across the codebase (cost estimates, exit-fee projections). Both
-# names refer to the same display-only computation.
-display_fee = compute_fee
-
 
 def fee_rate_display(market: dict[str, Any]) -> str | None:
     """Human-readable fee rate for UI, e.g. '7.2% taker'. None if fee-exempt."""

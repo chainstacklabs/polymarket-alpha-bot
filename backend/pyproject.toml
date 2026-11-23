@@ -29,6 +29,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["server", "core"]
 
+[tool.ruff.lint]
+# Correctness-focused baseline, enforced in CI.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ruff.lint.per-file-ignores]
 # load_dotenv() must be called before routers are imported (they read env vars at module level)
 "server/main.py" = ["E402"]

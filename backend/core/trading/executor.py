@@ -14,6 +14,7 @@ from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
 from core.markets import market_version, outcome_token_ids
+from core.paths import GAMMA_API_BASE_URL
 from core.wallet.manager import WalletManager
 
 # Polymarket enforces a $1 minimum CLOB order size.
@@ -78,7 +79,7 @@ class TradingExecutor:
         """Fetch market info from Polymarket API."""
         async with httpx.AsyncClient(timeout=30.0) as http:
             data = await fetch_json_with_retry(
-                http, f"https://gamma-api.polymarket.com/markets/{market_id}"
+                http, f"{GAMMA_API_BASE_URL}/markets/{market_id}"
             )
 
         version = market_version(data)

@@ -117,6 +117,17 @@ async def get_status() -> dict[str, Any]:
 # =============================================================================
 
 
+def _new_run_record(full: bool, max_events: int | None) -> dict[str, Any]:
+    mode = "demo" if max_events is not None else ("full" if full else "incremental")
+    return {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "pipeline_type": "production",
+        "mode": mode,
+        "max_events": max_events,
+        "status": "running",
+    }
+
+
 def run_production_pipeline_task(
     full: bool,
     max_events: int | None = None,
@@ -124,7 +135,11 @@ def run_production_pipeline_task(
     validation_model: str | None = None,
     tags: str | None = None,
 ):
-    """Background task to run the production pipeline."""
+    """Background task to run the production pipeline.
+
+    `run_production` registers the run as "running" before it replies; this
+    task updates that record (or creates it when called directly).
+    """
     global _running_pipeline, _step_tracker
 
     try:
@@ -138,14 +153,8 @@ def run_production_pipeline_task(
         is_demo = max_events is not None
         effective_full = full or is_demo
 
-        mode = "demo" if is_demo else ("full" if full else "incremental")
-        _running_pipeline = {
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "pipeline_type": "production",
-            "mode": mode,
-            "max_events": max_events,
-            "status": "running",
-        }
+        if not (_running_pipeline and _running_pipeline.get("status") == "running"):
+            _running_pipeline = _new_run_record(full, max_events)
 
         from core.runner import run
 
@@ -199,6 +208,11 @@ async def run_production(
             detail="Pipeline is already running",
         )
 
+    # Mark the run as started before replying, so a status request sent right
+    # after this response (before the background task starts) sees it, and a
+    # second start request gets the 409 above.
+    _running_pipeline = _new_run_record(request.full, request.max_events)
+
     # Start pipeline in background
     background_tasks.add_task(
         run_production_pipeline_task,
@@ -209,13 +223,12 @@ async def run_production(
         request.tags,
     )
 
-    mode = "demo" if request.max_events else ("full" if request.full else "incremental")
     return {
         "status": "started",
         "pipeline_type": "production",
-        "mode": mode,
+        "mode": _running_pipeline["mode"],
         "max_events": request.max_events,
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": _running_pipeline["started_at"],
     }
 
 
