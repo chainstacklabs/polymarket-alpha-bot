@@ -30,12 +30,12 @@ STRATEGIES TESTED
     /markets/keyset endpoint — it returns year-old markets with new=False.
 
 USAGE
-    uv run python experiments/08_new_market_polling.py
-    uv run python experiments/08_new_market_polling.py --interval 30  # Poll every 30s
-    uv run python experiments/08_new_market_polling.py --strategy events  # Use events endpoint
-    uv run python experiments/08_new_market_polling.py --duration 300  # Run for 5 minutes
-    uv run python experiments/08_new_market_polling.py --tag politics  # Filter by tag (default)
-    uv run python experiments/08_new_market_polling.py --tag none  # No tag filter (all markets)
+    uv run --frozen --project backend experiments/08_new_market_polling.py
+    uv run --frozen --project backend experiments/08_new_market_polling.py --interval 30  # Poll every 30s
+    uv run --frozen --project backend experiments/08_new_market_polling.py --strategy events  # Use events endpoint
+    uv run --frozen --project backend experiments/08_new_market_polling.py --duration 300  # Run for 5 minutes
+    uv run --frozen --project backend experiments/08_new_market_polling.py --tag politics  # Filter by tag (default)
+    uv run --frozen --project backend experiments/08_new_market_polling.py --tag none  # No tag filter (all markets)
 """
 
 import asyncio

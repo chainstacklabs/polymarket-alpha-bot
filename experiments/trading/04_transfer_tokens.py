@@ -6,7 +6,7 @@ Transfers all stablecoins (native USDC, USDC.e, pUSD) from the local wallet
 to a specified address.
 
 USAGE:
-    cd backend && uv run python ../experiments/trading/04_transfer_tokens.py <target_address>
+    uv run --frozen --project backend experiments/trading/04_transfer_tokens.py <target_address>
 """
 
 import json
@@ -81,7 +81,7 @@ def main():
     from web3 import Web3
 
     if len(sys.argv) < 2:
-        print("Usage: uv run python 04_transfer_tokens.py <target_address> [--yes]")
+        print("Usage: uv run --frozen --project backend experiments/trading/04_transfer_tokens.py <target_address> [--yes]")
         sys.exit(1)
 
     target_address = Web3.to_checksum_address(sys.argv[1])
@@ -182,7 +182,7 @@ def main_pol():
 
     if len(sys.argv) < 2:
         print(
-            "Usage: uv run python 04_transfer_tokens.py --pol <target_address> [--yes]"
+            "Usage: uv run --frozen --project backend experiments/trading/04_transfer_tokens.py --pol <target_address> [--yes]"
         )
         sys.exit(1)
 

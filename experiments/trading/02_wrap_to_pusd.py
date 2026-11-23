@@ -23,7 +23,7 @@ WHAT IT DOES:
     3. Calls ``wrap(asset=USDC.e, to, amount)``; receives pUSD 1:1.
 
 USAGE:
-    cd backend && uv run python ../experiments/trading/02_wrap_to_pusd.py
+    uv run --frozen --project backend experiments/trading/02_wrap_to_pusd.py
 
 PREREQUISITES:
     - Wallet created (01_setup_wallet.py).

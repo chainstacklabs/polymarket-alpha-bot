@@ -12,15 +12,16 @@ polymarket.com/settings?tab=api-keys (decision B). Approvals are best-effort:
 the relayer may reject some operators, and split/merge/orders recover
 allowances on demand.
 
-USAGE:
+USAGE (from the repo root):
     POLY_PK=0x.. POLY_RELAYER_API_KEY=.. POLY_RELAYER_ADDRESS=0x.. \
-      uv run --no-project --with polymarket-client --with eth-account \
-      --prerelease allow python experiments/trading/01_setup_wallet.py
+      uv run --frozen --project backend experiments/trading/01_setup_wallet.py
+
+POLY_PK must be an existing key: the Relayer API key has to be minted for its
+address on polymarket.com first, so a freshly generated key can't be used.
 """
 
 import os
 
-from eth_account import Account
 from polymarket import SecureClient
 from polymarket.auth import RelayerApiKey
 
@@ -28,10 +29,7 @@ from polymarket.auth import RelayerApiKey
 def main() -> None:
     pk = os.environ.get("POLY_PK")
     if not pk:
-        acct = Account.create()
-        pk = acct.key.hex()
-        print(f"generated EOA: {acct.address}")
-        print(f"private key (save securely!): {pk}")
+        raise SystemExit("Set POLY_PK (the signing key your Relayer API key was minted for)")
 
     client = SecureClient.create(
         private_key=pk,

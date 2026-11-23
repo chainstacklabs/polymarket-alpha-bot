@@ -15,7 +15,7 @@ WHY WE NEED THIS
 
 USAGE
     # Requires: anvil.sh running + setup_accounts.py completed
-    cd backend && uv run ../experiments/onchain-otc/07_intents.py
+    uv run --frozen --project backend experiments/onchain-otc/07_intents.py
 """
 
 import json
@@ -23,12 +23,10 @@ import logging
 from pathlib import Path
 
 import httpx
-from dotenv import load_dotenv
 from eth_account import Account
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
