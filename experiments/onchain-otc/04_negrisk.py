@@ -78,6 +78,11 @@ def fetch_negrisk_event() -> dict:
         if not e.get("negRisk"):
             continue
         markets = e.get("markets", [])
+        # Protocol V2 markets don't trade on the CTF; skip events with any.
+        if any(m.get("version") != "v1" for m in markets):
+            continue
+        if not markets or not markets[0].get("negRiskMarketID"):
+            continue
         if not (3 <= len(markets) <= 15):
             continue
         # Need at least 2 markets with non-trivial prices (skip huge markets)
@@ -181,15 +186,12 @@ def main():
     # Step 3: convertPositions — convert NO tokens to YES + collateral
     # =========================================================
     log.info("\n--- Step 3: convertPositions ---")
-    # indexSet is a bitmask: bit i set means "include question i's NO tokens"
-    # We split questions 0..4, so we have NO tokens for those.
-    # Convert all 5: indexSet = 0b11111 = 31
-    # This burns NO tokens for questions 0-4 and gives us:
-    #   - YES tokens for all questions NOT in the indexSet
-    #   - Collateral = amount * (num_questions_in_set - 1)
-    # Convert a single question's NO tokens — indexSet = 1 (bit 0 = question 0)
-    # The adapter will burn NO tokens for ALL other questions (not in indexSet)
-    # and give us YES tokens for question 0 + collateral
+    # indexSet is a bitmask of on-chain question indexes: bit i = "convert
+    # question i's NO tokens". For k questions in the set, the adapter burns
+    # `amount` NO of each, mints `amount` YES of every question NOT in the
+    # set, and pays (k - 1) * amount collateral.
+    # Here k = 1 (question 0): burn NO on question 0, get YES on all the
+    # others, and no collateral.
     index_set = 1  # convert using question 0
     convert_amount = 5 * 10**6  # convert 5 units (we have 10 per question)
 
@@ -239,7 +241,8 @@ def main():
     log.info("\n--- Step 4: PnL Analysis ---")
     log.info("In a %d-outcome NegRisk market:", len(markets))
     log.info("  Split $1 → 1 YES + 1 NO for each question")
-    log.info("  Convert 1 NO from question X → YES for all others + (n-1) collateral")
+    log.info("  Convert k NOs → YES on every other question + (k-1) collateral")
+    log.info("  (a single NO, k=1, returns YES on the others and no collateral)")
     log.info("")
 
     # Theoretical: if you hold NO on the most expensive outcome,
@@ -253,11 +256,11 @@ def main():
     log.info("If you buy NO on this outcome at $%.4f...", 1 - top[1]["yes_price"])
     log.info("  Convert gives you:")
     total_yes_value = sum(m["yes_price"] for _, m in rest)
-    n_outcomes = len(markets)
-    log.info("    Collateral: $%.4f (from %d-1 merged positions)", (n_outcomes - 1) * 1.0 / n_outcomes, n_outcomes)
+    log.info("    Collateral: $0 (one NO converted, k=1)")
     log.info("    YES tokens on %d other outcomes worth: $%.4f", len(rest), total_yes_value)
     log.info("  Cost of NO: $%.4f", 1 - top[1]["yes_price"])
-    log.info("  Gross value: $%.4f + $%.4f = $%.4f", (n_outcomes - 1) / n_outcomes, total_yes_value, (n_outcomes - 1) / n_outcomes + total_yes_value)
+    log.info("  Edge: $%.4f - $%.4f = $%.4f per share (before gas)",
+             total_yes_value, 1 - top[1]["yes_price"], total_yes_value - (1 - top[1]["yes_price"]))
 
     # --- Step 5: Merge round-trip ---
     log.info("\n--- Step 5: Merge back (round-trip) ---")

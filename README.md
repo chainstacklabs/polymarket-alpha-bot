@@ -121,7 +121,7 @@ Standalone scripts that don't import from `backend/`:
 |---|---|
 | [`experiments/`](experiments/) | One script per pipeline step, from fetching events to streaming prices |
 | [`experiments/trading/`](experiments/trading/) | Deposit wallet setup, USDC.e ↔ pUSD wrapping, buying, token transfers |
-| [`experiments/onchain-otc/`](experiments/onchain-otc/) | Trading without the order book (split/merge, escrow, intents) on a Polygon fork; uses USDC.e, from before pUSD |
+| [`experiments/onchain-otc/`](experiments/onchain-otc/) | Trading without the order book (split/merge, escrow, intents) on a Polygon fork; standard (v1) markets only |
 | [`experiments/verify/`](experiments/verify/) | Probes for the deposit-wallet flow, for when onboarding breaks |
 
 ## Contributing

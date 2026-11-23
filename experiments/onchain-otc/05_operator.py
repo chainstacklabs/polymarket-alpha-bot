@@ -13,7 +13,7 @@ V2 NOTES (verified on-chain 2026-06-22 against the Sourcify ABI)
       So sellers split USDC.e to get tradeable tokens; buyers pay pUSD.
     - V2 order struct DROPS taker/expiration/nonce/feeRateBps and ADDS
       timestamp (ms) / metadata (bytes32) / builder (bytes32). Verified against
-      the SDK (`polymarket.actions.orders.typed_data`) and the on-chain ABI.
+      the SDK (`polymarket._internal.actions.orders.typed_data`) and the on-chain ABI.
     - **`fillOrder` was REMOVED in V2** — `matchOrders` is the only settlement
       path. Its signature gained a leading `conditionId` and trailing
       `takerFeeAmount` / `makerFeeAmounts` (fees are operator-supplied, not in
@@ -196,6 +196,8 @@ def fetch_active_market() -> dict:
         timeout=15.0,
     )
     for m in resp.json():
+        if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
+            continue
         cid = m.get("conditionId", "")
         tokens = m.get("clobTokenIds")
         neg_risk = m.get("negRisk", False)

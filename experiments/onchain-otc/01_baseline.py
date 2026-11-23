@@ -84,6 +84,8 @@ def fetch_active_market() -> dict:
 
     # Find a binary market with a condition ID
     for m in markets:
+        if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
+            continue
         condition_id = m.get("conditionId", "")
         clob_tokens = m.get("clobTokenIds")
         neg_risk = m.get("negRisk", False)

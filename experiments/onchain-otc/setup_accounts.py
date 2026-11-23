@@ -88,9 +88,10 @@ def main():
     # Clear any contract code on test accounts (Polygon fork may have EIP-7702
     # delegations on these well-known Anvil addresses, which breaks ERC-1155
     # safeTransfer callbacks).
-    for addr in [alice, bob]:
+    # Charlie (accounts[2]) is the third party in 03 and 05.
+    for addr in accounts[:3]:
         w3.provider.make_request("anvil_setCode", [addr, "0x"])
-    log.info("Cleared contract code on Alice & Bob (pure EOAs now)")
+    log.info("Cleared contract code on Alice, Bob & Charlie (pure EOAs now)")
 
     usdc = w3.eth.contract(address=Web3.to_checksum_address(USDC_E), abi=ERC20_ABI)
     pusd = w3.eth.contract(address=Web3.to_checksum_address(PUSD), abi=ERC20_ABI)

@@ -68,6 +68,8 @@ def fetch_active_market() -> dict:
         timeout=15.0,
     )
     for m in resp.json():
+        if m.get("version") != "v1":  # Protocol V2 markets don't trade on the CTF
+            continue
         cid = m.get("conditionId", "")
         tokens = m.get("clobTokenIds")
         neg_risk = m.get("negRisk", False)
@@ -169,7 +171,7 @@ def main():
     print_state("After", ctf, usdc, alice, bob, yes_id)
 
     # Verify offer is no longer active
-    # Offer struct: (maker, erc1155, tokenId, amount, erc20, price, taker, deadline, active)
+    # Offer struct: (maker, taker, erc1155Token, tokenId, tokenAmount, erc20Token, price, deadline, active)
     offer = escrow.functions.getOffer(offer_id).call()
     log.info("  Offer active: %s", offer[8])
     assert not offer[8], "Offer should be inactive after fill"
@@ -255,15 +257,14 @@ def main():
     tx = usdc.functions.approve(escrow_addr, 2**256 - 1).transact({"from": charlie})
     w3.eth.wait_for_transaction_receipt(tx)
 
+    # Simulate the call so the revert reason is visible: Charlie holds no
+    # USDC.e, so only "not authorized" proves the taker check fired.
     try:
-        tx = escrow.functions.fillOffer(restricted_offer_id).transact({"from": charlie, "gas": 200_000})
-        receipt = w3.eth.wait_for_transaction_receipt(tx)
-        if receipt["status"] == 0:
-            log.info("  Charlie rejected as expected (reverted on-chain)")
-        else:
-            log.error("  Charlie fill: UNEXPECTEDLY SUCCEEDED")
-    except (ContractLogicError, Web3RPCError):
-        log.info("  Charlie rejected as expected")
+        escrow.functions.fillOffer(restricted_offer_id).call({"from": charlie})
+        log.error("  Charlie fill: UNEXPECTEDLY SUCCEEDED")
+    except (ContractLogicError, Web3RPCError) as e:
+        assert "not authorized" in str(e), f"Rejected for the wrong reason: {e}"
+        log.info("  Charlie rejected as expected: not authorized")
 
     # Bob fills successfully
     tx = escrow.functions.fillOffer(restricted_offer_id).transact({"from": bob})

@@ -78,6 +78,11 @@ def fetch_negrisk_event() -> dict:
         if not e.get("negRisk"):
             continue
         markets = e.get("markets", [])
+        # Protocol V2 markets don't trade on the CTF; skip events with any.
+        if any(m.get("version") != "v1" for m in markets):
+            continue
+        if not markets or not markets[0].get("negRiskMarketID"):
+            continue
         if not (3 <= len(markets) <= 8):
             continue
         active = []
