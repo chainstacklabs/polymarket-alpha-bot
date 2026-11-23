@@ -21,6 +21,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
+          version: "0.13.5"
           python-version: "3.12"
       - name: Install (from uv.lock)
         run: uv sync --frozen
@@ -44,8 +45,10 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install (from package-lock.json)
-        run: npm ci
+      # --ignore-scripts: packages' install scripts don't run (same as local
+      # ~/.npmrc). They're the usual way a compromised npm package attacks.
+      - name: Install (from package-lock.json, no install scripts)
+        run: npm ci --ignore-scripts
       - name: Lint (check only, no auto-fix)
         run: |
           npx prettier --check .
