@@ -70,6 +70,7 @@ data/               # Pipeline outputs (gitignored)
 | `POST /positions/{id}/merge` | Merge complementary tokens (SDK routes CTF or Router by protocol) |
 | `POST /positions/{id}/retry` | Retry selling leftover unwanted tokens on pending positions |
 | `POST /positions/{id}/exit` | Orchestrated sell + merge fallback |
+| `POST /positions/{id}/redeem` | Redeem resolved legs for pUSD (gasless; positions on the same market are each credited their part) |
 | `POST /trading/buy-pair` | Execute covered pair trade |
 | `POST /trading/buy-pair/estimate` | Estimate trade cost |
 | `GET /wallet/status` | Wallet + deposit-wallet state (pUSD/POL balances, approvals, relayer-set, deposit-wallet deployed) |

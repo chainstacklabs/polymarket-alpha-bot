@@ -4,12 +4,21 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
+from web3 import Web3
 from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
 from core.paths import GAMMA_API_BASE_URL
+from core.positions.redeem import (
+    CTF_PAYOUT_ABI,
+    OUTCOME_INDEX,
+    POSITION_MANAGER_PAYOUT_ABI,
+    v1_payout_rates,
+    v2_payout_rate,
+)
 from core.positions.service import LEG_ROLES, PositionService, legacy_sale_estimate
 from core.positions.storage import PositionStorage
+from core.wallet.contracts import CONTRACTS
 from core.wallet.manager import WalletManager
 
 
@@ -46,6 +55,16 @@ class SideExitResult:
     sold_wanted: float = 0.0  # Wanted tokens sold via CLOB
     sold_unwanted: float = 0.0  # Unwanted tokens sold via CLOB
     recovered: float = 0.0  # pUSD recovered: merged pairs + sale proceeds
+    error: Optional[str] = None
+
+
+@dataclass
+class RedeemResult:
+    """Result of redeeming a position's resolved legs."""
+
+    success: bool
+    payout: float  # pUSD credited to this position
+    tx_hashes: list[str]
     error: Optional[str] = None
 
 
@@ -548,3 +567,133 @@ class PositionManager:
             results["message"] = "; ".join(messages)
 
         return results
+
+    # ── redeem ───────────────────────────────────────────────────────────
+
+    def _client(self):
+        from core.trading.secure_client import get_secure_client
+
+        client = get_secure_client(self.wallet)
+        if client is None:
+            raise ValueError(
+                "Trading client init failed (unlock + relayer key required)"
+            )
+        return client
+
+    def _leg_rates(
+        self, entry: dict, side: str, condition_id: str
+    ) -> Optional[tuple[float, float]]:
+        """(wanted, unwanted) pUSD per share for a resolved leg; None if unresolved."""
+        w3 = self.service._get_web3()
+        if (entry.get(f"{side}_protocol") or "v1") == "v2":
+            pm = w3.eth.contract(
+                address=Web3.to_checksum_address(CONTRACTS["POSITION_MANAGER"]),
+                abi=POSITION_MANAGER_PAYOUT_ABI,
+            )
+            rates = [
+                v2_payout_rate(pm, self.service.leg_token_id(entry, side, role))
+                for role in ("wanted", "unwanted")
+            ]
+            if rates[0] is None or rates[1] is None:
+                return None
+            return rates[0], rates[1]
+        ctf = w3.eth.contract(
+            address=Web3.to_checksum_address(CONTRACTS["CTF"]), abi=CTF_PAYOUT_ABI
+        )
+        rates = v1_payout_rates(ctf, condition_id)
+        if rates is None:
+            return None
+        i = OUTCOME_INDEX[entry[f"{side}_position"]]
+        return rates[i], rates[1 - i]
+
+    def _market_credits(
+        self, market_id: str, condition_id: str, own: dict, own_balances: dict
+    ) -> list[tuple[str, str, float]]:
+        """Every stored leg on this market: (position_id, side, payout).
+
+        One redeem pays out the wallet's whole balance of the market, so each
+        position sharing it is credited its own allocated part.
+        """
+        credits = []
+        for entry in self.storage.load_all():
+            mine = entry["position_id"] == own["position_id"]
+            for side in ("target", "cover"):
+                if entry.get(f"{side}_market_id") != market_id:
+                    continue
+                if not entry.get(f"{side}_split_tx"):
+                    continue
+                balances = (
+                    own_balances if mine else self.service.allocated_balances(entry)
+                )
+                wanted = balances[f"{side}_wanted"]
+                unwanted = balances[f"{side}_unwanted"]
+                if wanted + unwanted < 0.01:
+                    continue
+                rates = self._leg_rates(entry, side, condition_id)
+                if rates is None:
+                    continue
+                payout = wanted * rates[0] + unwanted * rates[1]
+                credits.append((entry["position_id"], side, payout))
+        return credits
+
+    async def redeem_position(self, position_id: str) -> RedeemResult:
+        """Redeem every resolved leg of a position (gasless, via the SDK).
+
+        Unresolved legs are left alone; a leg that lost pays nothing and
+        sends no transaction.
+        """
+        entry = self.storage.get(position_id)
+        if not entry:
+            return RedeemResult(False, 0.0, [], "Position not found")
+
+        balances = self.service.allocated_balances(entry)
+        payout = 0.0
+        tx_hashes: list[str] = []
+        notes: list[str] = []
+        settled = False
+
+        for side in ("target", "cover"):
+            if balances[f"{side}_wanted"] + balances[f"{side}_unwanted"] < 0.01:
+                continue
+            market_id = entry[f"{side}_market_id"]
+            try:
+                market = await self._get_market_info(market_id)
+            except Exception as e:
+                notes.append(f"{side}: failed to fetch market info: {e}")
+                continue
+            condition_id = market.get("conditionId") or ""
+            if not condition_id:
+                notes.append(f"{side}: could not fetch market condition ID")
+                continue
+            if self._leg_rates(entry, side, condition_id) is None:
+                notes.append(f"{side}: market not resolved yet")
+                continue
+
+            credits = self._market_credits(market_id, condition_id, entry, balances)
+            if sum(c[2] for c in credits) > 0:
+                try:
+                    handle = self._client().redeem_positions(condition_id=condition_id)
+                    tx_hashes.append(handle.wait().transaction_hash)
+                except Exception as e:
+                    logger.error(f"Redeem error: {e}")
+                    notes.append(f"{side}: redeem failed: {e}")
+                    continue
+                for pid, leg, paid in credits:
+                    self.storage.add_realized_proceeds(pid, paid)
+                    self.storage.clear_leg_shares(pid, leg)
+                    if pid == position_id and leg == side:
+                        payout += paid
+            else:
+                notes.append(
+                    f"{side}: resolved against this position, nothing to redeem"
+                )
+            settled = True
+
+        if not settled and not notes:
+            notes.append("Nothing to redeem: no tokens held")
+        return RedeemResult(
+            success=settled,
+            payout=round(payout, 6),
+            tx_hashes=tx_hashes,
+            error="; ".join(notes) or None,
+        )

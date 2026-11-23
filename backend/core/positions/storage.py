@@ -230,6 +230,18 @@ class PositionStorage:
                     return True
             return False
 
+    def clear_leg_shares(self, position_id: str, side: str) -> bool:
+        """Set a leg's share counts to 0 (its tokens were redeemed)."""
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") == position_id:
+                    p[f"{side}_wanted_shares"] = 0.0
+                    p[f"{side}_unwanted_shares"] = 0.0
+                    self.save_all(positions)
+                    return True
+            return False
+
     def seed_shares(self, position_id: str, shares: dict[str, float]) -> bool:
         """Set untracked share counts ({"target_wanted": 5.0, ...}); keep tracked ones."""
         with _storage_lock:
