@@ -41,6 +41,65 @@ MULTICALL3_ABI = [
 ]
 
 
+LEG_ROLES = (
+    ("target", "wanted"),
+    ("target", "unwanted"),
+    ("cover", "wanted"),
+    ("cover", "unwanted"),
+)
+
+
+def share_claim(entry: dict, side: str, role: str) -> tuple[float, bool]:
+    """(shares this position leg holds, whether that's tracked exactly).
+
+    Tracked from the buy on (`{side}_{role}_shares`). Older positions get an
+    estimate from the buy: the split amount for the wanted side, and for the
+    unwanted side the split amount unless its sale filled.
+    """
+    tracked = entry.get(f"{side}_{role}_shares")
+    if tracked is not None:
+        return max(float(tracked), 0.0), True
+    if not entry.get(f"{side}_split_tx"):
+        return 0.0, False
+    amount = float(entry.get("entry_amount_per_side") or 0.0)
+    if role == "unwanted" and entry.get(f"{side}_clob_filled"):
+        return 0.0, False
+    return amount, False
+
+
+def allocate_shared(balance: float, claimants: list[tuple[float, bool]]) -> list[float]:
+    """Split one token balance between the positions that hold it.
+
+    Tracked claims are served first (scaled down if the wallet holds less),
+    then older positions share what's left by their estimates, or equally if
+    they have none. Never hands out more than the balance; shares nobody
+    claims (e.g. bought outside the bot) stay unassigned.
+    """
+    if len(claimants) <= 1:
+        return [balance] * len(claimants)
+    out = [0.0] * len(claimants)
+    tracked = [i for i, (_, t) in enumerate(claimants) if t]
+    legacy = [i for i, (_, t) in enumerate(claimants) if not t]
+
+    tracked_total = sum(claimants[i][0] for i in tracked)
+    if tracked_total > 0:
+        scale = min(1.0, balance / tracked_total)
+        for i in tracked:
+            out[i] = claimants[i][0] * scale
+
+    rest = max(balance - sum(out), 0.0)
+    if legacy and rest > 0:
+        legacy_total = sum(claimants[i][0] for i in legacy)
+        if legacy_total > 0:
+            scale = min(1.0, rest / legacy_total)
+            for i in legacy:
+                out[i] = claimants[i][0] * scale
+        else:
+            for i in legacy:
+                out[i] = rest / len(legacy)
+    return out
+
+
 def legacy_sale_estimate(entry: dict, side: str, unwanted_balance: float) -> float:
     """Estimated pUSD a leg's unwanted side sold for, for positions recorded
     before sale proceeds were tracked: whatever unwanted tokens are gone are
@@ -280,6 +339,64 @@ class PositionService:
         except Exception as e:
             logger.error(f"Failed to query token balance for {token_id}: {e}")
             return 0.0
+
+    def wanted_token_id(self, entry: dict, side: str) -> str:
+        """Token ID of a leg's wanted side (on-chain IDs from the split first)."""
+        ctf = self._parse_ctf_ids(entry.get(f"{side}_ctf_token_ids", ""))
+        if ctf:
+            return ctf[0] if entry[f"{side}_position"] == "YES" else ctf[1]
+        return entry[f"{side}_token_id"]
+
+    def leg_token_id(self, entry: dict, side: str, role: str) -> str:
+        if role == "wanted":
+            return self.wanted_token_id(entry, side)
+        return self.unwanted_token_id(entry, side)
+
+    def _token_refs(self) -> dict[str, list[tuple[str, str, str, float, bool]]]:
+        """token_id -> every stored position leg that holds it:
+        (position_id, side, role, claim, tracked)."""
+        refs: dict[str, list] = {}
+        for entry in self.storage.load_all():
+            for side, role in LEG_ROLES:
+                token_id = self.leg_token_id(entry, side, role)
+                if token_id:
+                    claim, tracked = share_claim(entry, side, role)
+                    refs.setdefault(token_id, []).append(
+                        (entry["position_id"], side, role, claim, tracked)
+                    )
+        return refs
+
+    def _allocate(
+        self, entry: dict, raw: dict[str, float], refs: dict
+    ) -> dict[str, float]:
+        """This position's part of each token balance it holds."""
+        out = {}
+        for side, role in LEG_ROLES:
+            field = f"{side}_{role}"
+            claimants = refs.get(self.leg_token_id(entry, side, role), [])
+            key = (entry["position_id"], side, role)
+            index = next((i for i, c in enumerate(claimants) if c[:3] == key), None)
+            if index is None or len(claimants) <= 1:
+                out[field] = raw.get(field, 0.0)
+                continue
+            parts = allocate_shared(
+                raw.get(field, 0.0), [(c[3], c[4]) for c in claimants]
+            )
+            out[field] = parts[index]
+        return out
+
+    def allocated_balances(self, entry: dict) -> dict[str, float]:
+        """This position's balances, read strictly (raises if a read fails)."""
+        raw = {
+            f"{side}_{role}": self.read_token_balance(
+                self.leg_token_id(entry, side, role),
+                entry.get(f"{side}_protocol") or "v1",
+            )
+            if entry.get(f"{side}_split_tx")
+            else 0.0
+            for side, role in LEG_ROLES
+        }
+        return self._allocate(entry, raw, self._token_refs())
 
     def unwanted_token_id(self, entry: dict, side: str) -> str:
         """Token ID of a leg's unwanted side (on-chain IDs from the split first)."""
@@ -600,37 +717,9 @@ class PositionService:
         token_id_map = []  # Track which position/field each token belongs to
 
         for i, entry in enumerate(entries):
-            # Resolve token IDs: prefer on-chain CTF IDs over CLOB IDs
-            # CTF IDs from split TX are [YES, NO] matching partition [1, 2]
-            target_ctf = self._parse_ctf_ids(entry.get("target_ctf_token_ids", ""))
-            cover_ctf = self._parse_ctf_ids(entry.get("cover_ctf_token_ids", ""))
-
-            # Wanted tokens
-            if target_ctf:
-                target_wanted_id = (
-                    target_ctf[0]
-                    if entry["target_position"] == "YES"
-                    else target_ctf[1]
-                )
-            else:
-                target_wanted_id = entry["target_token_id"]
-            token_ids.append(target_wanted_id)
-            token_id_map.append((i, "target_wanted"))
-
-            if cover_ctf:
-                cover_wanted_id = (
-                    cover_ctf[0] if entry["cover_position"] == "YES" else cover_ctf[1]
-                )
-            else:
-                cover_wanted_id = entry["cover_token_id"]
-            token_ids.append(cover_wanted_id)
-            token_id_map.append((i, "cover_wanted"))
-
-            # Unwanted tokens
-            token_ids.append(self.unwanted_token_id(entry, "target"))
-            token_id_map.append((i, "target_unwanted"))
-            token_ids.append(self.unwanted_token_id(entry, "cover"))
-            token_id_map.append((i, "cover_unwanted"))
+            for side, role in LEG_ROLES:
+                token_ids.append(self.leg_token_id(entry, side, role))
+                token_id_map.append((i, f"{side}_{role}"))
 
         # Ledger per token: target/cover legs can be on different protocols
         protocols = []
@@ -645,6 +734,14 @@ class PositionService:
         position_balances = [{} for _ in entries]
         for (pos_idx, field), balance in zip(token_id_map, balances):
             position_balances[pos_idx][field] = balance
+
+        # Positions on the same market share one token balance: split it
+        # instead of giving each the whole wallet balance.
+        refs = self._token_refs()
+        position_balances = [
+            self._allocate(entry, raw, refs)
+            for entry, raw in zip(entries, position_balances)
+        ]
 
         # Bulk-fetch fee stubs for all markets (single batched HTTP call)
         all_market_ids = list(

@@ -69,6 +69,13 @@ class PositionEntry:
     # True when the sale proceeds above started from an estimate (see
     # PositionManager._start_tracking).
     cost_estimated: bool = False
+    # Shares this position holds per leg. Positions on the same market share
+    # one wallet balance, which is split by these. None = recorded before they
+    # were tracked (estimated until the first sell/merge seeds them).
+    target_wanted_shares: Optional[float] = None
+    target_unwanted_shares: Optional[float] = None
+    cover_wanted_shares: Optional[float] = None
+    cover_unwanted_shares: Optional[float] = None
     # Market protocol per leg: "v1" (CTF balances) or "v2" (PositionManager).
     # Positions recorded before V2 support are all v1.
     target_protocol: str = "v1"
@@ -203,6 +210,35 @@ class PositionStorage:
                         if p.get(f"{side}_sell_proceeds") is None:
                             p[f"{side}_sell_proceeds"] = est
                             p["cost_estimated"] = True
+                    self.save_all(positions)
+                    return True
+            return False
+
+    def adjust_shares(
+        self, position_id: str, side: str, role: str, delta: float
+    ) -> bool:
+        """Change a tracked share count (after a sell or merge). No-op if untracked."""
+        key = f"{side}_{role}_shares"
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") == position_id:
+                    if p.get(key) is None:
+                        return False
+                    p[key] = round(max(p[key] + delta, 0.0), 6)
+                    self.save_all(positions)
+                    return True
+            return False
+
+    def seed_shares(self, position_id: str, shares: dict[str, float]) -> bool:
+        """Set untracked share counts ({"target_wanted": 5.0, ...}); keep tracked ones."""
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") == position_id:
+                    for field, value in shares.items():
+                        if p.get(f"{field}_shares") is None:
+                            p[f"{field}_shares"] = round(value, 6)
                     self.save_all(positions)
                     return True
             return False

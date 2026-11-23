@@ -40,6 +40,10 @@ def _entry(**overrides) -> PositionEntry:
         cover_split_tx="0xs2",
         target_sell_proceeds=3.8,
         cover_sell_proceeds=6.9,
+        target_wanted_shares=10.0,
+        target_unwanted_shares=10.0,
+        cover_wanted_shares=10.0,
+        cover_unwanted_shares=0.0,
     )
     base.update(overrides)
     return PositionEntry(**base)
@@ -226,11 +230,12 @@ def test_legacy_unwanted_sale_keeps_pnl(tmp_path):
     before, _ = entry_cost(s.get("pos1"), 10.0, 0.0)
 
     pm, client = _manager(s, live)
-    pm.service.unwanted_token_id.side_effect = lambda entry, side: side
-    pm.service.read_token_balance.side_effect = lambda token, protocol: {
-        "target": 10.0,
-        "cover": 0.0,
-    }[token]
+    pm.service.allocated_balances.return_value = {
+        "target_wanted": 10.0,
+        "target_unwanted": 10.0,
+        "cover_wanted": 10.0,
+        "cover_unwanted": 0.0,
+    }
     client.place_market_order.return_value = MagicMock(
         ok=True, order_id="0xo", making_amount=5.0, taking_amount=2.0
     )
@@ -249,7 +254,7 @@ def test_failed_balance_read_changes_nothing(tmp_path):
     s = PositionStorage(tmp_path / "p.json")
     s.add(_entry(target_sell_proceeds=None, cover_sell_proceeds=None))
     pm, client = _manager(s, _live(target_unwanted_balance=10.0))
-    pm.service.read_token_balance.side_effect = RuntimeError("rpc down")
+    pm.service.allocated_balances.side_effect = RuntimeError("rpc down")
 
     result = _run(pm.sell_position_tokens("pos1", "target", "unwanted"), client)
 

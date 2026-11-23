@@ -69,6 +69,17 @@ class EstimateResponse(BaseModel):
 # =============================================================================
 
 
+def _leg_shares(side: str, leg, amount: float) -> dict[str, float]:
+    """Shares a leg holds after the buy: the split mints `amount` of each side,
+    then the unwanted side's sale removes what filled. No split, no shares."""
+    if not leg.split_tx:
+        return {f"{side}_wanted_shares": 0.0, f"{side}_unwanted_shares": 0.0}
+    return {
+        f"{side}_wanted_shares": amount,
+        f"{side}_unwanted_shares": max(amount - leg.clob_filled_size, 0.0),
+    }
+
+
 @router.post("/buy-pair", response_model=BuyPairResponse)
 async def buy_pair(req: BuyPairRequest):
     """Execute a pair purchase (target + cover positions)."""
@@ -161,6 +172,8 @@ async def buy_pair(req: BuyPairRequest):
                     cover_protocol=result.cover.protocol,
                     target_sell_proceeds=result.target.clob_proceeds,
                     cover_sell_proceeds=result.cover.clob_proceeds,
+                    **_leg_shares("target", result.target, req.amount_per_position),
+                    **_leg_shares("cover", result.cover, req.amount_per_position),
                 )
 
                 storage = PositionStorage()

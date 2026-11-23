@@ -8,7 +8,7 @@ from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
 from core.paths import GAMMA_API_BASE_URL
-from core.positions.service import PositionService
+from core.positions.service import LEG_ROLES, PositionService, legacy_sale_estimate
 from core.positions.storage import PositionStorage
 from core.wallet.manager import WalletManager
 
@@ -110,41 +110,41 @@ class PositionManager:
             return None, error_msg
 
     def _start_tracking(self, position_id: str) -> Optional[str]:
-        """Older positions: seed sale proceeds from the current balances.
+        """Older positions: seed share counts and sale proceeds from balances.
 
-        Their cost used to be estimated from entry prices. Seeding it before
-        the first sell/merge (from the unwanted tokens already gone) keeps
-        today's P&L and lets each later sale be recorded exactly. The
-        balances are read strictly: a failed read must not pass for "all
-        sold", so it returns an error and the caller changes nothing.
+        Positions recorded before tracking have estimated cost and share
+        counts. Seeding them before the first sell/merge (from this
+        position's part of the wallet balances) keeps today's P&L and lets
+        each later sale be recorded exactly. Balances are read strictly: a
+        failed read must not pass for "all sold", so it returns an error and
+        the caller changes nothing.
         """
         entry = self.storage.get(position_id)
-        if not entry or (
-            entry.get("target_sell_proceeds") is not None
-            and entry.get("cover_sell_proceeds") is not None
-        ):
+        if not entry:
             return None
-        from core.positions.service import legacy_sale_estimate
-
-        estimates = {}
-        for side in ("target", "cover"):
-            if not entry.get(f"{side}_split_tx"):
-                estimates[side] = 0.0  # no split, nothing was sold
-                continue
-            try:
-                unwanted = self.service.read_token_balance(
-                    self.service.unwanted_token_id(entry, side),
-                    entry.get(f"{side}_protocol", "v1"),
-                )
-            except Exception as e:
-                return (
-                    f"Couldn't read the {side} balance to set up this position's "
-                    f"cost ({e}). Nothing was changed; try again."
-                )
-            estimates[side] = legacy_sale_estimate(entry, side, unwanted)
-        self.storage.start_tracking_proceeds(
-            position_id, estimates["target"], estimates["cover"]
+        fields = [f"{side}_{role}" for side, role in LEG_ROLES]
+        needs_shares = any(entry.get(f"{f}_shares") is None for f in fields)
+        needs_proceeds = any(
+            entry.get(f"{side}_sell_proceeds") is None for side in ("target", "cover")
         )
+        if not (needs_shares or needs_proceeds):
+            return None
+
+        try:
+            held = self.service.allocated_balances(entry)
+        except Exception as e:
+            return (
+                f"Couldn't read this position's balances to set it up ({e}). "
+                "Nothing was changed; try again."
+            )
+        if needs_proceeds:
+            self.storage.start_tracking_proceeds(
+                position_id,
+                legacy_sale_estimate(entry, "target", held["target_unwanted"]),
+                legacy_sale_estimate(entry, "cover", held["cover_unwanted"]),
+            )
+        if needs_shares:
+            self.storage.seed_shares(position_id, held)
         return None
 
     async def sell_position_tokens(
@@ -246,6 +246,8 @@ class PositionManager:
             self.storage.add_sell_proceeds(position_id, side, sale.proceeds)
         elif filled:
             self.storage.add_realized_proceeds(position_id, sale.proceeds)
+        if filled:
+            self.storage.adjust_shares(position_id, side, token_type, -sale.filled)
 
         return SellResult(
             success=filled,
@@ -339,7 +341,10 @@ class PositionManager:
             )
 
         # Each merged YES+NO pair returns exactly 1 pUSD.
-        self.storage.add_realized_proceeds(position_id, int(mergeable * 1e6) / 1e6)
+        merged = int(mergeable * 1e6) / 1e6
+        self.storage.add_realized_proceeds(position_id, merged)
+        self.storage.adjust_shares(position_id, side, "wanted", -merged)
+        self.storage.adjust_shares(position_id, side, "unwanted", -merged)
 
         return MergeResult(
             success=True,

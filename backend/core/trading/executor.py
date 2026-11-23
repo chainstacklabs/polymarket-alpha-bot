@@ -59,6 +59,8 @@ class TradeResult:
     protocol: str = "v1"
     # pUSD the unwanted side sold for at buy time (exchange-reported).
     clob_proceeds: float = 0.0
+    # Unwanted shares sold at buy time.
+    clob_filled_size: float = 0.0
 
 
 @dataclass
@@ -194,6 +196,7 @@ class TradingExecutor:
         clob_filled = False
         clob_error = None
         clob_proceeds = 0.0
+        clob_filled_size = 0.0
 
         if not skip_clob_sell and unwanted_token:
             # A split of $N mints N shares of each side.
@@ -218,6 +221,7 @@ class TradingExecutor:
                 clob_order_id, clob_error = sale.order_id, sale.error
                 clob_filled = sale.filled > 0
                 clob_proceeds = sale.proceeds
+                clob_filled_size = sale.filled
 
         wanted_token_id = (
             market.yes_token_id if position == "YES" else (market.no_token_id or "")
@@ -243,6 +247,7 @@ class TradingExecutor:
             entry_price=entry_price,
             protocol=market.protocol,
             clob_proceeds=clob_proceeds,
+            clob_filled_size=clob_filled_size,
         )
 
     async def buy_pair(
