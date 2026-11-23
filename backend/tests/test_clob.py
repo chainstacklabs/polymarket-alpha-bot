@@ -143,6 +143,9 @@ class TestSellViaClob:
         assert est["asset_id"] == "tok"
         assert est["side"] == "SELL"
         assert est["shares"] == 7.0
+        # FOK: a book that can't take all 7 raises instead of quoting its
+        # lowest bid (FAK would, which drops the floor to the bottom).
+        assert est["order_type"] == "FOK"
         kwargs = client.place_market_order.call_args.kwargs
         assert kwargs["min_price"] == compute_sell_price(0.16, 10)
 

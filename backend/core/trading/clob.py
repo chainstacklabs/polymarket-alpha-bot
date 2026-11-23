@@ -41,13 +41,15 @@ def _book_price(client, token_id: str, amount: float, fallback: float) -> float:
     """Worst price the order book pays for `amount` shares now.
 
     The mid price can sit far above the best bid on wide books, which puts a
-    FAK floor above every bid. Falls back to `fallback` if the book can't be
-    read (empty book, network error).
+    FAK floor above every bid. Estimated as FOK: a book too thin for the
+    whole amount raises (a FAK estimate would return its lowest bid and drop
+    the floor to the bottom), and then `fallback` is used, as it is for an
+    unreadable book.
     """
     try:
         book = float(
             client.estimate_market_price(
-                asset_id=token_id, side="SELL", shares=amount, order_type="FAK"
+                asset_id=token_id, side="SELL", shares=amount, order_type="FOK"
             )
         )
     except Exception as e:

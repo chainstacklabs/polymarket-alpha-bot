@@ -47,7 +47,7 @@ def book_price(token_id: str, shares: float, fallback: float) -> float:
         with PublicClient() as c:
             price = float(
                 c.estimate_market_price(
-                    asset_id=token_id, side="SELL", shares=shares, order_type="FAK"
+                    asset_id=token_id, side="SELL", shares=shares, order_type="FOK"
                 )
             )
     except Exception:
