@@ -173,7 +173,8 @@ def main():
     print(f"  USDC.e: ${bal_usdce_pre / 1e6:.2f}")
 
     if bal_pusd_pre == 0:
-        print("\nNo pUSD to unwrap. Run 02_wrap_to_pusd.py first.")
+        print("\nNo pUSD on the signing key. Move pUSD out of the deposit wallet first")
+        print("(SDK transfer_erc20), or wrap with WRAP_TO set to the signing key.")
         return
 
     if pol_pre_wei < int(0.01 * 1e18):

@@ -18,6 +18,7 @@ USAGE (from the repo root):
 """
 
 import json
+import math
 import os
 import sys
 
@@ -31,8 +32,10 @@ SLIPPAGE = 0.10  # sell no lower than 10% under the current price
 
 
 def sell_floor(price: float, tick: float = 0.01) -> float:
-    """Worst accepted price: SLIPPAGE under `price`, at least one tick."""
-    return round(max(price * (1 - SLIPPAGE), tick), 2)
+    """Worst accepted price: SLIPPAGE under `price`, rounded up to a tick."""
+    # round() first so float noise (0.45 / 0.01 = 45.000000001) doesn't add a tick
+    ticks = math.ceil(round(price * (1 - SLIPPAGE) / tick, 6))
+    return round(max(ticks, 1) * tick, 4)
 
 
 def main() -> None:
