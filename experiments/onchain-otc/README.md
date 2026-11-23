@@ -30,7 +30,7 @@ uv run --frozen --project backend experiments/onchain-otc/01_baseline.py      # 
 | 3 | `03_escrow.py` | Atomic YES ↔ USDC.e swap through `OTCEscrow.sol` | Create ~247k, fill ~91–108k; expiry, restricted taker, and double fill enforced |
 | 4 | `04_negrisk.py` | NegRisk split, `convertPositions`, merge | Convert ~375–432k on a 4-outcome market; 5M+ on large ones |
 | 5 | `05_operator.py` | Sign V2 orders and settle with `matchOrders` as the operator | ~210k gas; non-operators are rejected |
-| 6 | `06_negrisk_trading.py` | Get directional NegRisk exposure without the CLOB | Split + convert alone is break-even |
+| 6 | `06_negrisk_trading.py` | Get directional NegRisk exposure without the CLOB | Split + convert alone is break-even (if one question resolves YES) |
 | 7 | `07_intents.py` | Wrap positions as ERC-20s and settle EIP-712 intents | `fillIntent` ~140k; wrap 57k (650k for the first wrap of a token) |
 
 Gas figures are from the 2026-06-22 run.
