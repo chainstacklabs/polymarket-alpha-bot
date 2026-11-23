@@ -63,14 +63,27 @@ def split_receivers(receipt) -> set[str]:
     return out
 
 
+# Polymarket contracts that pass outcome tokens through on the way to a
+# wallet (polymarket-client 0.20.0 `environments.py`, PRODUCTION): never the
+# holder.
+PASS_THROUGH = {
+    "0xada100db00ca00073811820692005400218fce1f",  # collateral_adapter
+    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296",  # neg_risk_adapter
+    "0xada2005600dec949baf300f4c6120000bdb6eaab",  # neg_risk_collateral_adapter
+    "0xa1200000d0002264c9a1698e001292d00e1b00af",  # auto_redeem_operator
+}
+
+
 def holder_of(receivers: set[str], current: str) -> str:
     """Which wallet a split filled: the current one if it got tokens, else
-    the only recipient, else "" (can't tell)."""
+    the only recipient that isn't a Polymarket pass-through, else "" (can't
+    tell)."""
     current = current.lower()
     if current and current in receivers:
         return current
-    if len(receivers) == 1:
-        return next(iter(receivers))
+    wallets = receivers - PASS_THROUGH
+    if len(wallets) == 1:
+        return next(iter(wallets))
     return ""
 
 
@@ -712,7 +725,9 @@ class PositionService:
             except Exception as e:
                 logger.warning(f"Wallet tag failed for {entry['position_id']}: {e}")
                 continue
-            entry["wallet"] = tags[entry["position_id"]] = holder_of(receivers, current)
+            holder = holder_of(receivers, current)
+            if holder:  # undecided: leave unset and try again next time
+                entry["wallet"] = tags[entry["position_id"]] = holder
         if tags:
             self.storage.set_wallets(tags)
 

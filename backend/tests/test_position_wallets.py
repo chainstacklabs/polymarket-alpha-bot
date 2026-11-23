@@ -44,11 +44,25 @@ def test_split_receivers_reads_erc1155_recipients():
     assert split_receivers(receipt) == {ADAPTER, DEPOSIT}
 
 
+def test_holder_ignores_polymarket_adapters():
+    # A v1 split from an earlier deposit wallet: adapter + that wallet.
+    old_deposit = "0x21c79811788d075ed5c701a0a4875d73c5c92c4f"
+    assert holder_of({ADAPTER, old_deposit}, DEPOSIT) == old_deposit
+
+
+def test_undecided_tag_is_not_stored(tmp_path):
+    svc, storage = _service(
+        tmp_path, [_entry("a")], {"0xa": {OLD_EOA, "0x" + "99" * 20}}
+    )
+    svc.get_all_live()
+    assert storage.get("a").get("wallet") is None  # retried next time
+
+
 def test_holder_prefers_the_current_wallet():
     # v1 deposit-wallet splits mint to an adapter, which forwards to the wallet.
     assert holder_of({ADAPTER, DEPOSIT}, DEPOSIT) == DEPOSIT
     assert holder_of({OLD_EOA}, DEPOSIT) == OLD_EOA
-    assert holder_of({OLD_EOA, ADAPTER}, DEPOSIT) == ""  # can't tell
+    assert holder_of({OLD_EOA, "0x" + "99" * 20}, DEPOSIT) == ""  # can't tell
     assert holder_of(set(), DEPOSIT) == ""
 
 

@@ -81,7 +81,7 @@ class PositionEntry:
     target_protocol: str = "v1"
     cover_protocol: str = "v1"
     # Deposit wallet that received this position's split tokens (lowercase).
-    # None = not checked yet; "" = checked, couldn't tell (shown everywhere).
+    # None = not known yet (shown everywhere; re-checked on each listing).
     wallet: Optional[str] = None
 
 
@@ -233,15 +233,6 @@ class PositionStorage:
                     return True
             return False
 
-    def set_wallets(self, wallets: dict[str, str]) -> None:
-        """Store the holder wallet of several positions ({position_id: wallet})."""
-        with _storage_lock:
-            positions = self.load_all()
-            for p in positions:
-                if p.get("position_id") in wallets:
-                    p["wallet"] = wallets[p["position_id"]]
-            self.save_all(positions)
-
     def seed_shares(self, position_id: str, shares: dict[str, float]) -> bool:
         """Set untracked share counts ({"target_wanted": 5.0, ...}); keep tracked ones."""
         with _storage_lock:
@@ -288,3 +279,12 @@ class PositionStorage:
     def count(self) -> int:
         """Get total position count."""
         return len(self.load_all())
+
+    def set_wallets(self, wallets: dict[str, str]) -> None:
+        """Store the holder wallet of several positions ({position_id: wallet})."""
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") in wallets:
+                    p["wallet"] = wallets[p["position_id"]]
+            self.save_all(positions)
