@@ -226,6 +226,11 @@ def test_legacy_unwanted_sale_keeps_pnl(tmp_path):
     before, _ = entry_cost(s.get("pos1"), 10.0, 0.0)
 
     pm, client = _manager(s, live)
+    pm.service.unwanted_token_id.side_effect = lambda entry, side: side
+    pm.service.read_token_balance.side_effect = lambda token, protocol: {
+        "target": 10.0,
+        "cover": 0.0,
+    }[token]
     client.place_market_order.return_value = MagicMock(
         ok=True, order_id="0xo", making_amount=5.0, taking_amount=2.0
     )
@@ -237,3 +242,20 @@ def test_legacy_unwanted_sale_keeps_pnl(tmp_path):
     assert estimated
     # Cost fell by the 2.00 received; the 5 tokens sold were worth 5 x 0.4 = 2.00
     assert round(before - after, 6) == 2.0
+
+
+def test_failed_balance_read_changes_nothing(tmp_path):
+    # A failed read must not pass for "all unwanted sold" and seed a wrong cost.
+    s = PositionStorage(tmp_path / "p.json")
+    s.add(_entry(target_sell_proceeds=None, cover_sell_proceeds=None))
+    pm, client = _manager(s, _live(target_unwanted_balance=10.0))
+    pm.service.read_token_balance.side_effect = RuntimeError("rpc down")
+
+    result = _run(pm.sell_position_tokens("pos1", "target", "unwanted"), client)
+
+    assert not result.success
+    assert "Nothing was changed" in result.error
+    client.place_market_order.assert_not_called()
+    saved = s.get("pos1")
+    assert saved["target_sell_proceeds"] is None
+    assert saved["cost_estimated"] is False

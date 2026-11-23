@@ -255,23 +255,42 @@ class PositionService:
                 for tid, proto in zip(token_ids, protocols)
             ]
 
+    def read_token_balance(self, token_id: str, protocol: str = "v1") -> float:
+        """Token balance of the deposit wallet. Raises if it can't be read."""
+        if not self._token_holder:
+            raise ValueError("No deposit wallet to read balances from")
+        if not token_id:
+            raise ValueError("Unknown token ID")
+        ledger = self._get_web3().eth.contract(
+            address=self._ledger_address(protocol), abi=CTF_ABI
+        )
+        balance_wei = ledger.functions.balanceOf(
+            Web3.to_checksum_address(self._token_holder),
+            int(token_id),
+        ).call()
+        return balance_wei / 1e6
+
     def _get_token_balance_single(self, token_id: str, protocol: str = "v1") -> float:
-        """Query single token balance (fallback)."""
+        """Query single token balance (fallback). 0.0 on any failure."""
         if not self._token_holder or not token_id:
             return 0.0
 
         try:
-            ledger = self._get_web3().eth.contract(
-                address=self._ledger_address(protocol), abi=CTF_ABI
-            )
-            balance_wei = ledger.functions.balanceOf(
-                Web3.to_checksum_address(self._token_holder),
-                int(token_id),
-            ).call()
-            return balance_wei / 1e6
+            return self.read_token_balance(token_id, protocol)
         except Exception as e:
             logger.error(f"Failed to query token balance for {token_id}: {e}")
             return 0.0
+
+    def unwanted_token_id(self, entry: dict, side: str) -> str:
+        """Token ID of a leg's unwanted side (on-chain IDs from the split first)."""
+        ctf = self._parse_ctf_ids(entry.get(f"{side}_ctf_token_ids", ""))
+        position = entry[f"{side}_position"]
+        if ctf:
+            return ctf[1] if position == "YES" else ctf[0]
+        stored = entry.get(f"{side}_unwanted_token_id", "")
+        return stored or self._get_unwanted_token_id(
+            entry[f"{side}_market_id"], position
+        )
 
     def get_market_token_ids(self, market_id: str) -> tuple[str, str]:
         """Get YES and NO token IDs for a market. Returns (yes_token_id, no_token_id)."""
@@ -608,32 +627,9 @@ class PositionService:
             token_id_map.append((i, "cover_wanted"))
 
             # Unwanted tokens
-            if target_ctf:
-                target_unwanted_id = (
-                    target_ctf[1]
-                    if entry["target_position"] == "YES"
-                    else target_ctf[0]
-                )
-            else:
-                target_unwanted_id = entry.get(
-                    "target_unwanted_token_id", ""
-                ) or self._get_unwanted_token_id(
-                    entry["target_market_id"], entry["target_position"]
-                )
-            token_ids.append(target_unwanted_id)
+            token_ids.append(self.unwanted_token_id(entry, "target"))
             token_id_map.append((i, "target_unwanted"))
-
-            if cover_ctf:
-                cover_unwanted_id = (
-                    cover_ctf[1] if entry["cover_position"] == "YES" else cover_ctf[0]
-                )
-            else:
-                cover_unwanted_id = entry.get(
-                    "cover_unwanted_token_id", ""
-                ) or self._get_unwanted_token_id(
-                    entry["cover_market_id"], entry["cover_position"]
-                )
-            token_ids.append(cover_unwanted_id)
+            token_ids.append(self.unwanted_token_id(entry, "cover"))
             token_id_map.append((i, "cover_unwanted"))
 
         # Ledger per token: target/cover legs can be on different protocols

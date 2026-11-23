@@ -109,26 +109,43 @@ class PositionManager:
             logger.error(f"Merge error: {error_msg}")
             return None, error_msg
 
-    def _start_tracking(self, position_id: str, position) -> None:
+    def _start_tracking(self, position_id: str) -> Optional[str]:
         """Older positions: seed sale proceeds from the current balances.
 
         Their cost used to be estimated from entry prices. Seeding it before
         the first sell/merge (from the unwanted tokens already gone) keeps
-        today's P&L and lets each later sale be recorded exactly.
+        today's P&L and lets each later sale be recorded exactly. The
+        balances are read strictly: a failed read must not pass for "all
+        sold", so it returns an error and the caller changes nothing.
         """
         entry = self.storage.get(position_id)
         if not entry or (
             entry.get("target_sell_proceeds") is not None
             and entry.get("cover_sell_proceeds") is not None
         ):
-            return
+            return None
         from core.positions.service import legacy_sale_estimate
 
+        estimates = {}
+        for side in ("target", "cover"):
+            if not entry.get(f"{side}_split_tx"):
+                estimates[side] = 0.0  # no split, nothing was sold
+                continue
+            try:
+                unwanted = self.service.read_token_balance(
+                    self.service.unwanted_token_id(entry, side),
+                    entry.get(f"{side}_protocol", "v1"),
+                )
+            except Exception as e:
+                return (
+                    f"Couldn't read the {side} balance to set up this position's "
+                    f"cost ({e}). Nothing was changed; try again."
+                )
+            estimates[side] = legacy_sale_estimate(entry, side, unwanted)
         self.storage.start_tracking_proceeds(
-            position_id,
-            legacy_sale_estimate(entry, "target", position.target_unwanted_balance),
-            legacy_sale_estimate(entry, "cover", position.cover_unwanted_balance),
+            position_id, estimates["target"], estimates["cover"]
         )
+        return None
 
     async def sell_position_tokens(
         self,
@@ -151,7 +168,17 @@ class PositionManager:
                 error="Position not found",
             )
 
-        self._start_tracking(position_id, position)
+        tracking_error = self._start_tracking(position_id)
+        if tracking_error:
+            return SellResult(
+                success=False,
+                token_id="",
+                amount=0,
+                order_id=None,
+                filled=False,
+                recovered_value=0,
+                error=tracking_error,
+            )
 
         # Determine which tokens to sell
         if side == "target":
@@ -247,7 +274,15 @@ class PositionManager:
                 error="Position not found",
             )
 
-        self._start_tracking(position_id, position)
+        tracking_error = self._start_tracking(position_id)
+        if tracking_error:
+            return MergeResult(
+                success=False,
+                market_id="",
+                merged_amount=0,
+                tx_hash=None,
+                error=tracking_error,
+            )
 
         # Get balances for merge
         if side == "target":
