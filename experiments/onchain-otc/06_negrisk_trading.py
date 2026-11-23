@@ -67,14 +67,33 @@ NEG_RISK_ABI = json.loads("""[
 ]""")
 
 
+def gamma_pages(path: str, limit: int, max_pages: int = 10):
+    """Yield active Gamma results by 24h volume, one page at a time.
+
+    Protocol V2 results are skipped by the callers, so a whole page can hold
+    nothing usable; keep paging until a match or the results run out.
+    """
+    for page in range(max_pages):
+        items = httpx.get(
+            f"{GAMMA_API}/{path}",
+            params={
+                "closed": "false",
+                "active": "true",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=15.0,
+        ).json()
+        if not items:
+            return
+        yield from items
+
+
 def fetch_negrisk_event() -> dict:
     """Find a live NegRisk market with 3-8 outcomes and real prices."""
-    resp = httpx.get(
-        f"{GAMMA_API}/events",
-        params={"closed": "false", "active": "true", "limit": 30, "order": "volume24hr", "ascending": "false"},
-        timeout=15.0,
-    )
-    for e in resp.json():
+    for e in gamma_pages("events", limit=30):
         if not e.get("negRisk"):
             continue
         markets = e.get("markets", [])
