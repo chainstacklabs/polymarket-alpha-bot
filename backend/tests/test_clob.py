@@ -6,6 +6,7 @@ RejectedOrder (ok=False, message). For a SELL, making_amount is the shares
 filled and taking_amount the pUSD received.
 """
 
+from decimal import Decimal
 from unittest.mock import MagicMock, create_autospec
 
 from polymarket import SecureClient
@@ -13,9 +14,11 @@ from polymarket import SecureClient
 from core.trading.clob import compute_sell_price, sell_via_clob
 
 
-def _client() -> MagicMock:
+def _client(book_price: str = "0.5") -> MagicMock:
     # Autospec against the real SDK: a renamed/removed kwarg fails the test.
-    return create_autospec(SecureClient, instance=True)
+    client = create_autospec(SecureClient, instance=True)
+    client.estimate_market_price.return_value = Decimal(book_price)
+    return client
 
 
 def _accepted(
@@ -125,4 +128,28 @@ class TestSellViaClob:
         assert kwargs["side"] == "SELL"
         assert kwargs["shares"] == 5.0
         assert kwargs["order_type"] == "FAK"
+        assert kwargs["min_price"] == compute_sell_price(0.5, 10)
+
+    # ---- floor from the order book ----
+
+    def test_floor_sits_under_the_order_book_price(self):
+        # Live 2026-11-23: mid 0.205, best bid 0.16. A floor 10% under the
+        # mid (0.18) matched nothing; it has to sit under what the book pays.
+        client = _client(book_price="0.16")
+        client.place_market_order.return_value = _accepted()
+        sell_via_clob(client, "tok", 7.0, 0.205, slippage=10)
+
+        est = client.estimate_market_price.call_args.kwargs
+        assert est["asset_id"] == "tok"
+        assert est["side"] == "SELL"
+        assert est["shares"] == 7.0
+        kwargs = client.place_market_order.call_args.kwargs
+        assert kwargs["min_price"] == compute_sell_price(0.16, 10)
+
+    def test_floor_falls_back_to_price_when_book_read_fails(self):
+        client = _client()
+        client.estimate_market_price.side_effect = RuntimeError("no book")
+        client.place_market_order.return_value = _accepted()
+        sell_via_clob(client, "tok", 5.0, 0.5, slippage=10)
+        kwargs = client.place_market_order.call_args.kwargs
         assert kwargs["min_price"] == compute_sell_price(0.5, 10)

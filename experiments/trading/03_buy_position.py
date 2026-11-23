@@ -23,12 +23,11 @@ import os
 import sys
 
 import httpx
-from polymarket import SecureClient
+from polymarket import PublicClient, SecureClient
 from polymarket.auth import RelayerApiKey
 
-MIN_ORDER_USD = 1.0
 DEFAULT_MIN_SHARES = 5.0
-SLIPPAGE = 0.10  # sell no lower than 10% under the current price
+SLIPPAGE = 0.10  # sell no lower than 10% under what the order book pays
 
 
 def sell_floor(price: float, tick: float = 0.01) -> float:
@@ -36,6 +35,24 @@ def sell_floor(price: float, tick: float = 0.01) -> float:
     # round() first so float noise (0.45 / 0.01 = 45.000000001) doesn't add a tick
     ticks = math.ceil(round(price * (1 - SLIPPAGE) / tick, 6))
     return round(max(ticks, 1) * tick, 4)
+
+
+def book_price(token_id: str, shares: float, fallback: float) -> float:
+    """Worst price the order book pays for `shares` now (mid as fallback).
+
+    On wide books the mid sits far above the best bid, and a floor under the
+    mid matches nothing.
+    """
+    try:
+        with PublicClient() as c:
+            price = float(
+                c.estimate_market_price(
+                    asset_id=token_id, side="SELL", shares=shares, order_type="FAK"
+                )
+            )
+    except Exception:
+        return fallback
+    return price if price > 0 else fallback
 
 
 def main() -> None:
@@ -58,16 +75,16 @@ def main() -> None:
     unwanted = no if side == "YES" else yes
     unwanted_price = float(prices[1] if side == "YES" else prices[0])
     min_shares = float(m.get("orderMinSize") or DEFAULT_MIN_SHARES)
-    floor = sell_floor(unwanted_price)
-
     # A split of $N mints N shares of each side; sell the unwanted N.
-    sell = amount >= min_shares and amount * floor >= MIN_ORDER_USD
+    # Polymarket's minimum is in shares (no dollar floor on sells).
+    sell = amount >= min_shares
+    floor = sell_floor(book_price(unwanted, amount, unwanted_price))
     print(f"market:  {m.get('question')} ({m.get('version')})")
     print(f"split:   ${amount:g} pUSD -> {amount:g} YES + {amount:g} NO")
     if sell:
-        print(f"sell:    {amount:g} {'NO' if side == 'YES' else 'YES'} at >= {floor} (now {unwanted_price})")
+        print(f"sell:    {amount:g} {'NO' if side == 'YES' else 'YES'} at >= {floor} (mid {unwanted_price})")
     else:
-        print(f"sell:    skipped (below {min_shares:g} shares or ${MIN_ORDER_USD:g}); you keep both sides")
+        print(f"sell:    skipped (below {min_shares:g} shares); you keep both sides")
     if not execute:
         print("\nPreview only. Re-run with --yes to spend.")
         return

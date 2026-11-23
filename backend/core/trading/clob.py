@@ -35,6 +35,25 @@ class ClobSell:
     error: Optional[str] = None
 
 
+def _book_price(client, token_id: str, amount: float, fallback: float) -> float:
+    """Worst price the order book pays for `amount` shares now.
+
+    The mid price can sit far above the best bid on wide books, which puts a
+    FAK floor above every bid. Falls back to `fallback` if the book can't be
+    read (empty book, network error).
+    """
+    try:
+        book = float(
+            client.estimate_market_price(
+                asset_id=token_id, side="SELL", shares=amount, order_type="FAK"
+            )
+        )
+    except Exception as e:
+        logger.warning(f"Order-book estimate failed for {token_id}: {e}")
+        return fallback
+    return book if book > 0 else fallback
+
+
 def sell_via_clob(
     client,
     token_id: str,
@@ -51,8 +70,10 @@ def sell_via_clob(
         client: Authenticated SecureClient (deposit wallet).
         token_id: Token to sell.
         amount: Number of shares to sell.
-        price: Current market price.
-        slippage: Slippage percentage (clamped to 10-50%).
+        price: Current market price; fallback when the order book can't
+            be read.
+        slippage: Slippage percentage (clamped to 10-50%), applied under
+            the order book's price for `amount` shares.
     """
     if amount <= 0 or price <= 0:
         msg = f"Invalid sell params: amount={amount}, price={price}"
@@ -60,7 +81,9 @@ def sell_via_clob(
         return ClobSell(error=msg)
 
     try:
-        min_price = compute_sell_price(price, slippage)
+        min_price = compute_sell_price(
+            _book_price(client, token_id, amount, price), slippage
+        )
         resp = client.place_market_order(
             asset_id=token_id,
             side="SELL",

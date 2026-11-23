@@ -17,8 +17,6 @@ from core.markets import market_version, outcome_token_ids
 from core.paths import GAMMA_API_BASE_URL
 from core.wallet.manager import WalletManager
 
-# Polymarket enforces a $1 minimum CLOB order size.
-MIN_ORDER_USD = 1.0
 # Per-market share minimum (Gamma `orderMinSize`); 5 on every live market
 # checked 2026-11-22. Used when Gamma omits the field.
 DEFAULT_MIN_ORDER_SHARES = 5.0
@@ -204,12 +202,6 @@ class TradingExecutor:
                 clob_error = (
                     f"Unwanted side {amount:.2f} shares below the market's "
                     f"{market.min_order_shares:g}-share minimum — skipping sell"
-                )
-                logger.warning(clob_error)
-            elif amount * unwanted_price < MIN_ORDER_USD:
-                clob_error = (
-                    f"Unwanted side value ${amount * unwanted_price:.2f} below "
-                    f"${MIN_ORDER_USD} CLOB minimum — skipping sell"
                 )
                 logger.warning(clob_error)
             else:
