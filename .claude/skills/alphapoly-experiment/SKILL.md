@@ -11,7 +11,7 @@ Scaffold a new standalone script in `experiments/`.
 - **Completely standalone** — no shared modules; no imports from `backend/` or other `experiments/` files
 - **Sequential numbering** — check existing files in `experiments/` and use the next number
 - **Dependencies from backend** — experiments share `backend/pyproject.toml` deps (httpx, polars, etc.); no inline PEP 723 headers needed
-- **Run with** `uv run experiments/<script>.py` from the project root
+- **Run with** `uv run --frozen --project backend experiments/<script>.py` from the project root
 
 ## Template
 
@@ -50,6 +50,6 @@ Subdirectories (e.g. `experiments/trading/`) have their own numbering sequence.
 
 ## Running
 ```bash
-uv run experiments/NN_script.py
+uv run --frozen --project backend experiments/NN_script.py
 ```
 Run from the project root. Dependencies resolve from `backend/pyproject.toml` via `uv`.

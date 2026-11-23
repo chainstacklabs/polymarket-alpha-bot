@@ -29,8 +29,8 @@ CLOB WEBSOCKET API
     Keepalive: Send "PING" every 10 seconds
 
 USAGE
-    uv run python experiments/07_websocket_prices.py
-    uv run python experiments/07_websocket_prices.py --duration 60  # Run for 60s
+    uv run --frozen --project backend experiments/07_websocket_prices.py
+    uv run --frozen --project backend experiments/07_websocket_prices.py --duration 60  # Run for 60s
 """
 
 import asyncio

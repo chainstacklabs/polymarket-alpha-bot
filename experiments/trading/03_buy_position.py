@@ -11,11 +11,10 @@ The deposit wallet is deployed automatically on ``SecureClient.create()`` and
 must already hold pUSD (>= the trade amount). Polymarket enforces a $1 minimum
 order size, so the unwanted side is only sold when its value clears $1.
 
-USAGE:
+USAGE (from the repo root):
     POLY_PK=0x.. POLY_RELAYER_API_KEY=.. POLY_RELAYER_ADDRESS=0x.. \
-    MARKET_ID=.. SIDE=YES AMOUNT=2 \
-      uv run --no-project --with polymarket-client --with httpx \
-      --prerelease allow python experiments/trading/03_buy_position.py
+    MARKET_ID=.. SIDE=YES AMOUNT=5 \
+      uv run --frozen --project backend experiments/trading/03_buy_position.py
 """
 
 import json

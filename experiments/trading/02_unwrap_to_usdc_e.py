@@ -16,10 +16,10 @@ WHAT IT DOES:
        receives USDC.e 1:1.
 
 USAGE:
-    cd backend && uv run python ../experiments/trading/02_unwrap_to_usdc_e.py
+    uv run --frozen --project backend experiments/trading/02_unwrap_to_usdc_e.py
 
     # Partial amount (default is full pUSD balance):
-    UNWRAP_AMOUNT_USD=5 uv run python ../experiments/trading/02_unwrap_to_usdc_e.py
+    UNWRAP_AMOUNT_USD=5 uv run --frozen --project backend experiments/trading/02_unwrap_to_usdc_e.py
 
 PREREQUISITES:
     - Wallet with pUSD (run 02_wrap_to_pusd.py first to mint some).

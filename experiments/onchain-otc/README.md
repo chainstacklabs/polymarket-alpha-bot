@@ -958,9 +958,9 @@ experiments/onchain-otc/
 ./experiments/onchain-otc/anvil.sh
 
 # Terminal 2: Fund accounts (run once per fresh fork)
-cd backend && uv run ../experiments/onchain-otc/setup_accounts.py
+uv run --frozen --project backend experiments/onchain-otc/setup_accounts.py
 
 # Terminal 2: Run any experiment
-cd backend && uv run ../experiments/onchain-otc/01_baseline.py
-cd backend && uv run ../experiments/onchain-otc/05_operator.py
+uv run --frozen --project backend experiments/onchain-otc/01_baseline.py
+uv run --frozen --project backend experiments/onchain-otc/05_operator.py
 ```

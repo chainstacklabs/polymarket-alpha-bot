@@ -22,18 +22,15 @@ WHY WE NEED THIS
 USAGE
     # Start anvil first:  ./experiments/onchain-otc/anvil.sh
     # Then in another terminal:
-    cd backend && uv run ../experiments/onchain-otc/setup_accounts.py
+    uv run --frozen --project backend experiments/onchain-otc/setup_accounts.py
 """
 
 import json
 import logging
-from pathlib import Path
 
-from dotenv import load_dotenv
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
