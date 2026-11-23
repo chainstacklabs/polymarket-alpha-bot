@@ -71,6 +71,14 @@ class BuyPairResult:
     final_balances: dict
 
 
+def fee_stub(info: MarketInfo) -> dict:
+    """The market's fee fields in Gamma's shape (see core/fees.py)."""
+    stub: dict = {"id": info.market_id, "feesEnabled": info.fees_enabled}
+    if info.fee_schedule:
+        stub["feeSchedule"] = info.fee_schedule
+    return stub
+
+
 class TradingExecutor:
     """Executes trades via deposit-wallet split + sigtype-3 CLOB sell."""
 
@@ -208,7 +216,12 @@ class TradingExecutor:
                 from core.trading.clob import sell_via_clob
 
                 sale = sell_via_clob(
-                    client, unwanted_token, amount, unwanted_price, slippage=slippage
+                    client,
+                    unwanted_token,
+                    amount,
+                    unwanted_price,
+                    slippage=slippage,
+                    fee_market=fee_stub(market),
                 )
                 clob_order_id, clob_error = sale.order_id, sale.error
                 clob_filled = sale.filled > 0
@@ -270,15 +283,9 @@ class TradingExecutor:
             cover_info.yes_price if cover_position == "YES" else cover_info.no_price
         )
 
-        def _fee_stub(info: MarketInfo) -> dict:
-            stub: dict = {"id": info.market_id, "feesEnabled": info.fees_enabled}
-            if info.fee_schedule:
-                stub["feeSchedule"] = info.fee_schedule
-            return stub
-
         entry_fees = compute_fee(
-            amount_per_position, target_price, _fee_stub(target_info)
-        ) + compute_fee(amount_per_position, cover_price, _fee_stub(cover_info))
+            amount_per_position, target_price, fee_stub(target_info)
+        ) + compute_fee(amount_per_position, cover_price, fee_stub(cover_info))
 
         balances = self.wallet.get_balances()
         required = amount_per_position * 2 + entry_fees

@@ -10,6 +10,8 @@ from typing import Optional
 
 from loguru import logger
 
+from core.fees import taker_fee
+
 
 def _tick_decimals(tick_size: float) -> int:
     """Count decimal places from a tick size value."""
@@ -60,6 +62,7 @@ def sell_via_clob(
     amount: float,
     price: float,
     slippage: float = 10,
+    fee_market: Optional[dict] = None,
 ) -> ClobSell:
     """Sell tokens via a sigtype-3 FAK market order.
 
@@ -74,6 +77,9 @@ def sell_via_clob(
             be read.
         slippage: Slippage percentage (clamped to 10-50%), applied under
             the order book's price for `amount` shares.
+        fee_market: Gamma market (or fee stub) with `feesEnabled` /
+            `feeSchedule`; the taker fee is taken off the proceeds. The
+            order response reports the amount before fees.
     """
     if amount <= 0 or price <= 0:
         msg = f"Invalid sell params: amount={amount}, price={price}"
@@ -102,10 +108,12 @@ def sell_via_clob(
         # taking_amount the pUSD received.
         order_id = resp.order_id
         filled = float(resp.making_amount)
-        proceeds = float(resp.taking_amount)
+        gross = float(resp.taking_amount)
+        fee = taker_fee(filled, gross / filled, fee_market or {}) if filled else 0.0
+        proceeds = round(gross - fee, 6)
         logger.info(
             f"CLOB sigtype-3 sell (min_price={min_price}): {order_id} "
-            f"filled={filled} proceeds={proceeds}"
+            f"filled={filled} proceeds={proceeds} (fee {fee:.4f})"
         )
         if filled < amount:
             logger.warning(

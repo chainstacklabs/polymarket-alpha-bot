@@ -109,7 +109,7 @@ def main() -> None:
             # For a SELL: making_amount = shares sold, taking_amount = pUSD received
             print(
                 f"sold {float(resp.making_amount):g} of {amount:g} for "
-                f"${float(resp.taking_amount):.2f} (order {resp.order_id})"
+                f"${float(resp.taking_amount):.2f} before taker fees (order {resp.order_id})"
             )
         else:
             print(f"sell rejected: {getattr(resp, 'message', resp)} (you hold both sides)")

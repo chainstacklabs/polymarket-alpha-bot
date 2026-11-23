@@ -538,6 +538,11 @@ class PositionService:
                             stub["feeSchedule"] = m["feeSchedule"]
                         self._fee_cache[mid] = stub
 
+    def fee_stub(self, market_id: str) -> dict:
+        """A market's `feesEnabled` / `feeSchedule` (fee-free if unknown)."""
+        self._bulk_fetch_fee_stubs([market_id])
+        return self._fee_cache.get(market_id, {"feesEnabled": False})
+
     def _calculate_state(
         self,
         target_wanted: float,
