@@ -2,14 +2,15 @@
 Transfer USDC, USDC.e, and pUSD to Another Wallet
 =================================================
 
-Transfers all stablecoins (native USDC, USDC.e, pUSD) from the local wallet
-to a specified address.
+Transfers all stablecoins (native USDC, USDC.e, pUSD) held by the signing
+key (POLY_PK) itself to a target address; --pol moves its POL. Funds in the
+deposit wallet aren't touched: move those with the SDK's ``transfer_erc20``.
+Previews and asks to confirm unless --yes.
 
 USAGE:
     uv run --frozen --project backend experiments/trading/04_transfer_tokens.py <target_address>
 """
 
-import json
 import sys
 import time
 import os
@@ -24,8 +25,7 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-WALLET_PATH = Path(__file__).parent / ".wallet.local.json"
-RPC_URL = os.environ["CHAINSTACK_NODE"]
+RPC_URL = os.environ.get("CHAINSTACK_NODE", "")
 
 # Token addresses
 USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
@@ -62,14 +62,21 @@ ERC20_ABI = [
 def get_web3():
     from web3 import Web3
 
+    if not RPC_URL:
+        print("ERROR: set CHAINSTACK_NODE (Polygon RPC) in .env or the environment")
+        sys.exit(1)
     return Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={"timeout": 60}))
 
 
 def load_wallet() -> dict:
-    if not WALLET_PATH.exists():
-        print("ERROR: Wallet not found. Run 01_setup_wallet.py first")
+    """Signing key from POLY_PK, as in 01_setup_wallet.py and 03_buy_position.py."""
+    from eth_account import Account
+
+    pk = os.environ.get("POLY_PK")
+    if not pk:
+        print("ERROR: set POLY_PK (the signing key)")
         sys.exit(1)
-    return json.loads(WALLET_PATH.read_text())
+    return {"address": Account.from_key(pk).address, "private_key": pk}
 
 
 # =============================================================================
@@ -84,7 +91,11 @@ def main():
         print("Usage: uv run --frozen --project backend experiments/trading/04_transfer_tokens.py <target_address> [--yes]")
         sys.exit(1)
 
-    target_address = Web3.to_checksum_address(sys.argv[1])
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not args:
+        print("ERROR: No target address provided")
+        sys.exit(1)
+    target_address = Web3.to_checksum_address(args[0])
     skip_confirm = "--yes" in sys.argv
 
     wallet = load_wallet()

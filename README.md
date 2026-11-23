@@ -84,7 +84,7 @@ Polymarket trades from a **deposit wallet**: a smart wallet owned by your signin
 2. Add a Relayer API key, created at polymarket.com/settings?tab=api-keys while signed in with that key's wallet.
 3. Deploy the deposit wallet (free), then send pUSD to it.
 
-Holding USDC.e? Wrap it 1:1 into pUSD with [`experiments/trading/02_wrap_to_pusd.py`](experiments/trading/02_wrap_to_pusd.py).
+Holding USDC.e? Wrap it 1:1 into pUSD straight into the deposit wallet with [`experiments/trading/02_wrap_to_pusd.py`](experiments/trading/02_wrap_to_pusd.py) (`WRAP_TO=<deposit wallet>`).
 
 ## Commands
 
@@ -122,7 +122,6 @@ Standalone scripts that don't import from `backend/`:
 | [`experiments/`](experiments/) | One script per pipeline step, from fetching events to streaming prices |
 | [`experiments/trading/`](experiments/trading/) | Deposit wallet setup, USDC.e ↔ pUSD wrapping, buying, token transfers |
 | [`experiments/onchain-otc/`](experiments/onchain-otc/) | Trading without the order book (split/merge, escrow, intents) on a Polygon fork; standard (v1) markets only |
-| [`experiments/verify/`](experiments/verify/) | Probes for the deposit-wallet flow, for when onboarding breaks |
 
 ## Contributing
 

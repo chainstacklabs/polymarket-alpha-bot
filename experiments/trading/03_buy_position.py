@@ -2,39 +2,46 @@
 Buy a Position via Deposit Wallet (sigtype 3)
 =============================================
 
-Standalone demo of the current production buy flow:
+Standalone demo of the production buy flow (backend/core/trading/executor.py):
     1. Split pUSD into YES + NO (gasless relayer batch)
-    2. Sell the unwanted side via a sigtype-3 FAK order (ERC-1271 / POLY_1271)
-    3. Result: you hold only the wanted side
+    2. Sell the unwanted side with a FAK order and a price floor
+    3. Result: you hold the wanted side
 
-The deposit wallet is deployed automatically on ``SecureClient.create()`` and
-must already hold pUSD (>= the trade amount). Polymarket enforces a $1 minimum
-order size, so the unwanted side is only sold when its value clears $1.
+The deposit wallet must already hold pUSD (>= AMOUNT). Polymarket's minimums
+apply to the sale: the market's `orderMinSize` shares (usually 5) and $1.
+Without --yes it only prints the plan.
 
 USAGE (from the repo root):
     POLY_PK=0x.. POLY_RELAYER_API_KEY=.. POLY_RELAYER_ADDRESS=0x.. \
     MARKET_ID=.. SIDE=YES AMOUNT=5 \
-      uv run --frozen --project backend experiments/trading/03_buy_position.py
+      uv run --frozen --project backend experiments/trading/03_buy_position.py [--yes]
 """
 
 import json
 import os
+import sys
 
 import httpx
 from polymarket import SecureClient
 from polymarket.auth import RelayerApiKey
 
 MIN_ORDER_USD = 1.0
+DEFAULT_MIN_SHARES = 5.0
+SLIPPAGE = 0.10  # sell no lower than 10% under the current price
+
+
+def sell_floor(price: float, tick: float = 0.01) -> float:
+    """Worst accepted price: SLIPPAGE under `price`, at least one tick."""
+    return round(max(price * (1 - SLIPPAGE), tick), 2)
 
 
 def main() -> None:
     market_id = os.environ["MARKET_ID"]
     side = os.environ.get("SIDE", "YES").upper()
-    amount = float(os.environ.get("AMOUNT", "2"))
+    amount = float(os.environ.get("AMOUNT", "5"))
+    execute = "--yes" in sys.argv
 
-    m = httpx.get(
-        f"https://gamma-api.polymarket.com/markets/{market_id}", timeout=30
-    ).json()
+    m = httpx.get(f"https://gamma-api.polymarket.com/markets/{market_id}", timeout=30).json()
     # Trading IDs by protocol: v1 clobTokenIds (JSON string), v2 positionIds
     # (list). The SDK routes split + order signing for both.
     if m.get("version") == "v2":
@@ -44,10 +51,23 @@ def main() -> None:
     else:
         raise SystemExit(f"Market {market_id}: unsupported protocol {m.get('version')!r}")
     prices = json.loads(m["outcomePrices"])
-    condition_id = m["conditionId"]
     yes, no = tokens[0], tokens[1]
     unwanted = no if side == "YES" else yes
     unwanted_price = float(prices[1] if side == "YES" else prices[0])
+    min_shares = float(m.get("orderMinSize") or DEFAULT_MIN_SHARES)
+    floor = sell_floor(unwanted_price)
+
+    # A split of $N mints N shares of each side; sell the unwanted N.
+    sell = amount >= min_shares and amount * floor >= MIN_ORDER_USD
+    print(f"market:  {m.get('question')} ({m.get('version')})")
+    print(f"split:   ${amount:g} pUSD -> {amount:g} YES + {amount:g} NO")
+    if sell:
+        print(f"sell:    {amount:g} {'NO' if side == 'YES' else 'YES'} at >= {floor} (now {unwanted_price})")
+    else:
+        print(f"sell:    skipped (below {min_shares:g} shares or ${MIN_ORDER_USD:g}); you keep both sides")
+    if not execute:
+        print("\nPreview only. Re-run with --yes to spend.")
+        return
 
     client = SecureClient.create(
         private_key=os.environ["POLY_PK"],
@@ -56,28 +76,25 @@ def main() -> None:
             address=os.environ["POLY_RELAYER_ADDRESS"],
         ),
     )
-    print(f"deposit wallet: {client.wallet}")
+    print(f"\ndeposit wallet: {client.wallet}")
 
-    # 1. Split (gasless relayer batch)
-    handle = client.split_position(condition_id=condition_id, amount=int(amount * 1e6))
+    handle = client.split_position(condition_id=m["conditionId"], amount=int(amount * 1e6))
     print(f"split tx: {handle.wait().transaction_hash}")
 
-    # 2. Sell unwanted side (sigtype-3 FAK), respecting the $1 minimum
-    unwanted_value = amount * unwanted_price
-    if unwanted_value >= MIN_ORDER_USD:
+    if sell:
         resp = client.place_market_order(
-            asset_id=unwanted,
-            side="SELL",
-            shares=amount,
-            min_price=round(unwanted_price * 0.9, 2),
-            order_type="FAK",
+            asset_id=unwanted, side="SELL", shares=amount, min_price=floor, order_type="FAK"
         )
-        ok = getattr(resp, "ok", False)
-        print(f"sell unwanted: {'filled ' + resp.order_id if ok else getattr(resp, 'message', resp)}")
-    else:
-        print(f"sell skipped: unwanted ${unwanted_value:.2f} below ${MIN_ORDER_USD} min")
+        if getattr(resp, "ok", False):
+            # For a SELL: making_amount = shares sold, taking_amount = pUSD received
+            print(
+                f"sold {float(resp.making_amount):g} of {amount:g} for "
+                f"${float(resp.taking_amount):.2f} (order {resp.order_id})"
+            )
+        else:
+            print(f"sell rejected: {getattr(resp, 'message', resp)} (you hold both sides)")
 
-    print(f"done — holding {side}")
+    print(f"done: holding {side}")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@ Key minted for that same EOA (decision B). The SDK handles the deposit-wallet
 deploy, ERC-1271 (POLY_1271) order signing, and gasless relayer batches for
 split/merge/redeem — we just orchestrate it.
 
-Flow proven end-to-end in ``experiments/verify/03_sigtype3_spike.py``.
 """
 
 from typing import Optional
