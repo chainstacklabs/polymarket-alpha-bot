@@ -117,9 +117,32 @@ For the hedge to work:
 
 {pairs_text}
 
+## FIRST: TRY TO MAKE BOTH POSITIONS LOSE (MOST IMPORTANT)
+
+For each pair, actively try to construct ONE concrete, plausible outcome in
+which the TARGET position loses AND the COVER position also loses.
+
+- If you can describe such an outcome, the pair is INVALID. Put the outcome
+  in rejection_reason (e.g. "If 5,000 cases: target YES (>=12,500) loses and
+  cover NO (>=2,300) loses").
+- The pair is valid ONLY if no such outcome exists.
+- A true implication is not enough: the cover must be on the side that WINS
+  when the target loses. Check the positions, not just the relationship.
+
+Classic traps:
+- Threshold ladders: target YES ">=12,500 cases", cover NO ">=2,300 cases".
+  5,000 cases: target loses, cover loses -> INVALID.
+- Wrong direction: target YES "10.0+ earthquake", cover NO "9.0+ earthquake".
+  A 9.5 quake: target loses, cover loses -> INVALID.
+- Wrong side: target NO "Trump attends the World Cup final", cover YES
+  "Trump attends 0 World Cup matches". If he attends the final, target NO
+  loses and "0 matches" loses -> INVALID.
+- Broader vs narrower: target YES "new coronavirus pandemic", cover NO "new
+  pandemic". A flu pandemic: target loses, cover (NO pandemic) loses -> INVALID.
+
 ## VALIDATION CRITERIA
 
-For each pair, assess:
+For each pair, also assess:
 
 ### 1. TEMPORAL COHERENCE
 - Does the cover resolve at or AFTER when coverage is needed?

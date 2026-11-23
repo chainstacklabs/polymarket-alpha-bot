@@ -33,6 +33,7 @@ from loguru import logger
 
 from core.fees import compute_fee
 from core.state import PipelineState
+from core.steps.hedge_checks import numeric_both_lose
 
 # =============================================================================
 # CONFIGURATION
@@ -299,6 +300,13 @@ def compute_summary(portfolios: list[dict]) -> dict:
 # =============================================================================
 
 
+def passes_hedge_checks(portfolio: dict) -> bool:
+    """Price-independent checks for a stored portfolio: no numeric outcome
+    where both legs lose. (Cost isn't checked here: prices move, and the
+    dashboard's "profitable only" filter hides unprofitable portfolios.)"""
+    return numeric_both_lose(portfolio) is None
+
+
 def build_and_save_portfolios(
     validated_pairs: list[dict],
     state: PipelineState,
@@ -347,7 +355,15 @@ def merge_and_save_portfolios(
     """
     new_portfolios, _ = build_portfolios(new_validated_pairs, max_cost)
     new_ids = {p["pair_id"] for p in new_portfolios}
-    kept = [p for p in state.get_portfolios() if p.get("pair_id") not in new_ids]
+    existing = [p for p in state.get_portfolios() if p.get("pair_id") not in new_ids]
+    # Earlier runs' portfolios never pass through validation again, so apply
+    # the price-independent checks to them here.
+    kept = [p for p in existing if passes_hedge_checks(p)]
+    if len(kept) < len(existing):
+        logger.info(
+            f"Portfolios: dropped {len(existing) - len(kept)} earlier portfolio(s) "
+            "with an outcome where both legs lose"
+        )
 
     portfolios = new_portfolios + kept
     portfolios.sort(key=lambda p: (p["tier"], -p["coverage"]))

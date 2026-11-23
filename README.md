@@ -31,7 +31,7 @@ For a good experience, you'll need to add an LLM from OpenRouter and an RPC node
 
 1. **Groups** - Fetches markets from Polymarket (e.g., "Presidential Election Winner")
 2. **Implications** *(LLM)* - Extracts logical relationships between groups
-3. **Validation** *(LLM)* - Validates implications at the individual market level
+3. **Validation** - Rule-based checks reject pairs where some outcome makes both legs lose (e.g. number ladders) and skip pairs costing $1 or more; an LLM then validates the rest at the individual market level, looking for a both-lose scenario
 4. **Portfolios** - Computes cost and expected profit for validated pairs using live market prices
 5. **Positions** - Tracks your purchased position pairs
 

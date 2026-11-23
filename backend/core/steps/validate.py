@@ -15,9 +15,13 @@ Example problems:
     If election is held in November, the "called by March" market
     already resolved in March - hedge expired 8 months early.
 
+Deterministic pre-checks (see hedge_checks.py) run on every candidate,
+cached or not: same market/group, deadlines, cost under $1, and numeric
+ladders where some value makes both legs lose.
+
 Caching:
-    Validated pairs are cached permanently in SQLite.
-    pair_id is deterministic (hash of target+cover+positions).
+    Validated pairs are cached in SQLite by pair_id (hash of
+    target+cover+positions) and reused until VALIDATION_PROMPT_VERSION changes.
 """
 
 import os
@@ -28,6 +32,7 @@ from loguru import logger
 
 from core.models import LLMAuthError, get_llm_client
 from core.state import PipelineState
+from core.steps.hedge_checks import MAX_TOTAL_COST, numeric_both_lose, pair_total_cost
 from core.utils import extract_json_from_response
 
 # =============================================================================
@@ -49,6 +54,10 @@ DEFAULT_VALIDATION_MODEL = os.getenv("VALIDATION_MODEL")
 if not DEFAULT_VALIDATION_MODEL:
     raise ValueError("VALIDATION_MODEL environment variable not set")
 
+
+# Bump when VALIDATION_PROMPT changes in a way that should re-check cached
+# verdicts. 2 = adversarial both-lose search (issue #62).
+VALIDATION_PROMPT_VERSION = 2
 
 # =============================================================================
 # PROMPT
@@ -76,9 +85,32 @@ For the hedge to work:
 
 {pairs_text}
 
+## FIRST: TRY TO MAKE BOTH POSITIONS LOSE (MOST IMPORTANT)
+
+For each pair, actively try to construct ONE concrete, plausible outcome in
+which the TARGET position loses AND the COVER position also loses.
+
+- If you can describe such an outcome, the pair is INVALID. Put the outcome
+  in rejection_reason (e.g. "If 5,000 cases: target YES (>=12,500) loses and
+  cover NO (>=2,300) loses").
+- The pair is valid ONLY if no such outcome exists.
+- A true implication is not enough: the cover must be on the side that WINS
+  when the target loses. Check the positions, not just the relationship.
+
+Classic traps:
+- Threshold ladders: target YES ">=12,500 cases", cover NO ">=2,300 cases".
+  5,000 cases: target loses, cover loses -> INVALID.
+- Wrong direction: target YES "10.0+ earthquake", cover NO "9.0+ earthquake".
+  A 9.5 quake: target loses, cover loses -> INVALID.
+- Wrong side: target NO "Trump attends the World Cup final", cover YES
+  "Trump attends 0 World Cup matches". If he attends the final, target NO
+  loses and "0 matches" loses -> INVALID.
+- Broader vs narrower: target YES "new coronavirus pandemic", cover NO "new
+  pandemic". A flu pandemic: target loses, cover (NO pandemic) loses -> INVALID.
+
 ## VALIDATION CRITERIA
 
-For each pair, assess:
+For each pair, also assess:
 
 ### 1. TEMPORAL COHERENCE
 - Does the cover resolve at or AFTER when coverage is needed?
@@ -144,7 +176,7 @@ INVALID: Target="Election called by March", Cover="Election held by June 30" wit
       "temporal_valid": true/false,
       "logical_valid": true/false,
       "entity_valid": true/false,
-      "rejection_reason": "null if valid, else explanation",
+      "rejection_reason": "null if valid, else the both-lose outcome or other explanation",
       "brief_analysis": "1-2 sentence reasoning"
     }}
   ]
@@ -179,6 +211,32 @@ BE STRICT. False positives cost money. When in doubt, set is_valid=false.
 # =============================================================================
 
 
+def skip_costly_pairs(pairs: list[dict]) -> tuple[list[dict], int]:
+    """Drop pairs costing $1 or more before LLM validation.
+
+    A valid cover pays $1, so at or above that cost there's no guaranteed
+    profit and validating it is wasted LLM spend. Applied only to pairs about
+    to be validated: already-validated pairs stay, since prices move and the
+    dashboard can filter unprofitable portfolios.
+    """
+    kept = []
+    for pair in pairs:
+        cost = pair_total_cost(pair)
+        if cost is None or cost < MAX_TOTAL_COST:
+            kept.append(pair)
+    return kept, len(pairs) - len(kept)
+
+
+def empty_pre_filter_stats() -> dict:
+    return {
+        "same_market": 0,
+        "same_group": 0,
+        "deadline_mismatch": 0,
+        "cost_not_below_one": 0,
+        "numeric_both_lose": 0,
+    }
+
+
 def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
     """
     Apply deterministic pre-filters to reject pairs that would always fail.
@@ -187,6 +245,10 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
     - Same market: target and cover are the same market
     - Same group: target and cover are from the same event group
     - Deadline coherence: based on relationship type (direct vs contrapositive)
+    - Numeric ladders: no value of a shared number may make both legs lose
+
+    Cost is checked separately (skip_costly_pairs), only for pairs about to
+    be sent to the LLM.
 
     Deadline rules by relationship type:
     - Direct (implies): Prerequisite chains require matching deadlines
@@ -201,11 +263,7 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
         Tuple of (filtered_pairs, rejection_stats)
     """
     filtered = []
-    rejections = {
-        "same_market": 0,
-        "same_group": 0,
-        "deadline_mismatch": 0,
-    }
+    rejections = empty_pre_filter_stats()
 
     for pair in pairs:
         # Check 1: Same market (meaningless hedge)
@@ -226,6 +284,13 @@ def pre_filter_pairs(pairs: list[dict]) -> tuple[list[dict], dict]:
                 f"{pair.get('cover_question', '?')[:30]}: {reason}"
             )
             rejections["deadline_mismatch"] += 1
+            continue
+
+        # Check 4: Numeric ladders on the same question (bin math)
+        both_lose = numeric_both_lose(pair)
+        if both_lose:
+            logger.debug(f"Pre-filter rejecting pair: {both_lose}")
+            rejections["numeric_both_lose"] += 1
             continue
 
         filtered.append(pair)
@@ -507,22 +572,28 @@ async def validate_pairs(
     """
     model = llm_model or DEFAULT_VALIDATION_MODEL
 
-    # Separate cached vs new pairs
+    # Structural pre-filters (no LLM, price-independent) run on every
+    # candidate, cached or not.
+    total_candidates = len(candidate_pairs)
+    pre_filter_rejections = empty_pre_filter_stats()
+    if candidate_pairs:
+        candidate_pairs, pre_filter_rejections = pre_filter_pairs(candidate_pairs)
+
+    # Separate cached vs new pairs. Verdicts from an older prompt are re-checked.
     pairs_to_validate = []
     cached_validations = {}
 
     for pair in candidate_pairs:
         pair_id = pair["pair_id"]
         cached = state.get_validated_pair(pair_id)
-        if cached:
+        if cached and cached.get("prompt_version") == VALIDATION_PROMPT_VERSION:
             cached_validations[pair_id] = cached
         else:
             pairs_to_validate.append(pair)
 
-    # Apply pre-filters to new pairs (skip pairs that would always fail)
-    pre_filter_rejections = {"same_market": 0, "same_group": 0, "deadline_mismatch": 0}
-    if pairs_to_validate:
-        pairs_to_validate, pre_filter_rejections = pre_filter_pairs(pairs_to_validate)
+    # Only spend LLM calls on pairs that could make money.
+    pairs_to_validate, too_costly = skip_costly_pairs(pairs_to_validate)
+    pre_filter_rejections["cost_not_below_one"] = too_costly
 
     pre_filtered_count = sum(pre_filter_rejections.values())
     logger.info(
@@ -542,7 +613,7 @@ async def validate_pairs(
                 validated.append({**pair, "_validation": cached})
 
         return validated, {
-            "total_candidates": len(candidate_pairs),
+            "total_candidates": total_candidates,
             "from_cache": len(cached_validations),
             "pre_filtered": pre_filtered_count,
             "pre_filter_reasons": pre_filter_rejections,
@@ -621,7 +692,9 @@ async def validate_pairs(
             async with lock:
                 all_validations.update(validations)
                 if pairs_to_cache:
-                    state.add_validated_pairs(pairs_to_cache, model)
+                    state.add_validated_pairs(
+                        pairs_to_cache, model, prompt_version=VALIDATION_PROMPT_VERSION
+                    )
                     new_validated_pairs.extend(pairs_to_cache)
 
                 completed_batches += 1
@@ -668,22 +741,22 @@ async def validate_pairs(
                 rejection_reasons["low_score"] += 1
 
     summary = {
-        "total_candidates": len(candidate_pairs),
+        "total_candidates": total_candidates,
         "from_cache": len(cached_validations),
         "pre_filtered": pre_filtered_count,
         "pre_filter_reasons": pre_filter_rejections,
         "new_validated": len(new_validated_pairs),
         "validated_count": len(validated),
-        "rejected_count": len(candidate_pairs) - len(validated),
+        "rejected_count": total_candidates - len(validated),
         "rejection_reasons": rejection_reasons,
-        "retention_rate": round(len(validated) / len(candidate_pairs), 3)
-        if candidate_pairs
+        "retention_rate": round(len(validated) / total_candidates, 3)
+        if total_candidates
         else 0,
         "model_used": model,
     }
 
     logger.info(
-        f"Validated: {len(validated)}/{len(candidate_pairs)} "
+        f"Validated: {len(validated)}/{total_candidates} "
         f"({summary['retention_rate']:.1%} retention)"
     )
 
