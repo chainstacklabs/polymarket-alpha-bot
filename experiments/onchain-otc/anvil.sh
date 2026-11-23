@@ -2,7 +2,7 @@
 # Start a local Polygon fork via Anvil for the on-chain OTC experiments.
 #
 # Usage (from the repo root):
-#   ./experiments/onchain-otc/anvil.sh                        # CHAINSTACK_NODE from .env
+#   ./experiments/onchain-otc/anvil.sh                        # CHAINSTACK_NODE (env or .env)
 #   FORK_URL=https://... ./experiments/onchain-otc/anvil.sh   # override the RPC
 #
 # Needs an archive-capable Polygon RPC. Anvil serves http://127.0.0.1:8545 with
@@ -14,9 +14,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Read only CHAINSTACK_NODE from .env (don't export every secret in it).
-if [[ -z "${FORK_URL:-}" && -f "$ROOT_DIR/.env" ]]; then
-    FORK_URL="$(grep -E '^CHAINSTACK_NODE=' "$ROOT_DIR/.env" | tail -n 1 | cut -d= -f2- | tr -d '"'"'")"
+# FORK_URL, else CHAINSTACK_NODE from the environment, else CHAINSTACK_NODE
+# from .env (read on its own; the rest of .env isn't exported to anvil).
+FORK_URL="${FORK_URL:-${CHAINSTACK_NODE:-}}"
+if [[ -z "$FORK_URL" && -f "$ROOT_DIR/.env" ]]; then
+    FORK_URL="$(grep -E '^CHAINSTACK_NODE=' "$ROOT_DIR/.env" | tail -n 1 | cut -d= -f2- | tr -d '"'"'" || true)"
 fi
 : "${FORK_URL:?Set CHAINSTACK_NODE in .env or FORK_URL (archive Polygon RPC)}"
 
