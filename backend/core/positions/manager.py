@@ -4,21 +4,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
-from web3 import Web3
 from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
 from core.paths import GAMMA_API_BASE_URL
-from core.positions.redeem import (
-    CTF_PAYOUT_ABI,
-    OUTCOME_INDEX,
-    POSITION_MANAGER_PAYOUT_ABI,
-    v1_payout_rates,
-    v2_payout_rate,
-)
 from core.positions.service import LEG_ROLES, PositionService, legacy_sale_estimate
 from core.positions.storage import PositionStorage
-from core.wallet.contracts import CONTRACTS
 from core.wallet.manager import WalletManager
 
 
@@ -580,34 +571,8 @@ class PositionManager:
             )
         return client
 
-    def _leg_rates(
-        self, entry: dict, side: str, condition_id: str
-    ) -> Optional[tuple[float, float]]:
-        """(wanted, unwanted) pUSD per share for a resolved leg; None if unresolved."""
-        w3 = self.service._get_web3()
-        if (entry.get(f"{side}_protocol") or "v1") == "v2":
-            pm = w3.eth.contract(
-                address=Web3.to_checksum_address(CONTRACTS["POSITION_MANAGER"]),
-                abi=POSITION_MANAGER_PAYOUT_ABI,
-            )
-            rates = [
-                v2_payout_rate(pm, self.service.leg_token_id(entry, side, role))
-                for role in ("wanted", "unwanted")
-            ]
-            if rates[0] is None or rates[1] is None:
-                return None
-            return rates[0], rates[1]
-        ctf = w3.eth.contract(
-            address=Web3.to_checksum_address(CONTRACTS["CTF"]), abi=CTF_PAYOUT_ABI
-        )
-        rates = v1_payout_rates(ctf, condition_id)
-        if rates is None:
-            return None
-        i = OUTCOME_INDEX[entry[f"{side}_position"]]
-        return rates[i], rates[1 - i]
-
     def _market_credits(
-        self, market_id: str, condition_id: str, own: dict, own_balances: dict
+        self, market_id: str, own: dict, own_balances: dict
     ) -> list[tuple[str, str, float]]:
         """Every stored leg on this market: (position_id, side, payout).
 
@@ -629,7 +594,7 @@ class PositionManager:
                 unwanted = balances[f"{side}_unwanted"]
                 if wanted + unwanted < 0.01:
                     continue
-                rates = self._leg_rates(entry, side, condition_id)
+                rates = self.service.leg_payout_rates(entry, side)
                 if rates is None:
                     continue
                 payout = wanted * rates[0] + unwanted * rates[1]
@@ -657,19 +622,18 @@ class PositionManager:
                 continue
             market_id = entry[f"{side}_market_id"]
             try:
-                market = await self._get_market_info(market_id)
+                condition_id = self.service.condition_id(market_id)
             except Exception as e:
                 notes.append(f"{side}: failed to fetch market info: {e}")
                 continue
-            condition_id = market.get("conditionId") or ""
             if not condition_id:
                 notes.append(f"{side}: could not fetch market condition ID")
                 continue
-            if self._leg_rates(entry, side, condition_id) is None:
+            if self.service.leg_payout_rates(entry, side) is None:
                 notes.append(f"{side}: market not resolved yet")
                 continue
 
-            credits = self._market_credits(market_id, condition_id, entry, balances)
+            credits = self._market_credits(market_id, entry, balances)
             if sum(c[2] for c in credits) > 0:
                 try:
                     handle = self._client().redeem_positions(condition_id=condition_id)

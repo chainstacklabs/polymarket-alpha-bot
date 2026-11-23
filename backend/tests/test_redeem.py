@@ -79,13 +79,11 @@ def _manager(tmp_path, entries, balances, rates):
     storage.save_all(entries)
     service = MagicMock()
     service.allocated_balances.side_effect = lambda e: balances[e["position_id"]]
+    service.condition_id.side_effect = lambda market_id: f"0xcond-{market_id}"
+    service.leg_payout_rates.side_effect = lambda entry, side: rates[
+        entry[f"{side}_market_id"]
+    ]
     pm = PositionManager(MagicMock(), storage, service)
-
-    async def market_info(market_id):
-        return {"conditionId": f"0xcond-{market_id}"}
-
-    pm._get_market_info = market_info
-    pm._leg_rates = lambda entry, side, condition_id: rates[entry[f"{side}_market_id"]]
     client = create_autospec(SecureClient, instance=True)
     client.redeem_positions.return_value.wait.return_value.transaction_hash = "0xr"
     pm._client = lambda: client
@@ -168,19 +166,147 @@ def test_shared_market_credits_each_position_its_part(tmp_path):
     assert storage.get("b")["target_wanted_shares"] == 0.0
 
 
-def test_leg_rates_v1_maps_no_position(tmp_path):
+def _rates_service(contract):
+    from core.positions.service import PositionService
+
+    svc = PositionService(storage=MagicMock(), wallet=MagicMock())
+    w3 = MagicMock()
+    w3.eth.contract.return_value = contract
+    svc._get_web3 = lambda: w3
+    svc.condition_id = lambda market_id: "0x" + "ab" * 32
+    return svc
+
+
+def test_leg_rates_v1_maps_no_position():
     # A NO leg's wanted rate is the NO numerator (index 1).
-    service = MagicMock()
-    service._get_web3.return_value.eth.contract.return_value = _ctf(1, [1, 0])
-    pm = PositionManager(MagicMock(), MagicMock(), service)
+    svc = _rates_service(_ctf(1, [1, 0]))
     entry = _entry("a") | {"target_position": "NO"}
-    assert pm._leg_rates(entry, "target", "0x" + "ab" * 32) == (0.0, 1.0)
+    assert svc.leg_payout_rates(entry, "target") == (0.0, 1.0)
 
 
-def test_leg_rates_v2_unresolved(tmp_path):
-    service = MagicMock()
-    contract = service._get_web3.return_value.eth.contract.return_value
-    contract.functions.getPayout.return_value.call.side_effect = ContractLogicError("x")
-    service.leg_token_id.return_value = "123"
-    pm = PositionManager(MagicMock(), MagicMock(), service)
-    assert pm._leg_rates(_entry("a", protocol="v2"), "target", "0xc") is None
+def test_leg_rates_v2_unresolved():
+    pm = MagicMock()
+    pm.functions.getPayout.return_value.call.side_effect = ContractLogicError("x")
+    svc = _rates_service(pm)
+    assert svc.leg_payout_rates(_entry("a", protocol="v2"), "target") is None
+
+
+def test_resolved_rates_are_cached():
+    ctf = _ctf(1, [1, 0])
+    svc = _rates_service(ctf)
+    for _ in range(3):
+        svc.leg_payout_rates(_entry("a"), "target")
+    assert ctf.functions.payoutDenominator.call_count == 1
+
+
+# ── valuation: resolved legs are worth their payout ──────────────────────
+
+
+def _pair(**overrides) -> dict:
+    """A $1-per-side pair that kept both sides (skip_clob_sell)."""
+    base = dict(
+        position_id="pos",
+        pair_id="pair",
+        entry_time="2026-11-23T20:20:00Z",
+        entry_amount_per_side=1.0,
+        entry_total_cost=2.0,
+        target_market_id="t",
+        target_position="YES",
+        target_token_id="111",
+        target_unwanted_token_id="112",
+        target_question="T?",
+        target_entry_price=0.5,
+        cover_market_id="c",
+        cover_position="YES",
+        cover_token_id="221",
+        cover_unwanted_token_id="222",
+        cover_question="C?",
+        cover_entry_price=0.5,
+        target_split_tx="0xs1",
+        cover_split_tx="0xs2",
+        target_sell_proceeds=0.0,
+        cover_sell_proceeds=0.0,
+        target_wanted_shares=1.0,
+        target_unwanted_shares=1.0,
+        cover_wanted_shares=1.0,
+        cover_unwanted_shares=1.0,
+        realized_proceeds=0.0,
+    )
+    base.update(overrides)
+    return base
+
+
+def _service(tmp_path, entry: dict, chain: list[float], rates: dict):
+    from core.positions.service import PositionService
+
+    storage = PositionStorage(tmp_path / "positions.json")
+    storage.save_all([entry])
+    svc = PositionService(storage=storage, wallet=MagicMock())
+    svc._backfill_ctf_ids = lambda entries: None
+    svc._bulk_fetch_fee_stubs = lambda ids: None
+    svc._get_balances_batch = lambda tokens, protocols=None: list(chain)
+    svc.leg_payout_rates = lambda e, side: rates[side]
+    return svc
+
+
+def test_auto_redeemed_legs_are_valued_at_payout(tmp_path):
+    # Polymarket's auto-redeem operator emptied the wallet: chain balances are
+    # 0, but each leg's YES+NO pair paid $1. P&L must be 0, not -$2.
+    svc = _service(
+        tmp_path, _pair(), [0.0] * 4, {"target": (0.0, 1.0), "cover": (1.0, 0.0)}
+    )
+    p = svc.get_position("pos")
+    assert p.current_value == pytest.approx(2.0)
+    assert p.pnl == pytest.approx(0.0)
+    assert p.target_resolved and p.cover_resolved
+    assert p.state == "complete"
+
+
+def test_resolved_loser_is_worth_zero_not_last_price(tmp_path):
+    # Only the losing YES is left on the cover leg (its NO was auto-redeemed):
+    # value is the $1 the pair paid, not 1 YES at the last ~0.5 price.
+    entry = _pair(target_wanted_shares=0.0, target_unwanted_shares=0.0)
+    svc = _service(
+        tmp_path, entry, [0.0, 0.0, 1.0, 0.0], {"target": None, "cover": (0.0, 1.0)}
+    )
+    p = svc.get_position("pos")
+    assert p.current_value == pytest.approx(1.0)
+    assert not p.target_resolved and p.cover_resolved
+
+
+def test_app_redeem_is_not_counted_twice(tmp_path):
+    # After our own redeem: shares cleared, payout in realized_proceeds.
+    entry = _pair(
+        target_wanted_shares=0.0,
+        target_unwanted_shares=0.0,
+        cover_wanted_shares=0.0,
+        cover_unwanted_shares=0.0,
+        realized_proceeds=2.0,
+    )
+    svc = _service(
+        tmp_path, entry, [0.0] * 4, {"target": (0.0, 1.0), "cover": (1.0, 0.0)}
+    )
+    assert svc.get_position("pos").current_value == pytest.approx(2.0)
+
+
+def test_worthless_leftover_on_resolved_leg_is_not_open(tmp_path):
+    # Live 2026-11-23: after auto-redeem only the losing YES (1 share) was
+    # left; the position stayed "partial" forever.
+    entry = _pair(target_wanted_shares=0.0, target_unwanted_shares=0.0)
+    svc = _service(
+        tmp_path,
+        entry,
+        [0.0, 0.0, 1.0, 0.0],
+        {"target": (0.0, 1.0), "cover": (0.0, 1.0)},
+    )
+    assert svc.get_position("pos").state == "complete"
+
+
+def test_unredeemed_winner_keeps_position_open(tmp_path):
+    svc = _service(
+        tmp_path,
+        _pair(),
+        [0.0, 0.0, 1.0, 0.0],
+        {"target": (0.0, 1.0), "cover": (1.0, 0.0)},
+    )
+    assert svc.get_position("pos").state != "complete"
