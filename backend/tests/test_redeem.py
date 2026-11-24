@@ -484,3 +484,14 @@ def test_relayer_wait_runs_off_the_event_loop(tmp_path):
     result = asyncio.run(pm.redeem_position("a"))
     assert result.tx_hashes == ["0xr"]
     assert threads and threads[0] is not threading.main_thread()
+
+
+def test_another_wallets_position_is_not_found(tmp_path):
+    """Like sell/merge/exit: redeeming it would spend this wallet's tokens."""
+    pm, _, client = _manager(
+        tmp_path, [_entry("a")], {"a": _bal(5, 5)}, {"m1": (1.0, 0.0)}
+    )
+    pm.service.is_mine.side_effect = lambda entry: False
+    result = asyncio.run(pm.redeem_position("a"))
+    assert result.error == "Position not found"
+    client.redeem_positions.assert_not_called()

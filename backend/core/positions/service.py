@@ -753,7 +753,7 @@ class PositionService:
         not found: sell/merge/exit start here and would trade this wallet's
         tokens for it."""
         entry = self.storage.get(position_id)
-        if not entry or not self._mine([entry]):
+        if not entry or not self.is_mine(entry):
             return None
         return self._enrich_positions([entry])[0]
 
@@ -783,6 +783,12 @@ class PositionService:
 
     def _current_wallet(self) -> str:
         return (self.wallet.deposit_wallet_address or "").lower()
+
+    def is_mine(self, entry: dict) -> bool:
+        """Whether a position belongs to the current deposit wallet (or its
+        wallet is unknown). Actions refuse the others: they would spend this
+        wallet's tokens for them."""
+        return bool(self._mine([entry]))
 
     def _mine(self, entries: list[dict]) -> list[dict]:
         """Positions of the current deposit wallet, plus ones of unknown wallet.

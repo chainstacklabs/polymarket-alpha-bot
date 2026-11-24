@@ -626,7 +626,7 @@ class PositionManager:
         sends no transaction.
         """
         entry = self.storage.get(position_id)
-        if not entry:
+        if not entry or not self.service.is_mine(entry):
             return RedeemResult(False, 0.0, [], "Position not found")
 
         balances = self.service.allocated_balances(entry)
