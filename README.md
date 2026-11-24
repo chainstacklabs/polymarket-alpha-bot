@@ -84,6 +84,8 @@ Polymarket trades from a **deposit wallet**: a smart wallet owned by your signin
 2. Add a Relayer API key, created at polymarket.com/settings?tab=api-keys while signed in with that key's wallet.
 3. Deploy the deposit wallet (free), then send pUSD to it.
 
+Lost the password? **Forgot password? Replace wallet** in the same menu moves the encrypted key aside (kept in `backend/data/`, not deleted) so you can generate or import another one. Positions are listed per deposit wallet: another wallet's positions stay on disk and show again when that wallet is imported back.
+
 Holding USDC.e? Wrap it 1:1 into pUSD straight into the deposit wallet with [`experiments/trading/02_wrap_to_pusd.py`](experiments/trading/02_wrap_to_pusd.py) (`WRAP_TO=<deposit wallet>`).
 
 ## Commands
