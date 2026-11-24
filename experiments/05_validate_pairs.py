@@ -674,11 +674,12 @@ async def complete(client: httpx.AsyncClient, model: str, prompt: str) -> str:
             data = response.json()
             choice = (data.get("choices") or [{}])[0]
             content = (choice.get("message") or {}).get("content")
-            if content and content.strip():
+            finish = choice.get("finish_reason")
+            # finish_reason "error": a provider error cut the reply (a fragment).
+            if content and content.strip() and finish != "error":
                 return content
             # No text (production's rules): retry unless the budget ran out or a
             # filter blocked it; OpenRouter can also answer 200 with only an error.
-            finish = choice.get("finish_reason")
             reason = f"finish_reason={finish}"
             if data.get("error"):
                 reason += f", error: {data['error'].get('message', data['error'])}"
