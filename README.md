@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  • <a target="_blank" href="https://chainstack.com/">Homepage</a> •
-  <a target="_blank" href="https://chainstack.com/protocols/">Supported protocols</a> •
-  <a target="_blank" href="https://chainstack.com/blog/">Chainstack blog</a> •
-  <a target="_blank" href="https://docs.chainstack.com/quickstart/">Blockchain API reference</a> • <br>
-  • <a target="_blank" href="https://console.chainstack.com/user/account/create">Start for free</a> •
+  • <a target="_blank" href="https://chainstack.com/?utm_source=github&utm_medium=referral&utm_campaign=polymarket-alpha-bot">Homepage</a> •
+  <a target="_blank" href="https://chainstack.com/protocols/?utm_source=github&utm_medium=referral&utm_campaign=polymarket-alpha-bot">Supported protocols</a> •
+  <a target="_blank" href="https://chainstack.com/blog/?utm_source=github&utm_medium=referral&utm_campaign=polymarket-alpha-bot">Chainstack blog</a> •
+  <a target="_blank" href="https://docs.chainstack.com/reference/blockchain-apis?utm_source=github&utm_medium=referral&utm_campaign=polymarket-alpha-bot">Blockchain API reference</a> • <br>
+  • <a target="_blank" href="https://console.chainstack.com/sign-up?utm_source=github&utm_medium=referral&utm_campaign=polymarket-alpha-bot">Start for free</a> •
 </p>
 
 **Alphapoly** finds hedging pairs across correlated **Polymarket** markets and lets you trade them from a dashboard. An LLM pipeline groups related markets and finds where one outcome logically implies another; rule-based checks and a second LLM pass then reject pairs where both legs could lose. The dashboard streams live prices, buys a pair after showing its total cost against your balance, and tracks the P&L of your positions.
@@ -42,7 +42,7 @@
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) — it handles Python, no separate install needed
 - **Node.js 20.9+**, via [fnm](https://github.com/Schniz/fnm), nvm, or brew
 - An [OpenRouter API key](https://openrouter.ai/settings/keys) for the pipeline
-- A Polygon RPC endpoint for balances and trading — deploy a Polygon node on [Chainstack](https://console.chainstack.com/user/account/create)
+- A Polygon RPC endpoint for balances and trading — deploy a Polygon node on [Chainstack](https://console.chainstack.com/sign-up?utm_source=github&utm_medium=referral&utm_campaign=polymarket-alpha-bot)
 
 ### 2. Install and run
 
