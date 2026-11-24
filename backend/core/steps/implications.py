@@ -25,7 +25,7 @@ from typing import Callable
 
 from loguru import logger
 
-from core.models import LLMAuthError, get_llm_client
+from core.models import LLMAuthError, LLMEmptyReply, get_llm_client
 from core.state import PipelineState
 from core.utils import extract_json_from_response
 
@@ -520,6 +520,10 @@ async def extract_implications_batch(
                 except LLMAuthError:
                     # Credentials failure — don't retry or swallow, abort the run.
                     raise
+                except LLMEmptyReply as e:
+                    # complete() already retried where a retry can help.
+                    logger.error(f"{target_group['title'][:40]}: {e}")
+                    break
                 except Exception as e:
                     logger.error(
                         f"Error (attempt {attempt + 1}/{max_retries}) processing "

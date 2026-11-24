@@ -231,6 +231,10 @@ class LLMAuthError(RuntimeError):
     """OpenRouter rejected the key (401/403): abort instead of returning empties."""
 
 
+class LLMEmptyReply(RuntimeError):
+    """The model returned no text, after retries where a retry could help."""
+
+
 async def complete(client: httpx.AsyncClient, model: str, prompt: str) -> str:
     payload = {
         "model": model,
@@ -243,7 +247,22 @@ async def complete(client: httpx.AsyncClient, model: str, prompt: str) -> str:
                 f"{OPENROUTER_BASE_URL}/chat/completions", json=payload
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            data = resp.json()
+            choice = (data.get("choices") or [{}])[0]
+            content = (choice.get("message") or {}).get("content")
+            finish = choice.get("finish_reason")
+            # finish_reason "error": a provider error cut the reply (a fragment).
+            if content and content.strip() and finish != "error":
+                return content
+            # No text (production's rules): retry unless the budget ran out or a
+            # filter blocked it; OpenRouter can also answer 200 with only an error.
+            reason = f"finish_reason={finish}"
+            if data.get("error"):
+                reason += f", error: {data['error'].get('message', data['error'])}"
+            if finish not in ("length", "content_filter") and attempt < LLM_MAX_RETRIES - 1:
+                await asyncio.sleep(1)
+                continue
+            raise LLMEmptyReply(f"LLM {model} returned no text ({reason})")
         except httpx.HTTPStatusError as e:
             code = e.response.status_code
             if code == 429:
@@ -418,6 +437,10 @@ async def extract_all(
                             await asyncio.sleep(2**attempt)
                     except LLMAuthError:
                         raise
+                    except LLMEmptyReply as e:
+                        # complete() already retried where a retry can help.
+                        log.error(f"{target['title'][:40]}: {e}")
+                        break
                     except Exception as e:
                         log.error(
                             f"Error ({attempt + 1}/{ATTEMPTS}) {target['title'][:40]}: {e}"
