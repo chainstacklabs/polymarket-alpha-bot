@@ -257,7 +257,14 @@ class PositionManager:
 
         from core.trading.clob import sell_via_clob
 
-        sale = sell_via_clob(client, token_id, balance, price, slippage=slippage)
+        sale = sell_via_clob(
+            client,
+            token_id,
+            balance,
+            price,
+            slippage=slippage,
+            fee_market=self.service.fee_stub(market_id),
+        )
         filled = sale.filled > 0
 
         # Record what the exchange paid, so P&L sees the cash that replaced

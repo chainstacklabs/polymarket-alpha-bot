@@ -118,12 +118,12 @@ def test_buy_skips_sell_below_market_share_minimum():
     assert "5-share minimum" in (result.error or "")
 
 
-def test_buy_skips_sell_below_dollar_minimum():
-    # 6 shares (>= 5) but NO at 0.1 → $0.60 < $1
+def test_buy_sells_under_one_dollar():
+    # 6 shares (>= 5) of NO at 0.1 = $0.60. Polymarket's minimum is in shares;
+    # a $0.98 FAK sell filled live (2026-11-23), so no dollar floor on sells.
     market = MarketInfo(**{**_market().__dict__, "yes_price": 0.9, "no_price": 0.1})
-    client, result = _buy(6.0, market)
-    client.place_market_order.assert_not_called()
-    assert "$1.0 CLOB minimum" in (result.error or "")
+    client, _ = _buy(6.0, market)
+    client.place_market_order.assert_called_once()
 
 
 def test_market_share_minimum_read_from_gamma():

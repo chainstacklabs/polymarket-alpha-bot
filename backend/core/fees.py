@@ -16,8 +16,9 @@ V1 vs V2 (issue #36):
       computed server-side at match time via ``getClobMarketInfo()``. We never
       pass fees through `MarketOrderArgsV2` / `OrderArgsV2`.
     - Either way, `compute_fee()` is **display-only** for our bot: pre-trade
-      cost projection and unrealized-P&L exit-fee estimates. Realized P&L is
-      derived from balance deltas, which already net any actual fees paid.
+      cost projection and unrealized-P&L exit-fee estimates. Realized sale
+      proceeds are the order's taking_amount minus `taker_fee()`: the order
+      response reports the amount before fees.
 """
 
 from typing import Any
@@ -68,3 +69,20 @@ def fee_rate_display(market: dict[str, Any]) -> str | None:
     if rate is None:
         return None
     return f"{rate * 100:.1f}% taker"
+
+
+def taker_fee(shares: float, price: float, market: dict[str, Any]) -> float:
+    """Taker fee in pUSD on a fill of `shares` at `price`.
+
+    fee = shares * rate * price^exponent * (1 - price)^exponent. Matches what
+    reached the wallet on live sells (2026-11-23, sports rate 0.05 and crypto
+    rate 0.01) to the 1e-5. The size is in shares, not dollars.
+    """
+    if not is_fee_bearing(market):
+        return 0.0
+    schedule = market.get("feeSchedule") or {}
+    rate = float(schedule.get("rate", 0.0))
+    exponent = int(schedule.get("exponent", 1))
+    if shares <= 0 or price <= 0.0 or price >= 1.0:
+        return 0.0
+    return shares * rate * (price**exponent) * ((1.0 - price) ** exponent)

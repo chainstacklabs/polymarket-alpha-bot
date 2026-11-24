@@ -97,6 +97,7 @@ def _manager(storage, live) -> tuple[PositionManager, MagicMock]:
     service = MagicMock()
     service.get_position.return_value = live
     service.get_market_token_ids.return_value = ("111", "999")
+    service.fee_stub.return_value = {}  # fee-free unless a test says otherwise
     pm = PositionManager(MagicMock(), storage, service)
     client = create_autospec(SecureClient, instance=True)
     resp = MagicMock(ok=True, order_id="0xo", making_amount=10.0, taking_amount=4.6)
@@ -125,6 +126,18 @@ def test_unwanted_sale_lowers_the_leg_cost(storage):
     assert saved["target_sell_proceeds"] == 8.4
     assert saved["realized_proceeds"] == 0.0
     assert saved["target_clob_filled"] is True
+
+
+def test_wanted_sale_is_realized_net_of_taker_fee(storage):
+    pm, client = _manager(storage, _live())
+    pm.service.fee_stub.return_value = {
+        "feesEnabled": True,
+        "feeSchedule": {"exponent": 1, "rate": 0.05},
+    }
+    result = _run(pm.sell_position_tokens("pos1", "target", "wanted"), client)
+    # 10 shares filled for $4.60 (avg 0.46): fee 10 * 0.05 * 0.46 * 0.54
+    assert result.recovered_value == pytest.approx(4.6 - 0.1242)
+    assert storage.get("pos1")["realized_proceeds"] == pytest.approx(4.4758)
 
 
 def test_merge_is_realized_at_one_pusd_per_pair(storage):

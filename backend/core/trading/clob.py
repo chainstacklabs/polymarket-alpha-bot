@@ -1,14 +1,18 @@
 """Shared CLOB market sell — FAK sigtype-3 order via the polymarket-client SDK.
 
 The deposit-wallet (sigtype-3) client posts orders signed with ERC-1271
-(POLY_1271). Taker fees are computed server-side at match time. Polymarket
-enforces a $1 minimum order size — callers should not sell dust.
+(POLY_1271). Taker fees are computed server-side at match time. Polymarket's
+sell minimum is in shares (Gamma `orderMinSize`, usually 5); there is no
+dollar floor on sells.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
+
+from core.fees import taker_fee
 
 
 def _tick_decimals(tick_size: float) -> int:
@@ -17,12 +21,19 @@ def _tick_decimals(tick_size: float) -> int:
     return len(tick_str.split(".")[1]) if "." in tick_str else 0
 
 
-def compute_sell_price(price: float, slippage: float, tick_size: float = 0.01) -> float:
-    """Compute worst-case sell price with slippage, rounded to tick size."""
+def compute_sell_price(price: float, slippage: float) -> float:
+    """Worst-case sell price: `slippage` % under `price`, rounded down so it
+    never sits above the book price it came from.
+
+    On the 0.01 grid, valid on both 0.01- and 0.001-tick markets. Bids under
+    a cent exist only on 0.001-tick books, so those use the 0.001 grid.
+    """
     slippage_pct = max(10, min(50, slippage))
     raw = price * (1 - slippage_pct / 100)
-    decimals = _tick_decimals(tick_size)
-    return round(max(raw, tick_size), decimals)
+    tick = 0.01 if price >= 0.01 else 0.001
+    # round() first so float noise (0.63 / 0.01 = 62.999999) doesn't drop a tick
+    ticks = math.floor(round(raw / tick, 6))
+    return round(max(ticks, 1) * tick, _tick_decimals(tick))
 
 
 @dataclass
@@ -35,12 +46,34 @@ class ClobSell:
     error: Optional[str] = None
 
 
+def _book_price(client, token_id: str, amount: float, fallback: float) -> float:
+    """Worst price the order book pays for `amount` shares now.
+
+    The mid price can sit far above the best bid on wide books, which puts a
+    FAK floor above every bid. Estimated as FOK: a book too thin for the
+    whole amount raises (a FAK estimate would return its lowest bid and drop
+    the floor to the bottom), and then `fallback` is used, as it is for an
+    unreadable book.
+    """
+    try:
+        book = float(
+            client.estimate_market_price(
+                asset_id=token_id, side="SELL", shares=amount, order_type="FOK"
+            )
+        )
+    except Exception as e:
+        logger.warning(f"Order-book estimate failed for {token_id}: {e}")
+        return fallback
+    return book if book > 0 else fallback
+
+
 def sell_via_clob(
     client,
     token_id: str,
     amount: float,
     price: float,
     slippage: float = 10,
+    fee_market: Optional[dict] = None,
 ) -> ClobSell:
     """Sell tokens via a sigtype-3 FAK market order.
 
@@ -51,8 +84,13 @@ def sell_via_clob(
         client: Authenticated SecureClient (deposit wallet).
         token_id: Token to sell.
         amount: Number of shares to sell.
-        price: Current market price.
-        slippage: Slippage percentage (clamped to 10-50%).
+        price: Current market price; fallback when the order book can't
+            be read.
+        slippage: Slippage percentage (clamped to 10-50%), applied under
+            the order book's price for `amount` shares.
+        fee_market: Gamma market (or fee stub) with `feesEnabled` /
+            `feeSchedule`; the taker fee is taken off the proceeds. The
+            order response reports the amount before fees.
     """
     if amount <= 0 or price <= 0:
         msg = f"Invalid sell params: amount={amount}, price={price}"
@@ -60,7 +98,9 @@ def sell_via_clob(
         return ClobSell(error=msg)
 
     try:
-        min_price = compute_sell_price(price, slippage)
+        min_price = compute_sell_price(
+            _book_price(client, token_id, amount, price), slippage
+        )
         resp = client.place_market_order(
             asset_id=token_id,
             side="SELL",
@@ -79,10 +119,12 @@ def sell_via_clob(
         # taking_amount the pUSD received.
         order_id = resp.order_id
         filled = float(resp.making_amount)
-        proceeds = float(resp.taking_amount)
+        gross = float(resp.taking_amount)
+        fee = taker_fee(filled, gross / filled, fee_market or {}) if filled else 0.0
+        proceeds = round(gross - fee, 6)
         logger.info(
             f"CLOB sigtype-3 sell (min_price={min_price}): {order_id} "
-            f"filled={filled} proceeds={proceeds}"
+            f"filled={filled} proceeds={proceeds} (fee {fee:.4f})"
         )
         if filled < amount:
             logger.warning(
