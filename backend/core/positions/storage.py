@@ -80,6 +80,10 @@ class PositionEntry:
     # Positions recorded before V2 support are all v1.
     target_protocol: str = "v1"
     cover_protocol: str = "v1"
+    # Deposit wallet that received this position's split tokens (lowercase).
+    # None = not known yet (shown everywhere; decided again on each listing,
+    # from receipts read once per server run).
+    wallet: Optional[str] = None
 
 
 class PositionStorage:
@@ -302,3 +306,12 @@ class PositionStorage:
     def count(self) -> int:
         """Get total position count."""
         return len(self.load_all())
+
+    def set_wallets(self, wallets: dict[str, str]) -> None:
+        """Store the holder wallet of several positions ({position_id: wallet})."""
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") in wallets:
+                    p["wallet"] = wallets[p["position_id"]]
+            self.save_all(positions)
