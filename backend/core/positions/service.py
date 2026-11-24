@@ -657,9 +657,11 @@ class PositionService:
         return round(current_value, 4), round(pnl, 4), round(pnl_pct, 2)
 
     def get_position(self, position_id: str) -> Optional[LivePosition]:
-        """Get single position with live data."""
+        """Get single position with live data. Another wallet's position is
+        not found: sell/merge/exit start here and would trade this wallet's
+        tokens for it."""
         entry = self.storage.get(position_id)
-        if not entry:
+        if not entry or not self._mine([entry]):
             return None
         return self._enrich_positions([entry])[0]
 

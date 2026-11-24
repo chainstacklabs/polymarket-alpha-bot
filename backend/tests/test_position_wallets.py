@@ -136,3 +136,15 @@ def test_no_wallet_set_up_shows_everything(tmp_path):
     svc, _ = _service(tmp_path, [_entry("old", wallet=OLD_EOA)], {})
     svc.wallet.deposit_wallet_address = None
     assert [p.position_id for p in svc.get_all_live()] == ["old"]
+
+
+def test_get_position_hides_other_wallets(tmp_path):
+    # Sell/merge/exit start from get_position: another wallet's position
+    # would get this wallet's whole balance and sell its tokens.
+    svc, _ = _service(
+        tmp_path,
+        [_entry("mine", wallet=DEPOSIT), _entry("old", wallet=OLD_EOA)],
+        {},
+    )
+    assert svc.get_position("mine").position_id == "mine"
+    assert svc.get_position("old") is None
