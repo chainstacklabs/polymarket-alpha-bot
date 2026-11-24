@@ -109,7 +109,7 @@ Without `make`: `cd backend && uv sync && uv run python -m uvicorn server.main:a
 | `alphapoly-pipeline` | Run, debug, and manage the pipeline |
 | `alphapoly-portfolios` | List current hedging pairs |
 | `alphapoly-enter-position` | Buy a pair |
-| `alphapoly-exit-position` | Sell, merge, or exit a position |
+| `alphapoly-exit-position` | Sell, merge, exit, or redeem a position |
 | `alphapoly-feature` | Add a feature following the stack's conventions |
 | `alphapoly-experiment` | Start a standalone experiment script |
 

@@ -125,6 +125,8 @@ class PositionResponse(BaseModel):
 
     # Cost estimated from entry prices (positions from before proceeds were tracked)
     cost_estimated: bool = False
+    target_resolved: bool = False
+    cover_resolved: bool = False
 
 
 class PositionsListResponse(BaseModel):
