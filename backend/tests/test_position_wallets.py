@@ -58,6 +58,29 @@ def test_undecided_tag_is_not_stored(tmp_path):
     assert storage.get("a").get("wallet") is None  # retried next time
 
 
+def test_undecided_tag_does_not_reread_the_receipt(tmp_path):
+    """Positions refresh every few seconds; a mined receipt never changes, so
+    an undecided position must not cost a receipt read on every refresh."""
+    svc, storage = _service(
+        tmp_path, [_entry("a")], {"0xa": {OLD_EOA, "0x" + "99" * 20}}
+    )
+    svc.get_all_live()
+    svc._split_receivers = MagicMock(return_value={OLD_EOA, "0x" + "99" * 20})
+    svc.invalidate_cache()
+    assert {p.position_id for p in svc.get_all_live()} == {"a"}
+    svc._split_receivers.assert_not_called()
+    assert storage.get("a").get("wallet") is None
+
+
+def test_unmined_split_is_read_again(tmp_path):
+    svc, storage = _service(tmp_path, [_entry("a")], {"0xa": set()})
+    svc.get_all_live()  # no receipt yet
+    svc._split_receivers = lambda tx: {ADAPTER, DEPOSIT}
+    svc.invalidate_cache()
+    svc.get_all_live()
+    assert storage.get("a")["wallet"] == DEPOSIT
+
+
 def test_holder_prefers_the_current_wallet():
     # v1 deposit-wallet splits mint to an adapter, which forwards to the wallet.
     assert holder_of({ADAPTER, DEPOSIT}, DEPOSIT) == DEPOSIT
@@ -111,9 +134,10 @@ def test_untagged_positions_are_tagged_once_from_the_split(tmp_path):
     assert storage.get("a")["wallet"] == DEPOSIT
     assert storage.get("b")["wallet"] == OLD_EOA
 
-    svc._split_receivers = MagicMock(side_effect=AssertionError("re-read"))
+    svc._split_receivers = MagicMock(return_value=set())
     svc.invalidate_cache()
     svc.get_all_live()  # tags are stored: no second receipt read
+    svc._split_receivers.assert_not_called()
 
 
 def test_other_wallets_claims_do_not_split_shared_balances(tmp_path):

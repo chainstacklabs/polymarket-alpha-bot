@@ -248,6 +248,7 @@ class PositionService:
         self.wallet = wallet
         self._token_cache: dict[str, tuple[str, str]] = {}  # market_id -> (yes, no)
         self._fee_cache: dict[str, dict] = {}  # market_id -> fee market stub
+        self._receivers_by_tx: dict[str, set[str]] = {}  # split tx -> receivers
 
         # Lazy-init Web3 and contracts
         self._w3: Optional[Web3] = None
@@ -709,6 +710,15 @@ class PositionService:
         receipt = self._get_web3().eth.get_transaction_receipt(tx_hash)
         return split_receivers(receipt) if receipt else set()
 
+    def _receivers_cached(self, tx_hash: str) -> set[str]:
+        """Split receivers, read once per mined tx (a receipt never changes)."""
+        if tx_hash not in self._receivers_by_tx:
+            receivers = self._split_receivers(tx_hash)
+            if not receivers:  # not mined yet: read again next time
+                return receivers
+            self._receivers_by_tx[tx_hash] = receivers
+        return self._receivers_by_tx[tx_hash]
+
     def _tag_wallets(self, entries: list[dict]) -> None:
         """Record which wallet each untagged position's split filled (once)."""
         current = self._current_wallet()
@@ -723,7 +733,7 @@ class PositionService:
             if not txs:
                 continue
             try:
-                receivers = set().union(*(self._split_receivers(t) for t in txs))
+                receivers = set().union(*(self._receivers_cached(t) for t in txs))
             except Exception as e:
                 logger.warning(f"Wallet tag failed for {entry['position_id']}: {e}")
                 continue

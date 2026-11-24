@@ -81,7 +81,8 @@ class PositionEntry:
     target_protocol: str = "v1"
     cover_protocol: str = "v1"
     # Deposit wallet that received this position's split tokens (lowercase).
-    # None = not known yet (shown everywhere; re-checked on each listing).
+    # None = not known yet (shown everywhere; decided again on each listing,
+    # from receipts read once per server run).
     wallet: Optional[str] = None
 
 
