@@ -80,6 +80,7 @@ data/               # Pipeline outputs (gitignored)
 | `POST /wallet/import` | Import private key, optionally with relayer creds (encrypted with passphrase) |
 | `POST /wallet/set-relayer` | Attach/replace the relayer API key + address on an existing wallet |
 | `POST /wallet/unlock` / `lock` | Decrypt key into memory / clear |
+| `POST /wallet/replace` | Lost password: rename `wallet.enc` aside (kept) so a new wallet can be added. Body `{"confirm": true}`; refused while unlocked |
 | `POST /wallet/deploy-deposit-wallet` | Deploy the per-user sigtype-3 deposit wallet + approvals (gasless) |
 | `POST /wallet/approve-contracts` | Set trading approvals on the deposit wallet |
 | `GET /health` | Health check |

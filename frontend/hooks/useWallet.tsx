@@ -49,6 +49,7 @@ interface WalletContextValue {
   ) => Promise<void>
   unlock: (password: string) => Promise<void>
   lock: () => Promise<void>
+  replaceWallet: () => Promise<void>
   deployDepositWallet: () => Promise<void>
   approveContracts: () => Promise<void>
 }
@@ -102,7 +103,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }),
       })
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || 'Failed to generate wallet')
       }
       const data = await res.json()
@@ -130,7 +131,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }),
       })
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || 'Failed to import wallet')
       }
       const data = await res.json()
@@ -156,7 +157,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }),
       })
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || 'Failed to set relayer credentials')
       }
       await refresh()
@@ -172,7 +173,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ password }),
       })
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || 'Invalid password')
       }
       const data = await res.json()
@@ -193,12 +194,27 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     )
   }, [apiBase])
 
+  // Lost password: the backend renames wallet.enc aside (it isn't deleted),
+  // so a new wallet can be generated or imported.
+  const replaceWallet = useCallback(async (): Promise<void> => {
+    const res = await fetch(`${apiBase}/wallet/replace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Failed to replace wallet')
+    }
+    await refresh()
+  }, [apiBase, refresh])
+
   const deployDepositWallet = useCallback(async (): Promise<void> => {
     const res = await fetch(`${apiBase}/wallet/deploy-deposit-wallet`, {
       method: 'POST',
     })
     if (!res.ok) {
-      const err = await res.json()
+      const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || 'Failed to deploy deposit wallet')
     }
     await refresh()
@@ -209,7 +225,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       method: 'POST',
     })
     if (!res.ok) {
-      const err = await res.json()
+      const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || 'Failed to approve contracts')
     }
     await refresh()
@@ -227,6 +243,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         setRelayer,
         unlock,
         lock,
+        replaceWallet,
         deployDepositWallet,
         approveContracts,
       }}
