@@ -30,10 +30,13 @@ DEFAULT_MIN_SHARES = 5.0
 SLIPPAGE = 0.10  # sell no lower than 10% under what the order book pays
 
 
-def sell_floor(price: float, tick: float = 0.01) -> float:
-    """Worst accepted price: SLIPPAGE under `price`, rounded up to a tick."""
-    # round() first so float noise (0.45 / 0.01 = 45.000000001) doesn't add a tick
-    ticks = math.ceil(round(price * (1 - SLIPPAGE) / tick, 6))
+def sell_floor(price: float) -> float:
+    """Worst accepted price: SLIPPAGE under `price`, rounded down to a tick so
+    it never sits above the book price. Sub-cent bids exist only on
+    0.001-tick books, so those use the 0.001 grid."""
+    tick = 0.01 if price >= 0.01 else 0.001
+    # round() first so float noise (0.63 / 0.01 = 62.999999) doesn't drop a tick
+    ticks = math.floor(round(price * (1 - SLIPPAGE) / tick, 6))
     return round(max(ticks, 1) * tick, 4)
 
 

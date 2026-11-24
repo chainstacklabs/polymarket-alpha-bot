@@ -156,3 +156,13 @@ class TestSellViaClob:
         sell_via_clob(client, "tok", 5.0, 0.5, slippage=10)
         kwargs = client.place_market_order.call_args.kwargs
         assert kwargs["min_price"] == compute_sell_price(0.5, 10)
+
+
+def test_sell_floor_never_above_the_book_price():
+    # The floor comes from real bids now. Bids under a cent exist only on
+    # 0.001-tick books, where a 0.01 floor would never fill.
+    assert compute_sell_price(0.70, 10) == 0.63
+    assert compute_sell_price(0.005, 10) == 0.004
+    assert compute_sell_price(0.0005, 10) == 0.001  # lowest tick
+    # Rounded down, not to the nearest cent: 0.029 * 0.9 = 0.0261 -> 0.02.
+    assert compute_sell_price(0.029, 10) == 0.02

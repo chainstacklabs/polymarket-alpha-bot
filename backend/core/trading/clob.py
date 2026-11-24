@@ -1,10 +1,12 @@
 """Shared CLOB market sell — FAK sigtype-3 order via the polymarket-client SDK.
 
 The deposit-wallet (sigtype-3) client posts orders signed with ERC-1271
-(POLY_1271). Taker fees are computed server-side at match time. Polymarket
-enforces a $1 minimum order size — callers should not sell dust.
+(POLY_1271). Taker fees are computed server-side at match time. Polymarket's
+sell minimum is in shares (Gamma `orderMinSize`, usually 5); there is no
+dollar floor on sells.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -19,12 +21,19 @@ def _tick_decimals(tick_size: float) -> int:
     return len(tick_str.split(".")[1]) if "." in tick_str else 0
 
 
-def compute_sell_price(price: float, slippage: float, tick_size: float = 0.01) -> float:
-    """Compute worst-case sell price with slippage, rounded to tick size."""
+def compute_sell_price(price: float, slippage: float) -> float:
+    """Worst-case sell price: `slippage` % under `price`, rounded down so it
+    never sits above the book price it came from.
+
+    On the 0.01 grid, valid on both 0.01- and 0.001-tick markets. Bids under
+    a cent exist only on 0.001-tick books, so those use the 0.001 grid.
+    """
     slippage_pct = max(10, min(50, slippage))
     raw = price * (1 - slippage_pct / 100)
-    decimals = _tick_decimals(tick_size)
-    return round(max(raw, tick_size), decimals)
+    tick = 0.01 if price >= 0.01 else 0.001
+    # round() first so float noise (0.63 / 0.01 = 62.999999) doesn't drop a tick
+    ticks = math.floor(round(raw / tick, 6))
+    return round(max(ticks, 1) * tick, _tick_decimals(tick))
 
 
 @dataclass
