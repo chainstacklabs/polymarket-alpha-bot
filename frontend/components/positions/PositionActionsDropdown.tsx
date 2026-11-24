@@ -16,7 +16,9 @@ export function PositionActionsDropdown({
 }: PositionActionsDropdownProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [redeeming, setRedeeming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -64,6 +66,30 @@ export function PositionActionsDropdown({
     }
   }
 
+  const handleRedeem = async () => {
+    setRedeeming(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const res = await fetch(
+        `${getApiBaseUrl()}/positions/${p.position_id}/redeem`,
+        { method: 'POST' }
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Redeem failed')
+      if (!data.success) throw new Error(data.error || 'Nothing to redeem')
+      setNotice(
+        `Redeemed $${data.payout.toFixed(2)}` +
+          (data.error ? ` (${data.error})` : '')
+      )
+      onRefresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setRedeeming(false)
+    }
+  }
+
   return (
     <div className="relative" ref={dropdownRef}>
       <button
@@ -84,6 +110,11 @@ export function PositionActionsDropdown({
               {error}
             </div>
           )}
+          {notice && (
+            <div className="px-3 py-2 text-xs text-emerald border-b border-border">
+              {notice}
+            </div>
+          )}
 
           <button
             onClick={handleExit}
@@ -92,6 +123,18 @@ export function PositionActionsDropdown({
           >
             <span>{loading ? 'Exiting...' : 'Exit Position'}</span>
             {loading && (
+              <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+            )}
+          </button>
+
+          <button
+            onClick={handleRedeem}
+            disabled={!hasTokens || redeeming}
+            title="Claim pUSD for legs whose market has resolved"
+            className="w-full px-3 py-2 text-left text-sm hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between"
+          >
+            <span>{redeeming ? 'Redeeming...' : 'Redeem Resolved'}</span>
+            {redeeming && (
               <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
             )}
           </button>

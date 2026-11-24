@@ -6,6 +6,8 @@ Trades against Polymarket V2 (pUSD collateral, official `polymarket-client` SDK,
 
 Two market protocols trade side by side (Gamma `version`): **v1** CTF markets (trading IDs `clobTokenIds`, balances on the CTF, orders on CTF Exchange V2, domain "2") and **v2** Polymarket Protocol V2 markets from 2026-11-23 (IDs `positionIds`, balances on the PositionManager, orders on ExchangeV3, domain "3"). The SDK routes orders and split/merge for both; pick IDs with `core/markets.py:outcome_token_ids()` and record each leg's `*_protocol` so balances are read from the right ledger. Positions on the same market share one wallet balance: each leg's `*_shares` decides its part (`allocate_shared` in `core/positions/service.py`). Each position is tagged with the deposit wallet its split filled (`wallet`, read once from the split receipt); only the current wallet's positions are listed or share balances.
 
+Polymarket auto-redeems resolved positions in deposit wallets (SDK `auto_redeem_operator`, seen paying out ~40 s after resolution), so tokens can vanish without the app doing anything. A leg whose market resolved on-chain (`PositionService.leg_payout_rates`; Gamma's `closed` lags) is valued at its payout on the shares the position still claims; `POST /positions/{id}/redeem` covers the case where auto-redeem hasn't run.
+
 ## Commands
 
 ```bash
@@ -70,6 +72,7 @@ data/               # Pipeline outputs (gitignored)
 | `POST /positions/{id}/merge` | Merge complementary tokens (SDK routes CTF or Router by protocol) |
 | `POST /positions/{id}/retry` | Retry selling leftover unwanted tokens on pending positions |
 | `POST /positions/{id}/exit` | Orchestrated sell + merge fallback |
+| `POST /positions/{id}/redeem` | Redeem resolved legs for pUSD (gasless; positions on the same market are each credited their part) |
 | `POST /trading/buy-pair` | Execute covered pair trade |
 | `POST /trading/buy-pair/estimate` | Estimate trade cost |
 | `GET /wallet/status` | Wallet + deposit-wallet state (pUSD/POL balances, approvals, relayer-set, deposit-wallet deployed) |

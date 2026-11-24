@@ -1,5 +1,6 @@
 """Position manager - mutate positions via sell/merge operations."""
 
+import asyncio
 from dataclasses import dataclass
 from typing import Optional
 
@@ -8,7 +9,12 @@ from loguru import logger
 
 from core.http_retry import fetch_json_with_retry
 from core.paths import GAMMA_API_BASE_URL
-from core.positions.service import LEG_ROLES, PositionService, legacy_sale_estimate
+from core.positions.service import (
+    LEG_ROLES,
+    PositionService,
+    legacy_sale_estimate,
+    share_claim,
+)
 from core.positions.storage import PositionStorage
 from core.wallet.manager import WalletManager
 
@@ -46,6 +52,16 @@ class SideExitResult:
     sold_wanted: float = 0.0  # Wanted tokens sold via CLOB
     sold_unwanted: float = 0.0  # Unwanted tokens sold via CLOB
     recovered: float = 0.0  # pUSD recovered: merged pairs + sale proceeds
+    error: Optional[str] = None
+
+
+@dataclass
+class RedeemResult:
+    """Result of redeeming a position's resolved legs."""
+
+    success: bool
+    payout: float  # pUSD credited to this position
+    tx_hashes: list[str]
     error: Optional[str] = None
 
 
@@ -131,7 +147,13 @@ class PositionManager:
             return None
 
         try:
-            held = self.service.allocated_balances(entry)
+            held = dict(self.service.allocated_balances(entry))
+            # A resolved leg keeps its recorded claim: auto-redeem may have
+            # emptied the wallet, which doesn't mean the shares were sold.
+            for side in ("target", "cover"):
+                if self.service.leg_payout_rates(entry, side) is not None:
+                    for role in ("wanted", "unwanted"):
+                        held[f"{side}_{role}"] = share_claim(entry, side, role)[0]
         except Exception as e:
             return (
                 f"Couldn't read this position's balances to set it up ({e}). "
@@ -235,7 +257,14 @@ class PositionManager:
 
         from core.trading.clob import sell_via_clob
 
-        sale = sell_via_clob(client, token_id, balance, price, slippage=slippage)
+        sale = sell_via_clob(
+            client,
+            token_id,
+            balance,
+            price,
+            slippage=slippage,
+            fee_market=self.service.fee_stub(market_id),
+        )
         filled = sale.filled > 0
 
         # Record what the exchange paid, so P&L sees the cash that replaced
@@ -548,3 +577,126 @@ class PositionManager:
             results["message"] = "; ".join(messages)
 
         return results
+
+    # ── redeem ───────────────────────────────────────────────────────────
+
+    def _client(self):
+        from core.trading.secure_client import get_secure_client
+
+        client = get_secure_client(self.wallet)
+        if client is None:
+            raise ValueError(
+                "Trading client init failed (unlock + relayer key required)"
+            )
+        return client
+
+    def _market_credits(
+        self, market_id: str, own: dict, own_balances: dict
+    ) -> list[tuple[str, str, float]]:
+        """Every listed leg on this market: (position_id, side, payout).
+
+        One redeem pays out the wallet's whole balance of the market, so each
+        position sharing it is credited its own allocated part.
+        """
+        credits = []
+        for entry, side in self.service.leg_holders(market_id):
+            if entry["position_id"] == own["position_id"]:
+                balances = own_balances
+            else:
+                try:
+                    balances = self.service.allocated_balances(entry)
+                except Exception as e:
+                    logger.warning(f"Redeem skips {entry['position_id']}: {e}")
+                    continue
+            wanted = balances[f"{side}_wanted"]
+            unwanted = balances[f"{side}_unwanted"]
+            if wanted + unwanted < 0.01:
+                continue
+            rates = self.service.leg_payout_rates(entry, side)
+            if rates is None:
+                continue
+            payout = wanted * rates[0] + unwanted * rates[1]
+            credits.append((entry["position_id"], side, payout))
+        return credits
+
+    async def redeem_position(self, position_id: str) -> RedeemResult:
+        """Redeem every resolved leg of a position (gasless, via the SDK).
+
+        Unresolved legs are left alone; a leg that lost pays nothing and
+        sends no transaction.
+        """
+        entry = self.storage.get(position_id)
+        if not entry:
+            return RedeemResult(False, 0.0, [], "Position not found")
+
+        balances = self.service.allocated_balances(entry)
+        payout = 0.0
+        tx_hashes: list[str] = []
+        notes: list[str] = []
+        settled = False
+        # Legs paid by a redeem in this call: both legs can be on one market.
+        done: set[tuple[str, str]] = set()
+
+        for side in ("target", "cover"):
+            if (position_id, side) in done:
+                continue
+            if balances[f"{side}_wanted"] + balances[f"{side}_unwanted"] < 0.01:
+                continue
+            market_id = entry[f"{side}_market_id"]
+            try:
+                condition_id = self.service.condition_id(market_id)
+            except Exception as e:
+                notes.append(f"{side}: failed to fetch market info: {e}")
+                continue
+            if not condition_id:
+                notes.append(f"{side}: could not fetch market condition ID")
+                continue
+            if self.service.leg_payout_rates(entry, side) is None:
+                notes.append(f"{side}: market not resolved yet")
+                continue
+
+            credits = [
+                c
+                for c in self._market_credits(market_id, entry, balances)
+                if (c[0], c[1]) not in done
+            ]
+            if sum(c[2] for c in credits) > 0:
+                try:
+                    client = self._client()
+                    # The relayer takes seconds to confirm: wait in a thread
+                    # so the server keeps answering other requests.
+                    outcome = await asyncio.to_thread(
+                        lambda: client.redeem_positions(
+                            condition_id=condition_id
+                        ).wait()
+                    )
+                    tx_hashes.append(outcome.transaction_hash)
+                except Exception as e:
+                    logger.error(f"Redeem error: {e}")
+                    notes.append(f"{side}: redeem failed: {e}")
+                    continue
+                for pid, leg, paid in credits:
+                    stored = self.storage.get(pid) or {}
+                    estimate = 0.0
+                    if stored.get(f"{leg}_sell_proceeds") is None:
+                        # Older position: the cost estimate shown until now.
+                        kept = share_claim(stored, leg, "unwanted")[0]
+                        estimate = legacy_sale_estimate(stored, leg, kept)
+                    self.storage.settle_redeemed_leg(pid, leg, paid, estimate)
+                    done.add((pid, leg))
+                    if pid == position_id:
+                        payout += paid
+            else:
+                notes.append(
+                    f"{side}: resolved against this position, nothing to redeem"
+                )
+            settled = True
+
+        if not settled and not notes:
+            notes.append("Nothing to redeem: no tokens held")
+        return RedeemResult(
+            success=settled,
+            payout=round(payout, 6),
+            tx_hashes=tx_hashes,
+            error="; ".join(notes) or None,
+        )

@@ -1,4 +1,4 @@
-"""Position action endpoints - sell, merge, retry operations."""
+"""Position action endpoints - sell, merge, retry, exit, redeem operations."""
 
 from typing import Literal, Optional
 
@@ -206,6 +206,48 @@ async def merge_position_tokens(position_id: str, req: MergeTokensRequest):
     except Exception as e:
         logger.exception("Merge tokens failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class RedeemResponse(BaseModel):
+    """Response from redeeming a position's resolved legs."""
+
+    success: bool
+    payout: float
+    tx_hashes: list[str]
+    error: Optional[str] = None
+
+
+@router.post("/{position_id}/redeem", response_model=RedeemResponse)
+async def redeem_position(position_id: str):
+    """
+    Redeem the resolved legs of a position for pUSD (gasless).
+
+    Unresolved legs are skipped; a leg that resolved against the position
+    pays nothing and sends no transaction. Other positions on the same
+    market are credited their own part of the payout.
+    """
+    manager = get_manager()
+
+    if not manager.wallet.is_unlocked:
+        raise HTTPException(status_code=401, detail="Unlock wallet first")
+
+    try:
+        result = await manager.redeem_position(position_id)
+        if not result.success and result.error == "Position not found":
+            raise HTTPException(status_code=404, detail="Position not found")
+        return RedeemResponse(
+            success=result.success,
+            payout=result.payout,
+            tx_hashes=result.tx_hashes,
+            error=result.error,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Redeem failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        get_service().invalidate_cache()
 
 
 @router.post("/{position_id}/retry", response_model=RetryPendingResponse)

@@ -129,6 +129,7 @@ def _service(tmp_path) -> PositionService:
     svc._backfill_ctf_ids = lambda entries: None
     svc._bulk_fetch_fee_stubs = lambda ids: None
     svc._get_current_price = lambda market_id, position: None
+    svc.leg_payout_rates = lambda entry, side: None  # markets unresolved
     svc._get_balances_batch = lambda ids, protocols=None: [
         WALLET.get(t, 0.0) for t in ids
     ]
