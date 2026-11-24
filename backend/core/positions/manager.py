@@ -1,5 +1,6 @@
 """Position manager - mutate positions via sell/merge operations."""
 
+import asyncio
 from dataclasses import dataclass
 from typing import Optional
 
@@ -654,8 +655,15 @@ class PositionManager:
             ]
             if sum(c[2] for c in credits) > 0:
                 try:
-                    handle = self._client().redeem_positions(condition_id=condition_id)
-                    tx_hashes.append(handle.wait().transaction_hash)
+                    client = self._client()
+                    # The relayer takes seconds to confirm: wait in a thread
+                    # so the server keeps answering other requests.
+                    outcome = await asyncio.to_thread(
+                        lambda: client.redeem_positions(
+                            condition_id=condition_id
+                        ).wait()
+                    )
+                    tx_hashes.append(outcome.transaction_hash)
                 except Exception as e:
                     logger.error(f"Redeem error: {e}")
                     notes.append(f"{side}: redeem failed: {e}")

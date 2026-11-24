@@ -464,3 +464,23 @@ def test_start_tracking_keeps_resolved_claims(tmp_path):
     assert stored["target_unwanted_shares"] == 5.0
     assert stored["target_sell_proceeds"] == 0.0
     assert stored["cover_wanted_shares"] == 3.0  # unresolved: from balances
+
+
+def test_relayer_wait_runs_off_the_event_loop(tmp_path):
+    """The relayer confirms in seconds; waiting on the event loop would stall
+    every other request (positions polling included) until then."""
+    import threading
+
+    pm, _, client = _manager(
+        tmp_path, [_entry("a")], {"a": _bal(5, 5)}, {"m1": (1.0, 0.0)}
+    )
+    threads = []
+
+    def wait():
+        threads.append(threading.current_thread())
+        return MagicMock(transaction_hash="0xr")
+
+    client.redeem_positions.return_value.wait.side_effect = wait
+    result = asyncio.run(pm.redeem_position("a"))
+    assert result.tx_hashes == ["0xr"]
+    assert threads and threads[0] is not threading.main_thread()
