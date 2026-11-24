@@ -125,6 +125,8 @@ export interface Position {
   entry_net_cost: number
   realized_proceeds: number
   cost_estimated?: boolean
+  target_resolved?: boolean
+  cover_resolved?: boolean
   current_value: number
   pnl: number
   pnl_pct: number

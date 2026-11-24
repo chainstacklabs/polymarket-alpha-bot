@@ -21,10 +21,11 @@ description: Sells or merges tokens from an open alphapoly position via CLOB or 
 | Fully close a position | Exit — orchestrated merge + sell (preferred) |
 | Sell one specific side | Sell — `token_type: "wanted"` |
 | Clear failed entry leftovers | Sell — `token_type: "unwanted"` |
-| Market resolved, hold both outcomes | Merge |
+| Hold both outcomes of a market | Merge |
+| Market resolved | Redeem |
 | State is `pending` | Retry |
 
-4. **Confirm** — require explicit user approval before executing any sell or merge
+4. **Confirm** — require explicit user approval before executing any sell, merge, or redeem
 5. **Execute** — see quick reference below
 6. **Verify** — re-fetch position; full exit shows `state: "complete"`
 
@@ -45,6 +46,9 @@ POST /positions/{id}/merge
 
 # Retry pending
 POST /positions/{id}/retry
+
+# Redeem resolved legs (unresolved legs are skipped)
+POST /positions/{id}/redeem
 
 # Check result
 GET /positions/{id}
