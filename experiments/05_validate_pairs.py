@@ -104,6 +104,10 @@ class LLMAuthError(RuntimeError):
     marking every pair invalid."""
 
 
+class LLMEmptyReply(RuntimeError):
+    """The model returned no text, after retries where a retry could help."""
+
+
 # =============================================================================
 # DETERMINISTIC HEDGE CHECKS (copy of core/steps/hedge_checks.py)
 # =============================================================================
@@ -667,7 +671,21 @@ async def complete(client: httpx.AsyncClient, model: str, prompt: str) -> str:
         try:
             response = await client.post("/chat/completions", json=payload)
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
+            data = response.json()
+            choice = (data.get("choices") or [{}])[0]
+            content = (choice.get("message") or {}).get("content")
+            if content and content.strip():
+                return content
+            # No text (production's rules): retry unless the budget ran out or a
+            # filter blocked it; OpenRouter can also answer 200 with only an error.
+            finish = choice.get("finish_reason")
+            reason = f"finish_reason={finish}"
+            if data.get("error"):
+                reason += f", error: {data['error'].get('message', data['error'])}"
+            if finish not in ("length", "content_filter") and attempt < LLM_MAX_RETRIES - 1:
+                await asyncio.sleep(1)
+                continue
+            raise LLMEmptyReply(f"LLM {model} returned no text ({reason})")
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
             if status == 429:
