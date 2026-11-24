@@ -103,7 +103,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }),
       })
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || 'Failed to generate wallet')
       }
       const data = await res.json()
@@ -131,7 +131,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }),
       })
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || 'Failed to import wallet')
       }
       const data = await res.json()
@@ -157,7 +157,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }),
       })
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || 'Failed to set relayer credentials')
       }
       await refresh()
@@ -173,7 +173,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ password }),
       })
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || 'Invalid password')
       }
       const data = await res.json()
@@ -214,7 +214,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       method: 'POST',
     })
     if (!res.ok) {
-      const err = await res.json()
+      const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || 'Failed to deploy deposit wallet')
     }
     await refresh()
@@ -225,7 +225,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       method: 'POST',
     })
     if (!res.ok) {
-      const err = await res.json()
+      const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || 'Failed to approve contracts')
     }
     await refresh()
