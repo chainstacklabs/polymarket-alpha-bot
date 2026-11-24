@@ -80,6 +80,10 @@ class PositionEntry:
     # Positions recorded before V2 support are all v1.
     target_protocol: str = "v1"
     cover_protocol: str = "v1"
+    # Deposit wallet that received this position's split tokens (lowercase).
+    # None = not known yet (shown everywhere; decided again on each listing,
+    # from receipts read once per server run).
+    wallet: Optional[str] = None
 
 
 class PositionStorage:
@@ -230,6 +234,32 @@ class PositionStorage:
                     return True
             return False
 
+    def settle_redeemed_leg(
+        self, position_id: str, side: str, payout: float, sale_estimate: float
+    ) -> bool:
+        """Book a redeemed leg in one write: add its payout to realized
+        proceeds and set its share counts to 0.
+
+        Older positions without tracked sale proceeds get `sale_estimate`
+        frozen first: with the shares cleared, their cost estimate would
+        otherwise read the redeemed tokens as sold.
+        """
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") == position_id:
+                    if p.get(f"{side}_sell_proceeds") is None:
+                        p[f"{side}_sell_proceeds"] = sale_estimate
+                        p["cost_estimated"] = True
+                    p["realized_proceeds"] = round(
+                        p.get("realized_proceeds", 0.0) + payout, 4
+                    )
+                    p[f"{side}_wanted_shares"] = 0.0
+                    p[f"{side}_unwanted_shares"] = 0.0
+                    self.save_all(positions)
+                    return True
+            return False
+
     def seed_shares(self, position_id: str, shares: dict[str, float]) -> bool:
         """Set untracked share counts ({"target_wanted": 5.0, ...}); keep tracked ones."""
         with _storage_lock:
@@ -276,3 +306,12 @@ class PositionStorage:
     def count(self) -> int:
         """Get total position count."""
         return len(self.load_all())
+
+    def set_wallets(self, wallets: dict[str, str]) -> None:
+        """Store the holder wallet of several positions ({position_id: wallet})."""
+        with _storage_lock:
+            positions = self.load_all()
+            for p in positions:
+                if p.get("position_id") in wallets:
+                    p["wallet"] = wallets[p["position_id"]]
+            self.save_all(positions)

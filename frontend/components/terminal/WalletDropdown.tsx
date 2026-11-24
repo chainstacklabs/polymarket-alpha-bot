@@ -12,6 +12,7 @@ export function WalletDropdown() {
     error: walletError,
     unlock,
     lock,
+    replaceWallet,
     generate,
     importKey,
     setRelayer,
@@ -49,6 +50,28 @@ export function WalletDropdown() {
     setPassword('')
     setPrivateKey('')
     setError(null)
+  }
+
+  async function handleReplace() {
+    if (
+      !window.confirm(
+        'Set this wallet aside and add a new one? The encrypted file is kept ' +
+          '(renamed in backend/data), so it can still be opened with its ' +
+          'password. Funds stay on-chain; import the same private key to keep ' +
+          'using them.'
+      )
+    )
+      return
+    setProcessing(true)
+    setError(null)
+    try {
+      await replaceWallet()
+      resetForm()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to replace wallet')
+    } finally {
+      setProcessing(false)
+    }
   }
 
   async function handleUnlock() {
@@ -453,6 +476,13 @@ export function WalletDropdown() {
                   className="w-full px-2.5 py-1.5 rounded text-xs bg-amber-500 hover:bg-amber-400 text-void font-medium disabled:opacity-50 transition-colors"
                 >
                   {processing ? 'Unlocking...' : 'Unlock'}
+                </button>
+                <button
+                  onClick={handleReplace}
+                  disabled={processing}
+                  className="w-full text-[10px] text-text-muted hover:text-text-primary transition-colors"
+                >
+                  Forgot password? Replace wallet
                 </button>
               </div>
             )}

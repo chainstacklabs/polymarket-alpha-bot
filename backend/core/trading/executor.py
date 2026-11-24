@@ -17,8 +17,6 @@ from core.markets import market_version, outcome_token_ids
 from core.paths import GAMMA_API_BASE_URL
 from core.wallet.manager import WalletManager
 
-# Polymarket enforces a $1 minimum CLOB order size.
-MIN_ORDER_USD = 1.0
 # Per-market share minimum (Gamma `orderMinSize`); 5 on every live market
 # checked 2026-11-22. Used when Gamma omits the field.
 DEFAULT_MIN_ORDER_SHARES = 5.0
@@ -71,6 +69,14 @@ class BuyPairResult:
     cover: TradeResult
     total_spent: float
     final_balances: dict
+
+
+def fee_stub(info: MarketInfo) -> dict:
+    """The market's fee fields in Gamma's shape (see core/fees.py)."""
+    stub: dict = {"id": info.market_id, "feesEnabled": info.fees_enabled}
+    if info.fee_schedule:
+        stub["feeSchedule"] = info.fee_schedule
+    return stub
 
 
 class TradingExecutor:
@@ -206,17 +212,16 @@ class TradingExecutor:
                     f"{market.min_order_shares:g}-share minimum — skipping sell"
                 )
                 logger.warning(clob_error)
-            elif amount * unwanted_price < MIN_ORDER_USD:
-                clob_error = (
-                    f"Unwanted side value ${amount * unwanted_price:.2f} below "
-                    f"${MIN_ORDER_USD} CLOB minimum — skipping sell"
-                )
-                logger.warning(clob_error)
             else:
                 from core.trading.clob import sell_via_clob
 
                 sale = sell_via_clob(
-                    client, unwanted_token, amount, unwanted_price, slippage=slippage
+                    client,
+                    unwanted_token,
+                    amount,
+                    unwanted_price,
+                    slippage=slippage,
+                    fee_market=fee_stub(market),
                 )
                 clob_order_id, clob_error = sale.order_id, sale.error
                 clob_filled = sale.filled > 0
@@ -278,15 +283,9 @@ class TradingExecutor:
             cover_info.yes_price if cover_position == "YES" else cover_info.no_price
         )
 
-        def _fee_stub(info: MarketInfo) -> dict:
-            stub: dict = {"id": info.market_id, "feesEnabled": info.fees_enabled}
-            if info.fee_schedule:
-                stub["feeSchedule"] = info.fee_schedule
-            return stub
-
         entry_fees = compute_fee(
-            amount_per_position, target_price, _fee_stub(target_info)
-        ) + compute_fee(amount_per_position, cover_price, _fee_stub(cover_info))
+            amount_per_position, target_price, fee_stub(target_info)
+        ) + compute_fee(amount_per_position, cover_price, fee_stub(cover_info))
 
         balances = self.wallet.get_balances()
         required = amount_per_position * 2 + entry_fees

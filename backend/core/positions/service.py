@@ -10,6 +10,13 @@ from loguru import logger
 
 from core.markets import outcome_token_ids
 from core.paths import GAMMA_API_BASE_URL
+from core.positions.redeem import (
+    CTF_PAYOUT_ABI,
+    OUTCOME_INDEX,
+    POSITION_MANAGER_PAYOUT_ABI,
+    v1_payout_rates,
+    v2_payout_rate,
+)
 from core.wallet.manager import WalletManager
 from core.wallet.contracts import CONTRACTS, CTF_ABI
 from server.price_aggregation import price_aggregation
@@ -39,6 +46,52 @@ MULTICALL3_ABI = [
         "type": "function",
     }
 ]
+
+
+_TRANSFER_EVENTS = {
+    bytes(Web3.keccak(text="TransferSingle(address,address,address,uint256,uint256)")),
+    bytes(
+        Web3.keccak(text="TransferBatch(address,address,address,uint256[],uint256[])")
+    ),
+}
+
+
+def split_receivers(receipt) -> set[str]:
+    """Addresses that received ERC-1155 outcome tokens in a tx (lowercase).
+
+    v1 deposit-wallet splits mint to an adapter that forwards to the wallet,
+    so every recipient counts, not just the mint's.
+    """
+    out = set()
+    for log in receipt["logs"]:
+        topics = log["topics"]
+        if len(topics) == 4 and bytes(topics[0]) in _TRANSFER_EVENTS:
+            out.add("0x" + bytes(topics[3])[-20:].hex())
+    return out
+
+
+# Polymarket contracts that pass outcome tokens through on the way to a
+# wallet (polymarket-client 0.20.0 `environments.py`, PRODUCTION): never the
+# holder.
+PASS_THROUGH = {
+    "0xada100db00ca00073811820692005400218fce1f",  # collateral_adapter
+    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296",  # neg_risk_adapter
+    "0xada2005600dec949baf300f4c6120000bdb6eaab",  # neg_risk_collateral_adapter
+    "0xa1200000d0002264c9a1698e001292d00e1b00af",  # auto_redeem_operator
+}
+
+
+def holder_of(receivers: set[str], current: str) -> str:
+    """Which wallet a split filled: the current one if it got tokens, else
+    the only recipient that isn't a Polymarket pass-through, else "" (can't
+    tell)."""
+    current = current.lower()
+    if current and current in receivers:
+        return current
+    wallets = receivers - PASS_THROUGH
+    if len(wallets) == 1:
+        return next(iter(wallets))
+    return ""
 
 
 LEG_ROLES = (
@@ -190,6 +243,11 @@ class LivePosition:
     # entry_net_cost is estimated from entry prices.
     cost_estimated: bool = False
 
+    # Market resolved on-chain: the leg is valued at its payout (Polymarket's
+    # auto-redeem may already have paid it into the wallet).
+    target_resolved: bool = False
+    cover_resolved: bool = False
+
 
 class PositionService:
     """Enrich positions with live blockchain and price data."""
@@ -201,7 +259,11 @@ class PositionService:
         self.storage = storage
         self.wallet = wallet
         self._token_cache: dict[str, tuple[str, str]] = {}  # market_id -> (yes, no)
+        self._condition_cache: dict[str, str] = {}  # market_id -> conditionId
+        # leg key -> (checked_at, rates); resolved rates never change
+        self._payout_cache: dict[str, tuple[float, Optional[tuple[float, float]]]] = {}
         self._fee_cache: dict[str, dict] = {}  # market_id -> fee market stub
+        self._receivers_by_tx: dict[str, set[str]] = {}  # split tx -> receivers
 
         # Lazy-init Web3 and contracts
         self._w3: Optional[Web3] = None
@@ -356,7 +418,7 @@ class PositionService:
         """token_id -> every stored position leg that holds it:
         (position_id, side, role, claim, tracked)."""
         refs: dict[str, list] = {}
-        for entry in self.storage.load_all():
+        for entry in self._mine(self.storage.load_all()):
             for side, role in LEG_ROLES:
                 token_id = self.leg_token_id(entry, side, role)
                 if token_id:
@@ -440,6 +502,77 @@ class PositionService:
             logger.error(f"Failed to fetch token IDs for market {market_id}: {e}")
 
         return ("", "")
+
+    def condition_id(self, market_id: str) -> str:
+        """A market's conditionId from Gamma (cached; it never changes)."""
+        if market_id not in self._condition_cache:
+            with httpx.Client(timeout=10.0) as client:
+                data = client.get(f"{GAMMA_API_BASE_URL}/markets/{market_id}").json()
+            cid = data.get("conditionId") or ""
+            if not cid:
+                return ""
+            self._condition_cache[market_id] = cid
+        return self._condition_cache[market_id]
+
+    def leg_payout_rates(self, entry: dict, side: str) -> Optional[tuple[float, float]]:
+        """(wanted, unwanted) pUSD per share once the leg's market has resolved
+        on-chain; None while unresolved. Gamma's `closed` lags resolution, so
+        this reads the chain: the CTF for v1 legs, the PositionManager for v2.
+        Unresolved results are re-checked after a minute.
+        """
+        import time
+
+        protocol = entry.get(f"{side}_protocol") or "v1"
+        wanted_id = self.leg_token_id(entry, side, "wanted")
+        key = f"{protocol}:{entry[f'{side}_market_id']}:{wanted_id}"
+        cached = self._payout_cache.get(key)
+        if cached and (cached[1] is not None or time.time() - cached[0] < 60):
+            return cached[1]
+
+        w3 = self._get_web3()
+        rates: Optional[tuple[float, float]]
+        if protocol == "v2":
+            pm = w3.eth.contract(
+                address=Web3.to_checksum_address(CONTRACTS["POSITION_MANAGER"]),
+                abi=POSITION_MANAGER_PAYOUT_ABI,
+            )
+            wanted = v2_payout_rate(pm, wanted_id)
+            unwanted = v2_payout_rate(pm, self.leg_token_id(entry, side, "unwanted"))
+            rates = None if wanted is None or unwanted is None else (wanted, unwanted)
+        else:
+            cid = self.condition_id(entry[f"{side}_market_id"])
+            ctf = w3.eth.contract(
+                address=Web3.to_checksum_address(CONTRACTS["CTF"]), abi=CTF_PAYOUT_ABI
+            )
+            yes_no = v1_payout_rates(ctf, cid) if cid else None
+            if yes_no is None:
+                rates = None
+            else:
+                i = OUTCOME_INDEX[entry[f"{side}_position"]]
+                rates = (yes_no[i], yes_no[1 - i])
+        self._payout_cache[key] = (time.time(), rates)
+        return rates
+
+    def leg_holders(self, market_id: str) -> list[tuple[dict, str]]:
+        """(entry, side) of every position leg on this market that takes part
+        in sharing wallet balances (see `_token_refs`)."""
+        ids = {c[0] for claims in self._token_refs().values() for c in claims}
+        return [
+            (entry, side)
+            for entry in self.storage.load_all()
+            if entry["position_id"] in ids
+            for side in ("target", "cover")
+            if entry.get(f"{side}_market_id") == market_id
+            and entry.get(f"{side}_split_tx")
+        ]
+
+    def _resolved_rates(self, entry: dict, side: str) -> Optional[tuple[float, float]]:
+        """leg_payout_rates, treating a failed read as unresolved."""
+        try:
+            return self.leg_payout_rates(entry, side)
+        except Exception as e:
+            logger.debug(f"Payout read failed for {entry['position_id']} {side}: {e}")
+            return None
 
     @staticmethod
     def _parse_ctf_ids(raw: Optional[str]) -> list[str]:
@@ -538,6 +671,11 @@ class PositionService:
                             stub["feeSchedule"] = m["feeSchedule"]
                         self._fee_cache[mid] = stub
 
+    def fee_stub(self, market_id: str) -> dict:
+        """A market's `feesEnabled` / `feeSchedule` (fee-free if unknown)."""
+        self._bulk_fetch_fee_stubs([market_id])
+        return self._fee_cache.get(market_id, {"feesEnabled": False})
+
     def _calculate_state(
         self,
         target_wanted: float,
@@ -611,9 +749,11 @@ class PositionService:
         return round(current_value, 4), round(pnl, 4), round(pnl_pct, 2)
 
     def get_position(self, position_id: str) -> Optional[LivePosition]:
-        """Get single position with live data."""
+        """Get single position with live data. Another wallet's position is
+        not found: sell/merge/exit start here and would trade this wallet's
+        tokens for it."""
         entry = self.storage.get(position_id)
-        if not entry:
+        if not entry or not self.is_mine(entry):
             return None
         return self._enrich_positions([entry])[0]
 
@@ -629,6 +769,8 @@ class PositionService:
             return self._positions_cache
 
         entries = self.storage.load_all()
+        self._tag_wallets(entries)
+        entries = self._mine(entries)
         if not entries:
             self._positions_cache = []
             self._positions_cache_time = now
@@ -638,6 +780,65 @@ class PositionService:
         self._positions_cache = positions
         self._positions_cache_time = now
         return positions
+
+    def _current_wallet(self) -> str:
+        return (self.wallet.deposit_wallet_address or "").lower()
+
+    def is_mine(self, entry: dict) -> bool:
+        """Whether a position belongs to the current deposit wallet (or its
+        wallet is unknown). Actions refuse the others: they would spend this
+        wallet's tokens for them."""
+        return bool(self._mine([entry]))
+
+    def _mine(self, entries: list[dict]) -> list[dict]:
+        """Positions of the current deposit wallet, plus ones of unknown wallet.
+
+        Positions from another wallet (an earlier import) stay on disk and
+        show again if that wallet is imported back.
+        """
+        current = self._current_wallet()
+        if not current:
+            return entries
+        return [e for e in entries if not e.get("wallet") or e["wallet"] == current]
+
+    def _split_receivers(self, tx_hash: str) -> set[str]:
+        if not tx_hash.startswith("0x"):
+            tx_hash = f"0x{tx_hash}"
+        receipt = self._get_web3().eth.get_transaction_receipt(tx_hash)
+        return split_receivers(receipt) if receipt else set()
+
+    def _receivers_cached(self, tx_hash: str) -> set[str]:
+        """Split receivers, read once per mined tx (a receipt never changes)."""
+        if tx_hash not in self._receivers_by_tx:
+            receivers = self._split_receivers(tx_hash)
+            if not receivers:  # not mined yet: read again next time
+                return receivers
+            self._receivers_by_tx[tx_hash] = receivers
+        return self._receivers_by_tx[tx_hash]
+
+    def _tag_wallets(self, entries: list[dict]) -> None:
+        """Record which wallet each untagged position's split filled (once)."""
+        current = self._current_wallet()
+        if not current:
+            return
+        tags: dict[str, str] = {}
+        for entry in entries:
+            if entry.get("wallet") is not None:
+                continue
+            txs = [entry.get(f"{s}_split_tx") for s in ("target", "cover")]
+            txs = [t for t in txs if t]
+            if not txs:
+                continue
+            try:
+                receivers = set().union(*(self._receivers_cached(t) for t in txs))
+            except Exception as e:
+                logger.warning(f"Wallet tag failed for {entry['position_id']}: {e}")
+                continue
+            holder = holder_of(receivers, current)
+            if holder:  # undecided: leave unset and try again next time
+                entry["wallet"] = tags[entry["position_id"]] = holder
+        if tags:
+            self.storage.set_wallets(tags)
 
     def invalidate_cache(self) -> None:
         """Invalidate the positions cache (call after mutations)."""
@@ -775,12 +976,43 @@ class PositionService:
             if cover_price is None:
                 cover_price = entry["cover_entry_price"]
 
+            # A resolved leg is worth its payout on the shares the position
+            # still claims, whether they're in the wallet or were already paid
+            # out by Polymarket's auto-redeem. Our own redeem clears the claim
+            # and books the payout in realized_proceeds.
+            target_rates = self._resolved_rates(entry, "target")
+            cover_rates = self._resolved_rates(entry, "cover")
+
+            # Worthless tokens left on a resolved leg don't keep it open.
+            def _open(balance: float, rates, role: int) -> float:
+                return 0.0 if rates and rates[role] == 0 else balance
+
             state = self._calculate_state(
-                target_wanted, target_unwanted, cover_wanted, cover_unwanted
+                _open(target_wanted, target_rates, 0),
+                _open(target_unwanted, target_rates, 1),
+                _open(cover_wanted, cover_rates, 0),
+                _open(cover_unwanted, cover_rates, 1),
             )
 
+            value_tw, value_tu, value_cw, value_cu = (
+                target_wanted,
+                target_unwanted,
+                cover_wanted,
+                cover_unwanted,
+            )
+            if target_rates:
+                value_tw = share_claim(entry, "target", "wanted")[0]
+                value_tu = share_claim(entry, "target", "unwanted")[0]
+                target_price = target_rates[0]
+            if cover_rates:
+                value_cw = share_claim(entry, "cover", "wanted")[0]
+                value_cu = share_claim(entry, "cover", "unwanted")[0]
+                cover_price = cover_rates[0]
+
             realized_proceeds = entry.get("realized_proceeds", 0.0)
-            cost, cost_estimated = entry_cost(entry, target_unwanted, cover_unwanted)
+            # Same holdings for cost as for value: on a resolved leg an empty
+            # wallet doesn't mean the unwanted side was sold (auto-redeem).
+            cost, cost_estimated = entry_cost(entry, value_tu, value_cu)
 
             # Estimate exit fees at current prices (unrealized P&L only --
             # realized P&L uses actual CLOB proceeds which already net fees).
@@ -792,8 +1024,9 @@ class PositionService:
             cover_fee_stub = self._fee_cache.get(
                 entry["cover_market_id"], {"feesEnabled": False}
             )
-            target_value = target_wanted * target_price
-            cover_value = cover_wanted * cover_price
+            # Redeeming has no fees: only unresolved legs pay one to exit.
+            target_value = 0.0 if target_rates else target_wanted * target_price
+            cover_value = 0.0 if cover_rates else cover_wanted * cover_price
             exit_fees = compute_fee(
                 target_value, target_price, target_fee_stub
             ) + compute_fee(cover_value, cover_price, cover_fee_stub)
@@ -801,10 +1034,10 @@ class PositionService:
             current_value, pnl, pnl_pct = self._calculate_pnl(
                 cost,
                 realized_proceeds,
-                target_wanted,
-                target_unwanted,
-                cover_wanted,
-                cover_unwanted,
+                value_tw,
+                value_tu,
+                value_cw,
+                value_cu,
                 target_price,
                 cover_price,
                 exit_fees=exit_fees,
@@ -851,6 +1084,8 @@ class PositionService:
                     selling_target=entry.get("selling_target", False),
                     selling_cover=entry.get("selling_cover", False),
                     cost_estimated=cost_estimated,
+                    target_resolved=bool(target_rates),
+                    cover_resolved=bool(cover_rates),
                 )
             )
 
