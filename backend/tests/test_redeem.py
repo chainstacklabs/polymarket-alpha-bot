@@ -68,6 +68,11 @@ def _entry(position_id: str, market: str = "m1", protocol: str = "v1") -> dict:
         "cover_split_tx": "",
         "cover_protocol": "v1",
         "realized_proceeds": 0.0,
+        "entry_amount_per_side": 5.0,
+        "target_entry_price": 0.5,
+        "cover_entry_price": 0.5,
+        "target_sell_proceeds": 0.0,
+        "cover_sell_proceeds": 0.0,
         "target_wanted_shares": 5.0,
         "target_unwanted_shares": 5.0,
     }
@@ -369,3 +374,93 @@ def test_legacy_unsold_leftover_is_not_counted_as_sold(tmp_path):
     p = svc.get_position("pos")
     assert p.current_value == pytest.approx(20.0)
     assert p.pnl == pytest.approx(0.0)
+
+
+# ── CodeRabbit review on #84 ─────────────────────────────────────────────
+
+
+def test_same_market_legs_are_redeemed_and_credited_once(tmp_path):
+    # Both legs on m1 (POST /positions doesn't reject that): one redeem pays
+    # both, and the second pass must not credit them again.
+    entry = _entry("a")
+    entry.update(
+        cover_market_id="m1",
+        cover_split_tx="0xsplit2",
+        cover_wanted_shares=5.0,
+        cover_unwanted_shares=0.0,
+    )
+    bal = _bal(5, 0) | {"cover_wanted": 5.0}
+    pm, storage, client = _manager(tmp_path, [entry], {"a": bal}, {"m1": (1.0, 0.0)})
+    result = asyncio.run(pm.redeem_position("a"))
+    client.redeem_positions.assert_called_once()
+    assert result.payout == pytest.approx(10.0)
+    assert storage.get("a")["realized_proceeds"] == pytest.approx(10.0)
+
+
+def _legacy(position_id: str) -> dict:
+    """Recorded before shares and sale proceeds were tracked; kept both sides."""
+    entry = _entry(position_id)
+    entry.update(
+        entry_amount_per_side=5.0,
+        entry_total_cost=5.0,
+        target_entry_price=0.5,
+        target_clob_filled=False,
+        target_sell_proceeds=None,
+        target_wanted_shares=None,
+        target_unwanted_shares=None,
+    )
+    return entry
+
+
+def test_redeem_freezes_legacy_sale_estimate(tmp_path):
+    # Before the redeem the kept NO side counts as unsold (estimate 0). Once
+    # the shares are cleared, the estimate must not turn into a phantom sale.
+    pm, storage, _ = _manager(
+        tmp_path, [_legacy("a")], {"a": _bal(5, 5)}, {"m1": (1.0, 0.0)}
+    )
+    asyncio.run(pm.redeem_position("a"))
+    stored = storage.get("a")
+    assert stored["target_sell_proceeds"] == 0.0
+    assert stored["realized_proceeds"] == pytest.approx(5.0)
+
+
+def test_redeem_books_payout_and_clears_claim_in_one_write(tmp_path):
+    # A failed write must not leave the payout booked with the claim kept
+    # (that would count the payout twice).
+    pm, storage, _ = _manager(
+        tmp_path, [_entry("a")], {"a": _bal(5, 0)}, {"m1": (1.0, 0.0)}
+    )
+    real_save, writes = storage.save_all, []
+
+    def save_once(positions):
+        if writes:
+            raise OSError("disk full")
+        writes.append(1)
+        real_save(positions)
+
+    storage.save_all = save_once
+    try:
+        asyncio.run(pm.redeem_position("a"))
+    except OSError:
+        pass
+    stored = storage.get("a")
+    booked = stored["realized_proceeds"] > 0
+    cleared = stored["target_wanted_shares"] == 0.0
+    assert booked == cleared
+
+
+def test_start_tracking_keeps_resolved_claims(tmp_path):
+    # Target resolved and auto-redeemed (wallet empty); seeding from wallet
+    # balances would zero its claim and record the kept side as sold.
+    pm, storage, _ = _manager(
+        tmp_path,
+        [_legacy("a")],
+        {"a": _bal(0, 0) | {"cover_wanted": 3.0}},
+        {"m1": (0.0, 1.0), "m2": None},
+    )
+    assert pm._start_tracking("a") is None
+    stored = storage.get("a")
+    assert stored["target_wanted_shares"] == 5.0
+    assert stored["target_unwanted_shares"] == 5.0
+    assert stored["target_sell_proceeds"] == 0.0
+    assert stored["cover_wanted_shares"] == 3.0  # unresolved: from balances

@@ -230,12 +230,26 @@ class PositionStorage:
                     return True
             return False
 
-    def clear_leg_shares(self, position_id: str, side: str) -> bool:
-        """Set a leg's share counts to 0 (its tokens were redeemed)."""
+    def settle_redeemed_leg(
+        self, position_id: str, side: str, payout: float, sale_estimate: float
+    ) -> bool:
+        """Book a redeemed leg in one write: add its payout to realized
+        proceeds and set its share counts to 0.
+
+        Older positions without tracked sale proceeds get `sale_estimate`
+        frozen first: with the shares cleared, their cost estimate would
+        otherwise read the redeemed tokens as sold.
+        """
         with _storage_lock:
             positions = self.load_all()
             for p in positions:
                 if p.get("position_id") == position_id:
+                    if p.get(f"{side}_sell_proceeds") is None:
+                        p[f"{side}_sell_proceeds"] = sale_estimate
+                        p["cost_estimated"] = True
+                    p["realized_proceeds"] = round(
+                        p.get("realized_proceeds", 0.0) + payout, 4
+                    )
                     p[f"{side}_wanted_shares"] = 0.0
                     p[f"{side}_unwanted_shares"] = 0.0
                     self.save_all(positions)
