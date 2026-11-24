@@ -46,3 +46,52 @@ def test_replace_twice_keeps_both_backups(tmp_path):
 def test_replace_without_a_wallet_is_refused(tmp_path):
     with pytest.raises(ValueError, match="No wallet"):
         _manager(tmp_path).replace()
+
+
+# ── HTTP route: needs an explicit confirm, refused while unlocked ─────────
+
+
+def _client(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.routers import wallet as wallet_router
+
+    wm = _manager(tmp_path)
+    monkeypatch.setattr(wallet_router, "get_wallet_manager", lambda: wm)
+    app = FastAPI()
+    app.include_router(wallet_router.router, prefix="/wallet")
+    return TestClient(app), wm
+
+
+def test_route_needs_confirm(tmp_path, monkeypatch):
+    client, wm = _client(tmp_path, monkeypatch)
+    wm.generate("pw-123456")
+    assert client.post("/wallet/replace").status_code == 422
+    assert client.post("/wallet/replace", json={"confirm": False}).status_code == 400
+    assert wm.storage.exists()
+    assert client.post("/wallet/replace", json={"confirm": True}).status_code == 200
+    assert not wm.storage.exists()
+
+
+def test_route_refused_while_unlocked(tmp_path, monkeypatch):
+    # Replacing mid-trade would lock the key between the legs of an exit.
+    client, wm = _client(tmp_path, monkeypatch)
+    wm.generate("pw-123456")
+    wm.unlock("pw-123456")
+    r = client.post("/wallet/replace", json={"confirm": True})
+    assert r.status_code == 409
+    assert wm.storage.exists() and wm.is_unlocked
+
+
+def test_route_without_a_wallet_is_400(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    assert client.post("/wallet/replace", json={"confirm": True}).status_code == 400
+
+
+def test_replace_clears_the_relayer_key(tmp_path):
+    wm = _manager(tmp_path)
+    wm.generate("pw-123456")
+    wm._relayer_key = "rk"  # as after unlock with relayer creds
+    wm.replace()
+    assert wm._relayer_key is None

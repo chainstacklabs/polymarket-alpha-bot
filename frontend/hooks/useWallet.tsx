@@ -197,9 +197,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // Lost password: the backend renames wallet.enc aside (it isn't deleted),
   // so a new wallet can be generated or imported.
   const replaceWallet = useCallback(async (): Promise<void> => {
-    const res = await fetch(`${apiBase}/wallet/replace`, { method: 'POST' })
+    const res = await fetch(`${apiBase}/wallet/replace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    })
     if (!res.ok) {
-      const err = await res.json()
+      const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || 'Failed to replace wallet')
     }
     await refresh()
